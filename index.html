@@ -464,7 +464,7 @@ details.finun{margin-top:10px}
   <label class="f">Блюдо — это готовая заготовка со склада?<select id="dFromPrep"></select></label>
   <div class="f" style="gap:6px"><span>Техкарта: что списывается за 1 порцию</span><div id="dItems" style="display:flex;flex-direction:column;gap:6px"></div></div>
   <button type="button" class="btn small" id="dAdd" style="align-self:flex-start">+ Добавить продукт</button>
-  <label class="f" id="dMethodBox">Способ приготовления<textarea id="dMethod" rows="2" maxlength="600" autocomplete="off" placeholder="Коротко: что и в каком порядке делать"></textarea></label>
+  <label class="f" id="dMethodBox">Способ приготовления<textarea id="dMethod" rows="2" maxlength="1000" autocomplete="off" placeholder="Коротко: что и в каком порядке делать"></textarea></label>
   <div class="costbox" id="dCost" hidden></div>
   <p class="hint" id="dSets"></p>
   <div class="box"><label class="toggle" style="color:var(--ink)"><input type="checkbox" id="dPackCustom"> Своя упаковка навынос (вместо стандартной)</label>
@@ -481,6 +481,9 @@ details.finun{margin-top:10px}
 <dialog id="methDlg"><form method="dialog" id="methForm">
   <h3>Способы приготовления</h3>
   <p class="hint">Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.</p>
+  <div class="box" style="gap:6px"><div class="controls" style="margin:0"><button type="button" class="btn small" id="methCopy">Скопировать список блюд</button><button type="button" class="btn small" id="methPasteBtn">Вставить готовые тексты</button></div>
+    <div id="methPasteBox" hidden style="display:flex;flex-direction:column;gap:6px"><textarea id="methPaste" rows="5" autocomplete="off" placeholder="Вставьте сюда тексты от Claude" style="padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink)"></textarea>
+    <button type="button" class="btn small primary" id="methApply" style="align-self:flex-start">Подставить тексты</button></div></div>
   <div id="methList" style="display:flex;flex-direction:column;gap:8px"></div>
   <div class="dlg-actions"><span class="spacer"></span>
     <button type="button" class="btn" data-close>Закрыть</button>
@@ -1503,21 +1506,51 @@ function methodDraft(d){
   return fill.length ? `Подготовить: ${F}${sauceTxt}. Собрать по техкарте, оформить и подать.` : "";
 }
 function openMethods(){
-  const rows = sortedDishes().filter(d=>!String(d.method||"").trim());
-  $("#methList").innerHTML = rows.length ? rows.map(d=>`<div class="box" style="gap:6px"><label class="toggle" style="color:var(--ink)"><input type="checkbox" class="mOn" data-mid="${esc(d.id)}" checked> ${N(d.name)}</label>
-    <textarea class="mTxt" rows="2" maxlength="600" aria-label="Способ приготовления" style="padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink)">${esc(methodDraft(d))}</textarea></div>`).join("")
-    : `<p class="hint">У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.</p>`;
+  const rows = sortedDishes(), has = d => !!String(d.method||"").trim();
+  $("#methPasteBox").hidden = true; $("#methPaste").value = "";
+  $("#methList").innerHTML = rows.length ? rows.map(d=>`<div class="box" style="gap:6px"><label class="toggle" style="color:var(--ink)"><input type="checkbox" class="mOn" data-mid="${esc(d.id)}" ${has(d)?"":"checked"}> ${N(d.name)}${has(d)?' <small class="hint">· уже заполнено</small>':""}</label>
+    <textarea class="mTxt" rows="2" maxlength="1000" aria-label="Способ приготовления" style="padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink)">${esc(has(d) ? d.method : methodDraft(d))}</textarea></div>`).join("")
+    : `<p class="hint">Блюд пока нет.</p>`;
   $("#methSave").hidden = !rows.length;
   $("#methDlg").showModal();
   $("#methList").querySelectorAll("textarea").forEach(el=>fitArea(el));
 }
-$("#methList").addEventListener("input", e=>{ if (e.target.tagName==="TEXTAREA") fitArea(e.target, true); });
+$("#methList").addEventListener("input", e=>{ if (e.target.tagName==="TEXTAREA"){ fitArea(e.target, true); const c = e.target.closest(".box").querySelector(".mOn"); if (c) c.checked = true; } });
+function dishListText(){
+  const line = d => {
+    const items = (d.items||[]).map(i=>{ const p = byId(i.productId); return p ? `${p.name} ${fmt(i.qty*dispK(p.unit))} ${dispUnit(p.unit)}` : ""; }).filter(Boolean);
+    return `#${d.id} | ${d.category||""} | ${d.name}\nсостав: ${items.join("; ") || "техкарта не заполнена"}`;
+  };
+  return `SUSHI YM — блюда для способов приготовления (${S.menu.length})\n\n` + sortedDishes().map(line).join("\n\n");
+}
+$("#methCopy").addEventListener("click", async ()=>{
+  const t = dishListText();
+  try { await navigator.clipboard.writeText(t); toast("Список блюд скопирован. Вставьте его в чат с Claude."); }
+  catch(e){ $("#methPasteBox").hidden = false; $("#methPaste").value = t; $("#methPaste").select(); toast("Выделите текст в окошке и скопируйте его."); }
+});
+$("#methPasteBtn").addEventListener("click", ()=>{ $("#methPasteBox").hidden = false; $("#methPaste").value = ""; $("#methPaste").focus(); });
+$("#methApply").addEventListener("click", ()=>{
+  const blocks = {}; let cur = null;
+  for (const raw of $("#methPaste").value.replace(/\r/g,"").split("\n")){
+    const m = raw.match(/^\s*#\s*([A-Za-z0-9_-]+)/);
+    if (m){ cur = m[1]; blocks[cur] = []; continue; }
+    if (cur) blocks[cur].push(raw.replace(/\s+$/,""));
+  }
+  let ok = 0, miss = 0;
+  for (const [id, ls] of Object.entries(blocks)){
+    const txt = ls.join("\n").trim(), c = $("#methList").querySelector(`.mOn[data-mid="${CSS.escape(id)}"]`);
+    if (!c || !txt){ miss++; continue; }
+    const ta = c.closest(".box").querySelector(".mTxt"); ta.value = txt; c.checked = true; fitArea(ta); ok++;
+  }
+  toast(ok ? `Подставлено: ${ok} ${plural(ok,"блюдо","блюда","блюд")}${miss?`, не найдено: ${miss}`:""}. Проверьте и нажмите «Сохранить отмеченные».` : "Не нашёл блюд в тексте. Вставьте текст целиком, со строками #…");
+  if (ok){ $("#methPasteBox").hidden = true; $("#methPaste").value = ""; }
+});
 document.addEventListener("click", e=>{ if (e.target.closest("#openMethods") && isAdmin()) openMethods(); });
 $("#methForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async ()=>{
   const ops = [];
   for (const box of $("#methList").querySelectorAll(".box")){
     const on = box.querySelector(".mOn"), txt = box.querySelector(".mTxt").value.trim(), d = dishById(on.dataset.mid);
-    if (!on.checked || !txt || !d || String(d.method||"").trim()) continue;
+    if (!on.checked || !txt || !d || txt===String(d.method||"").trim()) continue;
     ops.push({col:"menu", id:d.id, after:Object.assign({}, d, {method:txt})});
   }
   if (!ops.length){ toast("Ничего не отмечено"); return; }
@@ -2810,6 +2843,7 @@ Object.assign(I18N, {"Акции и скидки": ["Promos and discounts", "Kam
 Object.assign(I18N, {"Срок действия. Пустое поле — без ограничения.": ["Valid period. Empty field = no limit.", "Geçerlilik süresi. Boş alan = sınır yok."], "Акции и скидки сейчас выключены администратором.": ["Promos and discounts are turned off by the admin.", "Kampanya ve indirimler yönetici tarafından kapatıldı."], "Цена по акции сейчас недоступна:": ["Promo price is not available now:", "Kampanya fiyatı şu an kullanılamaz:"], "Скидка на заказ сейчас недоступна:": ["Order discount is not available now:", "Sipariş indirimi şu an kullanılamaz:"], "начнётся": ["starts", "başlangıç"], "закончилась": ["ended", "bitiş"], "только в часы": ["only during hours", "yalnızca saatler"], "дата «с» позже даты «по»": ["start date is after end date", "başlangıç tarihi bitişten sonra"], "укажите оба времени или ни одного": ["enter both times or none", "iki saati de girin ya da hiçbirini"]});
 Object.assign(I18N, {"автоматически": ["automatically", "otomatik"], "вписано вручную": ["entered manually", "elle girildi"], "автоматически, последняя сумма": ["automatically, last amount", "otomatik, son tutar"], "Подставлена последняя сумма аренды.": ["The last rent amount is filled in.", "Son kira tutarı girildi."]});
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
+Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
