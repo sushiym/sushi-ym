@@ -524,7 +524,8 @@ details.finun{margin-top:10px}
   <div id="oLines"></div>
   <label class="toggle"><input type="checkbox" id="oPrint"> Распечатать на кухню после сохранения</label>
   <label class="f">Комментарий к заказу<input id="oComment" autocomplete="off" placeholder="Например: без кунжута, позвонить за 10 минут"></label>
-  <div class="odisc"><label><input type="checkbox" id="oDiscOn"> Скидка на весь заказ</label><label id="oDiscBox" hidden>Скидка, % <input class="oprice" id="oDiscPct" inputmode="decimal" autocomplete="off" placeholder="10" aria-label="Скидка, %"></label><span id="oDiscInfo" class="hint"></span></div>
+  <p id="oPromoOff" class="hint" hidden></p>
+  <div class="odisc" id="oDiscRow"><label><input type="checkbox" id="oDiscOn"> Скидка на весь заказ</label><label id="oDiscBox" hidden>Скидка, % <input class="oprice" id="oDiscPct" inputmode="decimal" autocomplete="off" placeholder="10" aria-label="Скидка, %"></label><span id="oDiscInfo" class="hint"></span></div>
   <div class="ototal">Итого: <b id="oTotal">0 ₺</b></div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
@@ -548,6 +549,26 @@ details.finun{margin-top:10px}
     <button type="button" class="btn small" data-padd="#pkOrder" style="align-self:flex-start">+ Добавить</button></div>
   <div class="box"><h4>На каждую позицию в заказе (стандартная)</h4><p class="hint" style="margin:0">Для блюд и сетов, у которых не задана своя упаковка в «Меню».</p><div id="pkItem" class="plist" style="display:flex;flex-direction:column;gap:6px"></div>
     <button type="button" class="btn small" data-padd="#pkItem" style="align-self:flex-start">+ Добавить</button></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
+<dialog id="promoDlg"><form method="dialog" id="promoForm">
+  <h3>Акции и скидки</h3>
+  <p class="hint">Правила для работников. Админ может ставить акции и скидки всегда, без ограничений.</p>
+  <label class="toggle"><input type="checkbox" id="prOn"> Работники могут ставить акции и скидки</label>
+  <div class="box"><h4>Срок</h4><p class="hint" style="margin:0">Пустое поле — без ограничения.</p>
+    <div class="two"><label class="f">С даты<input type="date" id="prFrom"></label><label class="f">По дату (включительно)<input type="date" id="prTo"></label></div>
+    <div class="two"><label class="f">Часы с<input type="time" id="prTFrom"></label><label class="f">Часы до<input type="time" id="prTTo"></label></div></div>
+  <div class="box"><h4>Цена по акции на блюдо</h4>
+    <label class="toggle"><input type="checkbox" id="prItemOn"> Разрешена</label>
+    <label class="f">Цена не ниже, % от цены меню<input id="prItemMin" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+    <p class="hint" style="margin:0">0 — можно отдать в подарок. 50 — скидка не больше половины цены.</p></div>
+  <div class="box"><h4>Скидка на весь заказ</h4>
+    <label class="toggle"><input type="checkbox" id="prOrdOn"> Разрешена</label>
+    <div class="two"><label class="f">Не меньше, %<input id="prOrdMin" inputmode="decimal" autocomplete="off" placeholder="1"></label><label class="f">Не больше, %<input id="prOrdMax" inputmode="decimal" autocomplete="off" placeholder="100"></label></div></div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
@@ -1526,6 +1547,32 @@ const OVERDUE_MIN = 30;
 const money = n => (Math.round((Number(n)||0)*100)/100).toLocaleString(LOC(),{maximumFractionDigits:2}) + " ₺";
 const dayKey = ts => { const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 const todayKey = () => dayKey(Date.now());
+// promo rules set by admin in Finance (settings/promo); no doc = everything allowed
+const PROMO_DEF = {id:"promo", on:true, from:"", to:"", tFrom:"", tTo:"", itemOn:true, itemMin:0, ordOn:true, ordMin:1, ordMax:100};
+const promoCfg = () => Object.assign({}, PROMO_DEF, S.settings.find(x=>x.id==="promo")||{});
+function promoRules(){
+  const c = promoCfg(), r = {item:true, ord:true, itemMin:0, ordMin:1, ordMax:100, why:""};
+  if (isAdmin()) return r;
+  const d = new Date(), dk = todayKey(), hm = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+  let why = "";
+  if (!c.on) why = "выключены администратором";
+  else if (c.from && dk < c.from) why = "начнутся " + c.from.split("-").reverse().join(".");
+  else if (c.to && dk > c.to) why = "закончились " + c.to.split("-").reverse().join(".");
+  else if (c.tFrom && c.tTo && !(c.tFrom<=c.tTo ? hm>=c.tFrom && hm<c.tTo : hm>=c.tFrom || hm<c.tTo)) why = "действуют только в часы " + c.tFrom + "–" + c.tTo;
+  r.why = why; r.item = !why && c.itemOn!==false; r.ord = !why && c.ordOn!==false;
+  r.itemMin = Math.min(100, Math.max(0, Number(c.itemMin)||0)); r.ordMin = Math.max(0, Number(c.ordMin)||0); r.ordMax = Math.min(100, Number(c.ordMax)||100);
+  return r;
+}
+function promoCfgText(){
+  const c = promoCfg(); if (!c.on) return "Работникам акции и скидки выключены.";
+  const dt = v => v.split("-").reverse().join(".");
+  const parts = [];
+  if (c.from || c.to) parts.push("срок " + (c.from?dt(c.from):"…") + "–" + (c.to?dt(c.to):"…")); else parts.push("без срока");
+  if (c.tFrom && c.tTo) parts.push("часы " + c.tFrom + "–" + c.tTo);
+  parts.push(c.itemOn!==false ? `цена на блюдо не ниже ${fmt(Number(c.itemMin)||0)}% от меню` : "цена на блюдо — нельзя");
+  parts.push(c.ordOn!==false ? `скидка на заказ ${fmt(Number(c.ordMin)||1)}–${fmt(Number(c.ordMax)||100)}%` : "скидка на заказ — нельзя");
+  return "Работникам: " + parts.join(", ") + ".";
+}
 const packCfg = () => S.settings.find(x=>x.id==="pack") || {id:"pack", perOrder:[], perItem:[]};
 const srcOf = l => l.kind==="set" ? setById(l.id) : dishById(l.id);
 const itemPrice = l => Number((srcOf(l)||{}).price)||0;
@@ -1697,7 +1744,8 @@ function renderFinControls(c){
   const range = finRange(), isC = S.finPeriod==="custom";
   c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${FIN_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-finp="${k}" aria-pressed="${S.finPeriod===k}">${l}</button>`).join("")}</div>
     ${isC ? `<div class="controls"><label class="f" style="flex:1 1 140px">С<input type="date" id="finFrom" class="search" value="${esc(S.finFrom||"")}"></label><label class="f" style="flex:1 1 140px">По<input type="date" id="finTo" class="search" value="${esc(S.finTo||todayKey())}"></label></div>` : ""}
-    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button></div>`;
+    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button></div>
+    <p class="hint" style="margin:0">${esc(promoCfgText())}</p>`;
 }
 function renderFin(L){
   const [t0,t1] = finRange(), inR = ts => (ts||0)>=t0 && (ts||0)<t1;
@@ -1782,6 +1830,26 @@ function renderFin(L){
     : `<p class="hint">Аренда, зарплата, коммуналка и другие расходы не со склада. Внесите их кнопкой «+ Расход», чтобы видеть настоящую чистую прибыль.</p>`);
   L.innerHTML = html;
 }
+function openPromo(){
+  if (!isAdmin()) return;
+  const c = promoCfg();
+  $("#prOn").checked = c.on!==false; $("#prFrom").value = c.from||""; $("#prTo").value = c.to||""; $("#prTFrom").value = c.tFrom||""; $("#prTTo").value = c.tTo||"";
+  $("#prItemOn").checked = c.itemOn!==false; $("#prItemMin").value = Number(c.itemMin)||0;
+  $("#prOrdOn").checked = c.ordOn!==false; $("#prOrdMin").value = Number(c.ordMin)||1; $("#prOrdMax").value = Number(c.ordMax)||100;
+  $("#promoDlg").showModal();
+}
+$("#promoForm").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const n = (id, def) => { const v = num($(id).value); return isNaN(v) ? def : v; };
+  const x = {id:"promo", on:$("#prOn").checked, from:$("#prFrom").value, to:$("#prTo").value, tFrom:$("#prTFrom").value, tTo:$("#prTTo").value,
+    itemOn:$("#prItemOn").checked, itemMin:n("#prItemMin",0), ordOn:$("#prOrdOn").checked, ordMin:n("#prOrdMin",1), ordMax:n("#prOrdMax",100), updatedAt:Date.now(), by:S.me?S.me.name:""};
+  if (x.from && x.to && x.from > x.to){ toast("Дата «с» позже даты «по»"); return; }
+  if (!!x.tFrom !== !!x.tTo){ toast("Укажите оба времени или ни одного"); return; }
+  if (x.itemMin<0 || x.itemMin>100){ toast("Цена не ниже: от 0 до 100%"); $("#prItemMin").focus(); return; }
+  if (x.ordMin<1 || x.ordMax>100 || x.ordMin>x.ordMax){ toast("Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»"); $("#prOrdMin").focus(); return; }
+  try { await commit("Правила акций и скидок", [{col:"settings", id:"promo", after:x}]); $("#promoDlg").close(); render(true); toast("Правила акций сохранены"); }
+  catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
+});
 function openExp(){
   $("#eCat").innerHTML = EXP_CATS.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
   $("#eAmt").value = ""; $("#eNote").value = ""; $("#eDate").value = todayKey(); $("#eWho").value = lsGet("sklad.who");
@@ -1799,10 +1867,11 @@ $("#expForm").addEventListener("submit", async e=>{
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
 document.addEventListener("click", async e=>{
-  const t = e.target.closest("[data-finp],[data-fins],#addExp,[data-delexp]"); if (!t) return;
+  const t = e.target.closest("[data-finp],[data-fins],#addExp,#openPromo,[data-delexp]"); if (!t) return;
   if (t.dataset.finp){ S.finPeriod = t.dataset.finp; lsSet("sushi.finp", S.finPeriod); return render(true); }
   if (t.dataset.fins){ S.finSort = t.dataset.fins; return renderList(); }
   if (t.id==="addExp") return openExp();
+  if (t.id==="openPromo") return openPromo();
   if (t.dataset.delexp){
     const x = S.expenses.find(y=>y.id===t.dataset.delexp); if (!x) return;
     if (!tConfirm(`Удалить расход «${x.category}» на ${money(x.amount)}?`)) return;
@@ -1856,14 +1925,18 @@ function odLineSub(l){
 function odTotal(){
   const on = $("#oDiscOn").checked, p = OD.discPct;
   $("#oDiscBox").hidden = !on;
+  const R = promoRules(); $("#oDiscPct").placeholder = R.ordMin>1||R.ordMax<100 ? `${fmt(R.ordMin)}–${fmt(R.ordMax)}` : "10";
   $("#oDiscInfo").innerHTML = on ? (p==null ? `<span class="neg">укажите процент скидки</span>` : `${money(orderSubtotal(OD))} − ${fmt(p)}% = −${money(orderDisc(OD))}`) : "";
   $("#oTotal").textContent = money(orderTotal(OD));
 }
 function renderODLines(){
+  const R = promoRules();
+  $("#oPromoOff").hidden = !R.why; $("#oPromoOff").textContent = R.why ? "Акции и скидки сейчас " + R.why + "." : "";
+  $("#oDiscRow").hidden = !R.ord && !$("#oDiscOn").checked;
   $("#oLines").innerHTML = OD.lines.length ? OD.lines.map((l,i)=>`<div class="oline ${l.promo?"promo":""}">
       <span class="oname">${NL(l)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}${promoTag(l)}<small data-osub="${i}">${odLineSub(l)}</small></span>
       <span class="stepper"><button type="button" data-odec="${i}" aria-label="Меньше">−</button><b>${fmt(l.qty)}</b><button type="button" data-oinc="${i}" aria-label="Больше">+</button></span>
-      <div class="opromo"><label><input type="checkbox" data-opromo="${i}" ${l.promo?"checked":""}> Акция</label>${l.promo?`<label>Цена за 1 шт, ₺ <input class="oprice" data-oprice="${i}" inputmode="decimal" autocomplete="off" value="${l.price==null?"":esc(String(l.price))}" placeholder="0" aria-label="Цена по акции"></label>${l.promoBy?`<small class="hint">поставил(а): ${esc(l.promoBy)}</small>`:""}`:""}</div>
+      ${R.item || l.promo ? `<div class="opromo"><label><input type="checkbox" data-opromo="${i}" ${l.promo?"checked":""}> Акция</label>${l.promo?`<label>Цена за 1 шт, ₺ <input class="oprice" data-oprice="${i}" inputmode="decimal" autocomplete="off" value="${l.price==null?"":esc(String(l.price))}" placeholder="${R.itemMin&&l.basePrice?"от "+fmt(Math.ceil(l.basePrice*R.itemMin)/100):"0"}" aria-label="Цена по акции"></label>${l.promoBy?`<small class="hint">поставил(а): ${esc(l.promoBy)}</small>`:""}`:""}</div>` : ""}
       <input class="ocom" data-ocom="${i}" value="${esc(l.comment||"")}" placeholder="Комментарий к блюду" aria-label="Комментарий к ${esc(l.name)}">
     </div>`).join("") : `<p class="hint">Добавьте блюда из списка выше.</p>`;
   odTotal();
@@ -1936,6 +2009,16 @@ $("#orderForm").addEventListener("submit", async e=>{
   if (badPromo>=0){ toast("Укажите цену по акции (0 — подарок)"); const inp = document.querySelector(`[data-oprice="${badPromo}"]`); if (inp) inp.focus(); return; }
   if ($("#oDiscOn").checked && OD.discPct==null){ toast("Укажите процент скидки: от 1 до 100"); $("#oDiscPct").focus(); return; }
   const old = OD.id ? orderById(OD.id) : null;
+  if (!isAdmin()){
+    const R = promoRules(), was = l => old && (old.lines||[]).some(x=>x.promo && x.kind===l.kind && x.id===l.id && Number(x.price)===Number(l.price));
+    for (const l of OD.lines){ if (!l.promo || was(l)) continue;
+      if (!R.item){ toast(R.why ? "Акции сейчас " + R.why : "Цена по акции сейчас запрещена администратором"); return; }
+      const minP = Math.ceil((Number(l.basePrice)||0)*R.itemMin)/100;
+      if (Number(l.price) < minP){ toast(`Цена по акции для «${l.name}» не ниже ${money(minP)} (${fmt(R.itemMin)}% от цены меню)`); return; } }
+    if ($("#oDiscOn").checked && !(old && Number(old.discPct)===OD.discPct)){
+      if (!R.ord){ toast(R.why ? "Скидки сейчас " + R.why : "Скидка на заказ сейчас запрещена администратором"); return; }
+      if (OD.discPct < R.ordMin || OD.discPct > R.ordMax){ toast(`Скидка на заказ: ${fmt(R.ordMin)}–${fmt(R.ordMax)}%`); $("#oDiscPct").focus(); return; } }
+  }
   const o = Object.assign({}, old||{}, {type:OD.type, table:OD.type==="hall"?OD.table:"", name:OD.type!=="hall"?OD.name:"", phone:OD.type!=="hall"?OD.phone:"",
     address:OD.type==="delivery"?OD.address:"", courier:OD.type==="delivery"?OD.courier:"", due:OD.type==="delivery"?OD.due:"",
     source:OD.type!=="hall"?OD.source:"", lines:OD.lines.map(l=>Object.assign({kind:l.kind, id:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0, comment:(l.comment||"").trim()}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})),
@@ -2589,6 +2672,7 @@ Object.assign(I18N, {"Админ":["Admin","Yönetici"],"Кухня":["Kitchen",
 Object.assign(I18N, {"Показать скрытые и без учёта":["Show hidden and untracked","Gizli ve takipsizleri göster"],"Нажмите на продукт — откроется его карточка: остаток, цена, описание, рецепт и кнопки прихода, расхода и списания.":["Tap a product to open its card: stock, price, description, recipe and buttons for receipt, usage and write-off.","Ürüne dokunun — kartı açılır: stok, fiyat, açıklama, reçete ve giriş, çıkış, fire düğmeleri."],"Список продуктов пуст. Нажмите «Добавить продукт».":["The product list is empty. Tap «Add product».","Ürün listesi boş. «Ürün ekle»ye dokunun."],"Список продуктов пуст. Продукты добавляет админ.":["The product list is empty. Products are added by the admin.","Ürün listesi boş. Ürünleri yönetici ekler."],"Ничего не найдено. Проверьте написание.":["Nothing found. Check the spelling.","Hiçbir şey bulunamadı. Yazımı kontrol edin."],"Описание":["Description","Açıklama"],"Например: поставщик, как хранить, как выглядит":["E.g.: supplier, how to store, what it looks like","Örn.: tedarikçi, nasıl saklanır, nasıl görünür"],"На складе":["In stock","Depoda"],"Цена закупки":["Purchase price","Alış fiyatı"],"Выход после чистки":["Yield after cleaning","Temizlik sonrası verim"],"Учёт остатка":["Stock tracking","Stok takibi"],"Входит в рецепты:":["Used in recipes:","Kullanıldığı reçeteler:"],"Цена заполняется при приходе товара или в карточке продукта на «Складе».":["Enter the price when receiving goods or in the product card in «Stock».","Fiyatı mal girişinde veya «Depo» bölümündeki ürün kartında girin."],"Рецепт не заполнен: заготовка добавится на склад, но продукты не спишутся. Админ заполняет рецепт в карточке продукта на «Складе».":["No recipe: the prep item will be added to stock, but no products will be deducted. The admin fills in the recipe in the product card in «Stock».","Reçete yok: hazırlık depoya eklenir ama ürünler düşülmez. Reçeteyi yönetici «Depo» bölümündeki ürün kartında doldurur."],"Админ видит и меняет всё. Работник ресторана: склад (приход с количеством и ценой, расход, списание, приготовление, просмотр карточек продуктов), заказы и продажи, техкарты без себестоимости, история, пересчёт на утверждение. Добавление, изменение и скрытие продуктов, финансы и сотрудники — только у админа.":["The admin sees and changes everything. Restaurant staff: stock (receipts with quantity and price, usage, write-offs, prep, viewing product cards), orders and sales, recipe cards without cost, history, recounts for approval. Adding, editing and hiding products, finance and staff are admin only.","Yönetici her şeyi görür ve değiştirir. Restoran çalışanı: depo (miktar ve fiyatla giriş, çıkış, fire, hazırlık, ürün kartlarını görme), siparişler ve satışlar, maliyetsiz reçeteler, geçmiş, onaya sayım. Ürün ekleme, düzenleme ve gizleme, finans ve personel yalnızca yöneticide."]});
 Object.assign(I18N, {"Акция": ["Promo", "Kampanya"], "акция": ["promo", "kampanya"], "подарок": ["gift", "ikram"], "Цена за 1 шт, ₺": ["Price per item, ₺", "Adet fiyatı, ₺"], "поставил(а)": ["set by", "giren"], "Цена по акции": ["Promo price", "Kampanya fiyatı"], "укажите цену по акции": ["enter the promo price", "kampanya fiyatını girin"], "Укажите цену по акции (0 — подарок)": ["Enter the promo price (0 = gift)", "Kampanya fiyatını girin (0 = ikram)"], "По акции и в подарок": ["Promo and gifts", "Kampanya ve ikramlar"], "скидка": ["discount", "indirim"], "Скидки по акциям": ["Promo discounts", "Kampanya indirimleri"], "подарков": ["gifts", "ikram"], "Скидки по акциям и подарки": ["Promo discounts and gifts", "Kampanya indirimleri ve ikramlar"], "уже учтены в выручке, для сведения": ["already included in revenue, for reference", "ciroya zaten yansıdı, bilgi için"], "АКЦИЯ": ["PROMO", "KAMPANYA"], "ПОДАРОК": ["GIFT", "İKRAM"]});
 Object.assign(I18N, {"Скидка на весь заказ": ["Discount on the whole order", "Tüm siparişe indirim"], "Скидка, %": ["Discount, %", "İndirim, %"], "укажите процент скидки": ["enter the discount percent", "indirim yüzdesini girin"], "Укажите процент скидки: от 1 до 100": ["Enter the discount percent: 1 to 100", "İndirim yüzdesini girin: 1 ile 100 arası"], "Скидка на заказ": ["Order discount", "Sipariş indirimi"], "СКИДКА": ["DISCOUNT", "İNDİRİM"], "НА ЗАКАЗ": ["ON ORDER", "SİPARİŞE"], "Акции, подарки и скидки": ["Promos, gifts and discounts", "Kampanyalar, ikramlar ve indirimler"], "Заказ": ["Order", "Sipariş"], "заказов со скидкой": ["orders with discount", "indirimli sipariş"]});
+Object.assign(I18N, {"Акции и скидки": ["Promos and discounts", "Kampanyalar ve indirimler"], "Правила для работников. Админ может ставить акции и скидки всегда, без ограничений.": ["Rules for staff. The admin can always set promos and discounts, without limits.", "Çalışanlar için kurallar. Yönetici kampanya ve indirimleri her zaman, sınırsız girebilir."], "Работники могут ставить акции и скидки": ["Staff may set promos and discounts", "Çalışanlar kampanya ve indirim girebilir"], "Срок": ["Period", "Süre"], "Пустое поле — без ограничения.": ["Empty field = no limit.", "Boş alan = sınır yok."], "С даты": ["From date", "Başlangıç tarihi"], "По дату (включительно)": ["To date (inclusive)", "Bitiş tarihi (dahil)"], "Часы с": ["Hours from", "Saat başlangıç"], "Часы до": ["Hours to", "Saat bitiş"], "Цена по акции на блюдо": ["Promo price per dish", "Yemek başına kampanya fiyatı"], "Разрешена": ["Allowed", "İzinli"], "Цена не ниже, % от цены меню": ["Price at least, % of menu price", "Fiyat en az, menü fiyatının %'si"], "0 — можно отдать в подарок. 50 — скидка не больше половины цены.": ["0 = gifts allowed. 50 = discount no more than half the price.", "0 = ikram serbest. 50 = indirim fiyatın yarısını geçemez."], "Не меньше, %": ["At least, %", "En az, %"], "Не больше, %": ["At most, %", "En çok, %"], "Акции и скидки сейчас": ["Promos and discounts are now", "Kampanya ve indirimler şu an"], "выключены администратором": ["turned off by the admin", "yönetici tarafından kapatıldı"], "начнутся": ["start on", "başlangıç:"], "закончились": ["ended on", "bitti:"], "действуют только в часы": ["only valid during hours", "yalnızca şu saatlerde geçerli:"], "Работникам акции и скидки выключены.": ["Promos and discounts are off for staff.", "Çalışanlar için kampanya ve indirimler kapalı."], "Работникам": ["For staff", "Çalışanlar için"], "без срока": ["no end date", "süresiz"],"срок": ["period", "süre"], "часы": ["hours", "saat"], "цена на блюдо не ниже": ["dish price at least", "yemek fiyatı en az"], "от меню": ["of menu", "menüden"], "цена на блюдо — нельзя": ["dish price — not allowed", "yemek fiyatı — yasak"], "скидка на заказ": ["order discount", "sipariş indirimi"], "скидка на заказ — нельзя": ["order discount — not allowed", "sipariş indirimi — yasak"], "Акции сейчас": ["Promos are now", "Kampanyalar şu an"], "Скидки сейчас": ["Discounts are now", "İndirimler şu an"], "Цена по акции сейчас запрещена администратором": ["Promo prices are currently disabled by the admin", "Kampanya fiyatı şu an yönetici tarafından kapalı"], "Скидка на заказ сейчас запрещена администратором": ["Order discounts are currently disabled by the admin", "Sipariş indirimi şu an yönetici tarafından kapalı"], "Цена по акции для": ["Promo price for", "Kampanya fiyatı:"], "не ниже": ["at least", "en az"], "от цены меню": ["of menu price", "menü fiyatının"], "Скидка на заказ:": ["Order discount:", "Sipariş indirimi:"], "Дата «с» позже даты «по»": ["Start date is after end date", "Başlangıç tarihi bitişten sonra"], "Укажите оба времени или ни одного": ["Enter both times or none", "İki saati de girin ya da hiçbirini"], "Цена не ниже: от 0 до 100%": ["Minimum price: 0 to 100%", "En düşük fiyat: %0–100"], "Правила акций и скидок": ["Promo and discount rules", "Kampanya ve indirim kuralları"], "Правила акций сохранены": ["Promo rules saved", "Kampanya kuralları kaydedildi"], "Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»": ["Order discount: 1 to 100%, “at least” must not exceed “at most”", "Sipariş indirimi: %1–100, «en az» «en çok»tan büyük olamaz"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
