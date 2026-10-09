@@ -143,6 +143,8 @@ dialog::backdrop{background:rgba(10,16,13,.55)}
 dialog form{padding:18px;display:flex;flex-direction:column;gap:12px}
 dialog h3{margin:0;font-family:var(--display);font-weight:500;font-size:1.15rem}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:.9rem;color:var(--muted)}
+#dMethod,#methList textarea{resize:vertical;line-height:1.35}
+#dMethod:disabled{opacity:1;-webkit-text-fill-color:var(--ink);color:var(--ink)}
 label.f input,label.f select,label.f textarea{padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink);font-size:1rem}
 .seg{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:var(--radius-s);overflow:hidden}
 .seg label{text-align:center;padding:9px 4px;cursor:pointer;font-weight:500;border-right:1px solid var(--line)}
@@ -462,6 +464,7 @@ details.finun{margin-top:10px}
   <label class="f">Блюдо — это готовая заготовка со склада?<select id="dFromPrep"></select></label>
   <div class="f" style="gap:6px"><span>Техкарта: что списывается за 1 порцию</span><div id="dItems" style="display:flex;flex-direction:column;gap:6px"></div></div>
   <button type="button" class="btn small" id="dAdd" style="align-self:flex-start">+ Добавить продукт</button>
+  <label class="f" id="dMethodBox">Способ приготовления<textarea id="dMethod" rows="2" maxlength="600" autocomplete="off" placeholder="Коротко: что и в каком порядке делать"></textarea></label>
   <div class="costbox" id="dCost" hidden></div>
   <p class="hint" id="dSets"></p>
   <div class="box"><label class="toggle" style="color:var(--ink)"><input type="checkbox" id="dPackCustom"> Своя упаковка навынос (вместо стандартной)</label>
@@ -472,6 +475,16 @@ details.finun{margin-top:10px}
     <button type="button" class="btn danger" id="dDel">Удалить</button><span class="spacer"></span>
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
+<dialog id="methDlg"><form method="dialog" id="methForm">
+  <h3>Способы приготовления</h3>
+  <p class="hint">Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.</p>
+  <div id="methList" style="display:flex;flex-direction:column;gap:8px"></div>
+  <div class="dlg-actions"><span class="spacer"></span>
+    <button type="button" class="btn" data-close>Закрыть</button>
+    <button type="submit" class="btn primary" id="methSave">Сохранить отмеченные</button>
   </div>
 </form></dialog>
 
@@ -772,7 +785,7 @@ function renderControls(){
       <p class="hint" style="margin:0 0 10px">Нажимайте на блюда и сеты — они добавятся в чек. Потом нажмите «Провести», и продукты спишутся по техкартам.</p>`;
   } else if (S.view==="menu"){
     const nn = S.menu.filter(d=>d.needsWork).length + S.sets.filter(x=>x.needsWork).length;
-    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button></div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
+    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button></div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
@@ -1380,6 +1393,7 @@ function openDish(id){
   $("#dPackCustom").checked = !!(d && d.packMode==="custom"); $("#dPackBox").hidden = !$("#dPackCustom").checked;
   fillPList($("#dPack"), d && d.pack);
   $("#dItems").innerHTML = d && (d.items||[]).length ? d.items.map(ditemHtml).join("") : ditemHtml(null);
+  $("#dMethod").value = d ? d.method||"" : ""; fitArea($("#dMethod"));
   const inSets = d ? setsWithDish(d.id).map(x=>x.name) : [];
   $("#dSets").textContent = (inSets.length ? "Входит в сеты: " + inSets.join(", ") + ". " : "") + "Указывайте чистый вес (нетто): продукты в килограммах — в граммах, в литрах — в миллилитрах, штуки и листы — как есть. Отходы при чистке программа добавит сама.";
   $("#dDel").hidden = !d;
@@ -1421,7 +1435,7 @@ $("#dishForm").addEventListener("submit", async e=>{
   if (old && old.needsWork && $("#dNeeds").checked && tConfirm("Доработка закончена? Снять красную пометку «доработать»?")) $("#dNeeds").checked = false;
   const custom = $("#dPackCustom").checked, pack = custom ? readPList($("#dPack")) : (old && old.pack) || [];
   if (pack===null) return;
-  const d = {id: old ? old.id : uid("d"), name, name_en:$("#dNameEn").value.trim(), name_tr:$("#dNameTr").value.trim(), needsWork:$("#dNeeds").checked, todo:$("#dNote").value.trim(), category:$("#dCat").value, active:$("#dActive").checked, items, price: isNaN(price)?0:price, packMode: custom?"custom":"default", pack,
+  const d = {...(old||{}), id: old ? old.id : uid("d"), method:$("#dMethod").value.trim(), name, name_en:$("#dNameEn").value.trim(), name_tr:$("#dNameTr").value.trim(), needsWork:$("#dNeeds").checked, todo:$("#dNote").value.trim(), category:$("#dCat").value, active:$("#dActive").checked, items, price: isNaN(price)?0:price, packMode: custom?"custom":"default", pack,
     order: old ? (old.order ?? 9999) : Math.max(0, ...S.menu.map(x=>x.order||0)) + 1};
   try { await commit((old?"Изменение блюда: ":"Новое блюдо: ") + name, [{col:"menu", id:d.id, after:d}]); $("#dishDlg").close(); render(); toast(old?"Блюдо сохранено":"Блюдо добавлено"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
@@ -1434,6 +1448,85 @@ $("#dDel").addEventListener("click", async ()=>{
   try { await commit("Удаление блюда: " + d.name, ops); $("#dishDlg").close(); render(); toast("Блюдо удалено"); }
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
+/* cooking method: field helper + drafts for dishes without a method */
+function fitArea(el, again){
+  if (!el.offsetParent){ if (!again) requestAnimationFrame(()=>fitArea(el, true)); return; }
+  el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight + 2, 260) + "px";
+}
+$("#dMethod").addEventListener("input", e=>fitArea(e.target, true));
+function methodDraft(d){
+  const low = s => String(s||"").toLowerCase();
+  const nm = low(d.name), cat = low(d.category), all = nm + " " + cat;
+  const ps = (d.items||[]).map(i=>byId(i.productId)).filter(Boolean).filter(p=>p.category!=="Упаковка");
+  const pn = p => low(p.name).replace(/\s*\(.*?\)\s*/g," ").trim();
+  const is = (p, re) => re.test(pn(p));
+  const SKIP = /нори|тесто|рис\b|рис |рис для|соев|васаби|имбир|палочк|кунжут|соль|сахар|уксус|масло раст|масло для|вода/;
+  const fill = ps.filter(p=>!is(p,SKIP) && p.category!=="Соусы и приправы").map(pn);
+  const sauce = ps.filter(p=>p.category==="Соусы и приправы" && !is(p,/соев|васаби|имбир|соль|сахар|уксус|кунжут|специ|перец/)).map(pn);
+  const list = a => [...new Set(a)].join(", ");
+  const F = fill.length ? list(fill) : "начинка по техкарте";
+  const sauceTxt = sauce.length ? ", соус: " + list(sauce) : "";
+  const preps = ps.filter(p=>p.category==="Заготовки");
+  if ((d.items||[]).length===1 && preps.length===1){
+    if (/десерт|салат|напит|сок|лимонад|морс|компот/.test(all)) return `Выложить порцию «${preps[0].name}», оформить и подать.`;
+    return `Разогреть порцию «${preps[0].name}», выложить в тарелку, подать.`;
+  }
+  const roll = /ролл|маки|roll/.test(all);
+  if (roll && /темпур|tempura|горяч|жарен/.test(nm)) return `Нори, рис, начинка: ${F}. Свернуть ролл, обмакнуть в кляр, обвалять в панко, жарить во фритюре 170–175 °C 2–3 мин. Нарезать на 8 частей${sauce.length?", полить: "+list(sauce):""}.`;
+  if (roll && /запеч|baked|запек/.test(nm)) return `Нори, рис, начинка: ${F}. Свернуть ролл, нарезать на 8 частей, сверху ${sauce.length?list(sauce):"соус"}, запечь горелкой или в духовке до корочки.`;
+  if (/маки|хосомаки|мини.?ролл/.test(nm)) return `Половина листа нори, тонкий слой риса, в центр: ${F}. Свернуть, нарезать на 6 частей.`;
+  if (roll) return `Нори, рис, перевернуть рисом вниз, начинка: ${F}${sauceTxt}. Свернуть ролл, плотно прижать. Нарезать на 8 частей.`;
+  if (/гункан/.test(nm)) return `Рисовый брусок обернуть полоской нори, сверху: ${F}.`;
+  if (/суши.?бургер/.test(all)) return `Сформовать 2 рисовые «булки», обжарить в нори или панко. Между ними: ${F}${sauceTxt}. Разрезать пополам.`;
+  if (/нигири|суши|сашими/.test(all)) return /сашими/.test(nm) ? `Нарезать ломтиками 5–7 мм: ${F}. Выложить на тарелку, подать с соевым соусом, васаби, имбирём.` : `Слепить рисовый брусок, тонко смазать васаби, накрыть: ${F}. Прижать.`;
+  if (/пицц/.test(all)) return `Раскатать тесто, смазать соусом, выложить: ${F}. Выпекать 250–280 °C 6–8 мин до румяного края.`;
+  if (/бургер/.test(all)) return `Обжарить котлету по 3–4 мин с каждой стороны, подрумянить булку. Собрать: булка, соус, ${F}, булка.`;
+  if (/уха/.test(nm)) return `В кипящий бульон: картофель, морковь, лук — 10 мин, рыба — 7 мин. Соль, перец, зелень.`;
+  if (/борщ/.test(nm)) return `В кипящий бульон: картофель — 10 мин, капуста — 5 мин, свёкла с зажаркой — 5 мин. Чеснок, зелень, подать со сметаной.`;
+  if (/том.?ям/.test(nm)) return `Бульон с пастой том ям довести до кипения, добавить ${F}, кокосовое молоко, варить 3–4 мин. Сок лайма, кинза.`;
+  if (/мисо/.test(nm)) return `В горячий бульон развести мисо-пасту (не кипятить), добавить тофу, вакаме, зелёный лук.`;
+  if (/рамен|лапш.*суп/.test(all)) return `Бульон довести до кипения, лапшу отварить 2–3 мин. В миску: лапша, бульон, сверху: ${F}.`;
+  if (/суп|бульон|солянк|окрошк/.test(all)) return `Порцию супа довести до кипения, налить в тарелку, посыпать зеленью.`;
+  if (/плов/.test(nm)) return `Обжарить мясо, лук, морковь (зирвак), добавить рис, залить водой на 1–1,5 см, специи. Томить под крышкой 25–30 мин.`;
+  if (/пельмен|варени|манты|хинкал|дюшбар/.test(nm)) return /манты/.test(nm) ? `Готовить на пару 40–45 мин, подать со сметаной или маслом.` : `Варить в кипящей подсоленной воде 5–7 мин после всплытия. Подать со сметаной или маслом.`;
+  if (/блин|оладь|сырник/.test(nm)) return `Обжарить с двух сторон до золотистого цвета${fill.length?", подать с: "+F:""}.`;
+  if (/вок|wok|удон|соба|фунчоз|лапш/.test(all)) return `Раскалить вок, обжарить ${F} 2–3 мин, добавить лапшу и ${sauce.length?list(sauce):"соус"}, перемешать 1–2 мин.`;
+  if (/паст|спагет|феттуч|карбонар/.test(all)) return `Отварить пасту 8–10 мин. Обжарить ${F}, добавить соус, смешать с пастой 1 мин.`;
+  if (/салат/.test(all)) return `Нарезать и смешать: ${F}. Заправить${sauce.length?" "+list(sauce):""}, выложить в тарелку.`;
+  if (/темпур|фри|наггет|крыл|кальмар|креветк.*кляр|стрипс/.test(nm)) return `Обмакнуть в кляр/панировку, жарить во фритюре 170–175 °C 3–4 мин до золотистого цвета. Подать с соусом.`;
+  if (/кофе|эспрессо|капуч|латте|американо|раф/.test(all)) return `Приготовить в кофемашине${/капуч|латте|раф/.test(nm)?", взбить молоко":""}, подать.`;
+  if (/чай/.test(all)) return `Заварить кипятком 3–5 мин, подать.`;
+  if (/коктейл|мохито|лимонад|смузи|шейк/.test(nm)) return `Смешать: ${F}. Добавить лёд, налить в бокал, украсить.`;
+  if (/напит|сок|вода|кола|пиво|вино|бар/.test(all)) return `Подать охлаждённым${/пиво|вино/.test(nm)?"":", при желании со льдом"}.`;
+  if (/десерт|торт|чизкейк|мороже/.test(all)) return `Выложить порцию на тарелку, украсить, подать.`;
+  if (/завтрак|омлет|яичниц/.test(all)) return `Обжарить на сковороде: ${F}. Выложить на тарелку, подать горячим.`;
+  return fill.length ? `Подготовить: ${F}${sauceTxt}. Собрать по техкарте, оформить и подать.` : "";
+}
+function openMethods(){
+  const rows = sortedDishes().filter(d=>!String(d.method||"").trim());
+  $("#methList").innerHTML = rows.length ? rows.map(d=>`<div class="box" style="gap:6px"><label class="toggle" style="color:var(--ink)"><input type="checkbox" class="mOn" data-mid="${esc(d.id)}" checked> ${N(d.name)}</label>
+    <textarea class="mTxt" rows="2" maxlength="600" aria-label="Способ приготовления" style="padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink)">${esc(methodDraft(d))}</textarea></div>`).join("")
+    : `<p class="hint">У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.</p>`;
+  $("#methSave").hidden = !rows.length;
+  $("#methDlg").showModal();
+  $("#methList").querySelectorAll("textarea").forEach(el=>fitArea(el));
+}
+$("#methList").addEventListener("input", e=>{ if (e.target.tagName==="TEXTAREA") fitArea(e.target, true); });
+document.addEventListener("click", e=>{ if (e.target.closest("#openMethods") && isAdmin()) openMethods(); });
+$("#methForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async ()=>{
+  const ops = [];
+  for (const box of $("#methList").querySelectorAll(".box")){
+    const on = box.querySelector(".mOn"), txt = box.querySelector(".mTxt").value.trim(), d = dishById(on.dataset.mid);
+    if (!on.checked || !txt || !d || String(d.method||"").trim()) continue;
+    ops.push({col:"menu", id:d.id, after:Object.assign({}, d, {method:txt})});
+  }
+  if (!ops.length){ toast("Ничего не отмечено"); return; }
+  const bkId = "bk_menu_" + Date.now();
+  try { await putDoc("backups", bkId, {id:bkId, ts:Date.now(), label:"Меню перед заполнением способов приготовления", menu:clone(S.menu)}); }
+  catch(err){ console.error(err); toast("Не удалось сохранить копию меню — ничего не изменено."); return; }
+  try { await commit("Способы приготовления: " + ops.length + " " + plural(ops.length,"блюдо","блюда","блюд"), ops); $("#methDlg").close(); render(); toast("Сохранено: " + ops.length + " " + plural(ops.length,"блюдо","блюда","блюд") + ". Отменить — кнопка ↶"); }
+  catch(err){ console.error(err); render(); toast("Не удалось сохранить. Проверьте права на изменение."); }
+}); });
 
 /* set dialog */
 let editingSet = null;
@@ -2605,7 +2698,7 @@ document.addEventListener("click", e=>{
   printOrder(orderById(b.dataset.oprint), false);
 });
 
-{ const _od = openDish; openDish = function(id){ lockForm($("#dishForm"), false); _od(id); if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr"); } }; }
+{ const _od = openDish; openDish = function(id){ lockForm($("#dishForm"), false); _od(id); if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr"); if (!$("#dMethod").value.trim()){ $("#dMethodBox").hidden = true; $("#dMethodBox").dataset.roHid = "1"; } } }; }
 { const _os = openSet; openSet = function(id){ lockForm($("#setForm"), false); _os(id); updateSetCost(); if (!isAdmin()){ $("#setTitle").textContent = "Состав сета"; lockForm($("#setForm"), true, "#stPrice,#stCost,#stPackCustom,#stNeeds,#stNameEn,#stNameTr"); } }; }
 
 /* ---------- events ---------- */
@@ -2716,6 +2809,7 @@ Object.assign(I18N, {"Скидка на весь заказ": ["Discount on the 
 Object.assign(I18N, {"Акции и скидки": ["Promos and discounts", "Kampanyalar ve indirimler"], "Правила для работников. Админ может ставить акции и скидки всегда, без ограничений.": ["Rules for staff. The admin can always set promos and discounts, without limits.", "Çalışanlar için kurallar. Yönetici kampanya ve indirimleri her zaman, sınırsız girebilir."], "Работники могут ставить акции и скидки": ["Staff may set promos and discounts", "Çalışanlar kampanya ve indirim girebilir"], "Срок": ["Period", "Süre"], "Пустое поле — без ограничения.": ["Empty field = no limit.", "Boş alan = sınır yok."], "С даты": ["From date", "Başlangıç tarihi"], "По дату (включительно)": ["To date (inclusive)", "Bitiş tarihi (dahil)"], "Часы с": ["Hours from", "Saat başlangıç"], "Часы до": ["Hours to", "Saat bitiş"], "Цена по акции на блюдо": ["Promo price per dish", "Yemek başına kampanya fiyatı"], "Разрешена": ["Allowed", "İzinli"], "Цена не ниже, % от цены меню": ["Price at least, % of menu price", "Fiyat en az, menü fiyatının %'si"], "0 — можно отдать в подарок. 50 — скидка не больше половины цены.": ["0 = gifts allowed. 50 = discount no more than half the price.", "0 = ikram serbest. 50 = indirim fiyatın yarısını geçemez."], "Не меньше, %": ["At least, %", "En az, %"], "Не больше, %": ["At most, %", "En çok, %"], "Акции и скидки сейчас": ["Promos and discounts are now", "Kampanya ve indirimler şu an"], "выключены администратором": ["turned off by the admin", "yönetici tarafından kapatıldı"], "начнутся": ["start on", "başlangıç:"], "закончились": ["ended on", "bitti:"], "действуют только в часы": ["only valid during hours", "yalnızca şu saatlerde geçerli:"], "Работникам акции и скидки выключены.": ["Promos and discounts are off for staff.", "Çalışanlar için kampanya ve indirimler kapalı."], "Работникам": ["For staff", "Çalışanlar için"], "без срока": ["no end date", "süresiz"],"срок": ["period", "süre"], "часы": ["hours", "saat"], "цена на блюдо не ниже": ["dish price at least", "yemek fiyatı en az"], "от меню": ["of menu", "menüden"], "цена на блюдо — нельзя": ["dish price — not allowed", "yemek fiyatı — yasak"], "скидка на заказ": ["order discount", "sipariş indirimi"], "скидка на заказ — нельзя": ["order discount — not allowed", "sipariş indirimi — yasak"], "Акции сейчас": ["Promos are now", "Kampanyalar şu an"], "Скидки сейчас": ["Discounts are now", "İndirimler şu an"], "Цена по акции сейчас запрещена администратором": ["Promo prices are currently disabled by the admin", "Kampanya fiyatı şu an yönetici tarafından kapalı"], "Скидка на заказ сейчас запрещена администратором": ["Order discounts are currently disabled by the admin", "Sipariş indirimi şu an yönetici tarafından kapalı"], "Цена по акции для": ["Promo price for", "Kampanya fiyatı:"], "не ниже": ["at least", "en az"], "от цены меню": ["of menu price", "menü fiyatının"], "Скидка на заказ:": ["Order discount:", "Sipariş indirimi:"], "Дата «с» позже даты «по»": ["Start date is after end date", "Başlangıç tarihi bitişten sonra"], "Укажите оба времени или ни одного": ["Enter both times or none", "İki saati de girin ya da hiçbirini"], "Цена не ниже: от 0 до 100%": ["Minimum price: 0 to 100%", "En düşük fiyat: %0–100"], "Правила акций и скидок": ["Promo and discount rules", "Kampanya ve indirim kuralları"], "Правила акций сохранены": ["Promo rules saved", "Kampanya kuralları kaydedildi"], "Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»": ["Order discount: 1 to 100%, “at least” must not exceed “at most”", "Sipariş indirimi: %1–100, «en az» «en çok»tan büyük olamaz"]});
 Object.assign(I18N, {"Срок действия. Пустое поле — без ограничения.": ["Valid period. Empty field = no limit.", "Geçerlilik süresi. Boş alan = sınır yok."], "Акции и скидки сейчас выключены администратором.": ["Promos and discounts are turned off by the admin.", "Kampanya ve indirimler yönetici tarafından kapatıldı."], "Цена по акции сейчас недоступна:": ["Promo price is not available now:", "Kampanya fiyatı şu an kullanılamaz:"], "Скидка на заказ сейчас недоступна:": ["Order discount is not available now:", "Sipariş indirimi şu an kullanılamaz:"], "начнётся": ["starts", "başlangıç"], "закончилась": ["ended", "bitiş"], "только в часы": ["only during hours", "yalnızca saatler"], "дата «с» позже даты «по»": ["start date is after end date", "başlangıç tarihi bitişten sonra"], "укажите оба времени или ни одного": ["enter both times or none", "iki saati de girin ya da hiçbirini"]});
 Object.assign(I18N, {"автоматически": ["automatically", "otomatik"], "вписано вручную": ["entered manually", "elle girildi"], "автоматически, последняя сумма": ["automatically, last amount", "otomatik, son tutar"], "Подставлена последняя сумма аренды.": ["The last rent amount is filled in.", "Son kira tutarı girildi."]});
+Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
