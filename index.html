@@ -2698,7 +2698,7 @@ document.addEventListener("click", e=>{
   printOrder(orderById(b.dataset.oprint), false);
 });
 
-{ const _od = openDish; openDish = function(id){ lockForm($("#dishForm"), false); _od(id); if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr"); if (!$("#dMethod").value.trim()){ $("#dMethodBox").hidden = true; $("#dMethodBox").dataset.roHid = "1"; } } }; }
+{ const _od = openDish; openDish = function(id){ lockForm($("#dishForm"), false); _od(id); if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr"); $("#dMethodBox").hidden = true; $("#dMethodBox").dataset.roHid = "1"; } }; }
 { const _os = openSet; openSet = function(id){ lockForm($("#setForm"), false); _os(id); updateSetCost(); if (!isAdmin()){ $("#setTitle").textContent = "Состав сета"; lockForm($("#setForm"), true, "#stPrice,#stCost,#stPackCustom,#stNeeds,#stNameEn,#stNameTr"); } }; }
 
 /* ---------- events ---------- */
