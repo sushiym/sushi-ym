@@ -1859,7 +1859,7 @@ $("#orderDlg").addEventListener("change", e=>{
   if (e.target.name==="otype"){ readODFields(); OD.type = e.target.value; renderODFields(); renderODLines(); }
   else if (e.target.dataset.opromo!==undefined){
     const i = +e.target.dataset.opromo, l = OD.lines[i]; if (!l) return;
-    if (e.target.checked){ l.basePrice = Number(l.price)||0; l.promo = true; l.promoBy = S.me ? S.me.name : lsGet("sklad.who"); }
+    if (e.target.checked){ l.basePrice = Number(l.price)||0; l.price = null; l.promo = true; l.promoBy = S.me ? S.me.name : lsGet("sklad.who"); }
     else { l.price = l.basePrice!=null ? Number(l.basePrice)||0 : itemPrice({kind:l.kind, id:l.id}); l.promo = false; delete l.basePrice; delete l.promoBy; }
     renderODLines();
     if (l.promo){ const inp = document.querySelector(`[data-oprice="${i}"]`); if (inp){ inp.focus(); inp.select(); } }
