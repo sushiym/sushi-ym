@@ -559,16 +559,19 @@ details.finun{margin-top:10px}
   <h3>Акции и скидки</h3>
   <p class="hint">Правила для работников. Админ может ставить акции и скидки всегда, без ограничений.</p>
   <label class="toggle"><input type="checkbox" id="prOn"> Работники могут ставить акции и скидки</label>
-  <div class="box"><h4>Срок</h4><p class="hint" style="margin:0">Пустое поле — без ограничения.</p>
-    <div class="two"><label class="f">С даты<input type="date" id="prFrom"></label><label class="f">По дату (включительно)<input type="date" id="prTo"></label></div>
-    <div class="two"><label class="f">Часы с<input type="time" id="prTFrom"></label><label class="f">Часы до<input type="time" id="prTTo"></label></div></div>
   <div class="box"><h4>Цена по акции на блюдо</h4>
     <label class="toggle"><input type="checkbox" id="prItemOn"> Разрешена</label>
     <label class="f">Цена не ниже, % от цены меню<input id="prItemMin" inputmode="decimal" autocomplete="off" placeholder="0"></label>
-    <p class="hint" style="margin:0">0 — можно отдать в подарок. 50 — скидка не больше половины цены.</p></div>
+    <p class="hint" style="margin:0">0 — можно отдать в подарок. 50 — скидка не больше половины цены.</p>
+    <p class="hint" style="margin:0">Срок действия. Пустое поле — без ограничения.</p>
+    <div class="two"><label class="f">С даты<input type="date" id="prItemFrom"></label><label class="f">По дату (включительно)<input type="date" id="prItemTo"></label></div>
+    <div class="two"><label class="f">Часы с<input type="time" id="prItemTFrom"></label><label class="f">Часы до<input type="time" id="prItemTTo"></label></div></div>
   <div class="box"><h4>Скидка на весь заказ</h4>
     <label class="toggle"><input type="checkbox" id="prOrdOn"> Разрешена</label>
-    <div class="two"><label class="f">Не меньше, %<input id="prOrdMin" inputmode="decimal" autocomplete="off" placeholder="1"></label><label class="f">Не больше, %<input id="prOrdMax" inputmode="decimal" autocomplete="off" placeholder="100"></label></div></div>
+    <div class="two"><label class="f">Не меньше, %<input id="prOrdMin" inputmode="decimal" autocomplete="off" placeholder="1"></label><label class="f">Не больше, %<input id="prOrdMax" inputmode="decimal" autocomplete="off" placeholder="100"></label></div>
+    <p class="hint" style="margin:0">Срок действия. Пустое поле — без ограничения.</p>
+    <div class="two"><label class="f">С даты<input type="date" id="prOrdFrom"></label><label class="f">По дату (включительно)<input type="date" id="prOrdTo"></label></div>
+    <div class="two"><label class="f">Часы с<input type="time" id="prOrdTFrom"></label><label class="f">Часы до<input type="time" id="prOrdTTo"></label></div></div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
@@ -1548,30 +1551,44 @@ const money = n => (Math.round((Number(n)||0)*100)/100).toLocaleString(LOC(),{ma
 const dayKey = ts => { const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 const todayKey = () => dayKey(Date.now());
 // promo rules set by admin in Finance (settings/promo); no doc = everything allowed
-const PROMO_DEF = {id:"promo", on:true, from:"", to:"", tFrom:"", tTo:"", itemOn:true, itemMin:0, ordOn:true, ordMin:1, ordMax:100};
-const promoCfg = () => Object.assign({}, PROMO_DEF, S.settings.find(x=>x.id==="promo")||{});
-function promoRules(){
-  const c = promoCfg(), r = {item:true, ord:true, itemMin:0, ordMin:1, ordMax:100, why:""};
-  if (isAdmin()) return r;
+const PROMO_DEF = {id:"promo", on:true, itemOn:true, itemMin:0, ordOn:true, ordMin:1, ordMax:100};
+// each part (item = promo price per dish, ord = % off whole order) has its own dates and hours;
+// old shared from/to/tFrom/tTo are used as a fallback
+const promoCfg = () => { const c = Object.assign({}, PROMO_DEF, S.settings.find(x=>x.id==="promo")||{});
+  for (const k of ["item","ord"]) for (const f of ["From","To","TFrom","TTo"]){ const n = k+f; if (c[n]===undefined) c[n] = c[f.charAt(0).toLowerCase()+f.slice(1)]||""; }
+  return c; };
+const dmy = v => v.split("-").reverse().join(".");
+function promoWinWhy(c, k){
   const d = new Date(), dk = todayKey(), hm = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
-  let why = "";
-  if (!c.on) why = "выключены администратором";
-  else if (c.from && dk < c.from) why = "начнутся " + c.from.split("-").reverse().join(".");
-  else if (c.to && dk > c.to) why = "закончились " + c.to.split("-").reverse().join(".");
-  else if (c.tFrom && c.tTo && !(c.tFrom<=c.tTo ? hm>=c.tFrom && hm<c.tTo : hm>=c.tFrom || hm<c.tTo)) why = "действуют только в часы " + c.tFrom + "–" + c.tTo;
-  r.why = why; r.item = !why && c.itemOn!==false; r.ord = !why && c.ordOn!==false;
+  const from = c[k+"From"], to = c[k+"To"], tf = c[k+"TFrom"], tt = c[k+"TTo"];
+  if (from && dk < from) return "начнётся " + dmy(from);
+  if (to && dk > to) return "закончилась " + dmy(to);
+  if (tf && tt && !(tf<=tt ? hm>=tf && hm<tt : hm>=tf || hm<tt)) return "только в часы " + tf + "–" + tt;
+  return "";
+}
+function promoRules(){
+  const c = promoCfg(), r = {item:true, ord:true, itemMin:0, ordMin:1, ordMax:100, off:false, itemWhy:"", ordWhy:""};
+  if (isAdmin()) return r;
+  r.off = !c.on;
+  r.itemWhy = c.itemOn!==false ? promoWinWhy(c, "item") : ""; r.ordWhy = c.ordOn!==false ? promoWinWhy(c, "ord") : "";
+  r.item = c.on && c.itemOn!==false && !r.itemWhy; r.ord = c.on && c.ordOn!==false && !r.ordWhy;
   r.itemMin = Math.min(100, Math.max(0, Number(c.itemMin)||0)); r.ordMin = Math.max(0, Number(c.ordMin)||0); r.ordMax = Math.min(100, Number(c.ordMax)||100);
   return r;
 }
+function promoOffText(R){
+  if (R.off) return "Акции и скидки сейчас выключены администратором.";
+  return [R.itemWhy ? "Цена по акции сейчас недоступна: " + R.itemWhy + "." : "", R.ordWhy ? "Скидка на заказ сейчас недоступна: " + R.ordWhy + "." : ""].filter(Boolean).join(" ");
+}
 function promoCfgText(){
   const c = promoCfg(); if (!c.on) return "Работникам акции и скидки выключены.";
-  const dt = v => v.split("-").reverse().join(".");
+  const win = k => { const p = [];
+    if (c[k+"From"] || c[k+"To"]) p.push((c[k+"From"]?dmy(c[k+"From"]):"…") + "–" + (c[k+"To"]?dmy(c[k+"To"]):"…"));
+    if (c[k+"TFrom"] && c[k+"TTo"]) p.push(c[k+"TFrom"] + "–" + c[k+"TTo"]);
+    return p.length ? " (" + p.join(", ") + ")" : " (без срока)"; };
   const parts = [];
-  if (c.from || c.to) parts.push("срок " + (c.from?dt(c.from):"…") + "–" + (c.to?dt(c.to):"…")); else parts.push("без срока");
-  if (c.tFrom && c.tTo) parts.push("часы " + c.tFrom + "–" + c.tTo);
-  parts.push(c.itemOn!==false ? `цена на блюдо не ниже ${fmt(Number(c.itemMin)||0)}% от меню` : "цена на блюдо — нельзя");
-  parts.push(c.ordOn!==false ? `скидка на заказ ${fmt(Number(c.ordMin)||1)}–${fmt(Number(c.ordMax)||100)}%` : "скидка на заказ — нельзя");
-  return "Работникам: " + parts.join(", ") + ".";
+  parts.push(c.itemOn!==false ? `цена на блюдо не ниже ${fmt(Number(c.itemMin)||0)}% от меню${win("item")}` : "цена на блюдо — нельзя");
+  parts.push(c.ordOn!==false ? `скидка на заказ ${fmt(Number(c.ordMin)||1)}–${fmt(Number(c.ordMax)||100)}%${win("ord")}` : "скидка на заказ — нельзя");
+  return "Работникам: " + parts.join("; ") + ".";
 }
 const packCfg = () => S.settings.find(x=>x.id==="pack") || {id:"pack", perOrder:[], perItem:[]};
 const srcOf = l => l.kind==="set" ? setById(l.id) : dishById(l.id);
@@ -1833,7 +1850,7 @@ function renderFin(L){
 function openPromo(){
   if (!isAdmin()) return;
   const c = promoCfg();
-  $("#prOn").checked = c.on!==false; $("#prFrom").value = c.from||""; $("#prTo").value = c.to||""; $("#prTFrom").value = c.tFrom||""; $("#prTTo").value = c.tTo||"";
+  $("#prOn").checked = c.on!==false; for (const k of ["Item","Ord"]) for (const f of ["From","To","TFrom","TTo"]) $("#pr"+k+f).value = c[k.toLowerCase()+f]||"";
   $("#prItemOn").checked = c.itemOn!==false; $("#prItemMin").value = Number(c.itemMin)||0;
   $("#prOrdOn").checked = c.ordOn!==false; $("#prOrdMin").value = Number(c.ordMin)||1; $("#prOrdMax").value = Number(c.ordMax)||100;
   $("#promoDlg").showModal();
@@ -1841,10 +1858,13 @@ function openPromo(){
 $("#promoForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const n = (id, def) => { const v = num($(id).value); return isNaN(v) ? def : v; };
-  const x = {id:"promo", on:$("#prOn").checked, from:$("#prFrom").value, to:$("#prTo").value, tFrom:$("#prTFrom").value, tTo:$("#prTTo").value,
+  const x = {id:"promo", on:$("#prOn").checked,
     itemOn:$("#prItemOn").checked, itemMin:n("#prItemMin",0), ordOn:$("#prOrdOn").checked, ordMin:n("#prOrdMin",1), ordMax:n("#prOrdMax",100), updatedAt:Date.now(), by:S.me?S.me.name:""};
-  if (x.from && x.to && x.from > x.to){ toast("Дата «с» позже даты «по»"); return; }
-  if (!!x.tFrom !== !!x.tTo){ toast("Укажите оба времени или ни одного"); return; }
+  for (const [k, name] of [["Item","Цена по акции на блюдо"],["Ord","Скидка на весь заказ"]]){
+    for (const f of ["From","To","TFrom","TTo"]) x[k.toLowerCase()+f] = $("#pr"+k+f).value;
+    const p = k.toLowerCase();
+    if (x[p+"From"] && x[p+"To"] && x[p+"From"] > x[p+"To"]){ toast(name + ": дата «с» позже даты «по»"); $("#pr"+k+"From").focus(); return; }
+    if (!!x[p+"TFrom"] !== !!x[p+"TTo"]){ toast(name + ": укажите оба времени или ни одного"); $("#pr"+k+"TFrom").focus(); return; } }
   if (x.itemMin<0 || x.itemMin>100){ toast("Цена не ниже: от 0 до 100%"); $("#prItemMin").focus(); return; }
   if (x.ordMin<1 || x.ordMax>100 || x.ordMin>x.ordMax){ toast("Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»"); $("#prOrdMin").focus(); return; }
   try { await commit("Правила акций и скидок", [{col:"settings", id:"promo", after:x}]); $("#promoDlg").close(); render(true); toast("Правила акций сохранены"); }
@@ -1931,7 +1951,7 @@ function odTotal(){
 }
 function renderODLines(){
   const R = promoRules();
-  $("#oPromoOff").hidden = !R.why; $("#oPromoOff").textContent = R.why ? "Акции и скидки сейчас " + R.why + "." : "";
+  const offT = promoOffText(R); $("#oPromoOff").hidden = !offT; $("#oPromoOff").textContent = offT;
   $("#oDiscRow").hidden = !R.ord && !$("#oDiscOn").checked;
   $("#oLines").innerHTML = OD.lines.length ? OD.lines.map((l,i)=>`<div class="oline ${l.promo?"promo":""}">
       <span class="oname">${NL(l)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}${promoTag(l)}<small data-osub="${i}">${odLineSub(l)}</small></span>
@@ -2012,11 +2032,11 @@ $("#orderForm").addEventListener("submit", async e=>{
   if (!isAdmin()){
     const R = promoRules(), was = l => old && (old.lines||[]).some(x=>x.promo && x.kind===l.kind && x.id===l.id && Number(x.price)===Number(l.price));
     for (const l of OD.lines){ if (!l.promo || was(l)) continue;
-      if (!R.item){ toast(R.why ? "Акции сейчас " + R.why : "Цена по акции сейчас запрещена администратором"); return; }
+      if (!R.item){ toast(R.itemWhy && !R.off ? "Цена по акции сейчас недоступна: " + R.itemWhy : "Цена по акции сейчас запрещена администратором"); return; }
       const minP = Math.ceil((Number(l.basePrice)||0)*R.itemMin)/100;
       if (Number(l.price) < minP){ toast(`Цена по акции для «${l.name}» не ниже ${money(minP)} (${fmt(R.itemMin)}% от цены меню)`); return; } }
     if ($("#oDiscOn").checked && !(old && Number(old.discPct)===OD.discPct)){
-      if (!R.ord){ toast(R.why ? "Скидки сейчас " + R.why : "Скидка на заказ сейчас запрещена администратором"); return; }
+      if (!R.ord){ toast(R.ordWhy && !R.off ? "Скидка на заказ сейчас недоступна: " + R.ordWhy : "Скидка на заказ сейчас запрещена администратором"); return; }
       if (OD.discPct < R.ordMin || OD.discPct > R.ordMax){ toast(`Скидка на заказ: ${fmt(R.ordMin)}–${fmt(R.ordMax)}%`); $("#oDiscPct").focus(); return; } }
   }
   const o = Object.assign({}, old||{}, {type:OD.type, table:OD.type==="hall"?OD.table:"", name:OD.type!=="hall"?OD.name:"", phone:OD.type!=="hall"?OD.phone:"",
@@ -2673,6 +2693,7 @@ Object.assign(I18N, {"Показать скрытые и без учёта":["Sh
 Object.assign(I18N, {"Акция": ["Promo", "Kampanya"], "акция": ["promo", "kampanya"], "подарок": ["gift", "ikram"], "Цена за 1 шт, ₺": ["Price per item, ₺", "Adet fiyatı, ₺"], "поставил(а)": ["set by", "giren"], "Цена по акции": ["Promo price", "Kampanya fiyatı"], "укажите цену по акции": ["enter the promo price", "kampanya fiyatını girin"], "Укажите цену по акции (0 — подарок)": ["Enter the promo price (0 = gift)", "Kampanya fiyatını girin (0 = ikram)"], "По акции и в подарок": ["Promo and gifts", "Kampanya ve ikramlar"], "скидка": ["discount", "indirim"], "Скидки по акциям": ["Promo discounts", "Kampanya indirimleri"], "подарков": ["gifts", "ikram"], "Скидки по акциям и подарки": ["Promo discounts and gifts", "Kampanya indirimleri ve ikramlar"], "уже учтены в выручке, для сведения": ["already included in revenue, for reference", "ciroya zaten yansıdı, bilgi için"], "АКЦИЯ": ["PROMO", "KAMPANYA"], "ПОДАРОК": ["GIFT", "İKRAM"]});
 Object.assign(I18N, {"Скидка на весь заказ": ["Discount on the whole order", "Tüm siparişe indirim"], "Скидка, %": ["Discount, %", "İndirim, %"], "укажите процент скидки": ["enter the discount percent", "indirim yüzdesini girin"], "Укажите процент скидки: от 1 до 100": ["Enter the discount percent: 1 to 100", "İndirim yüzdesini girin: 1 ile 100 arası"], "Скидка на заказ": ["Order discount", "Sipariş indirimi"], "СКИДКА": ["DISCOUNT", "İNDİRİM"], "НА ЗАКАЗ": ["ON ORDER", "SİPARİŞE"], "Акции, подарки и скидки": ["Promos, gifts and discounts", "Kampanyalar, ikramlar ve indirimler"], "Заказ": ["Order", "Sipariş"], "заказов со скидкой": ["orders with discount", "indirimli sipariş"]});
 Object.assign(I18N, {"Акции и скидки": ["Promos and discounts", "Kampanyalar ve indirimler"], "Правила для работников. Админ может ставить акции и скидки всегда, без ограничений.": ["Rules for staff. The admin can always set promos and discounts, without limits.", "Çalışanlar için kurallar. Yönetici kampanya ve indirimleri her zaman, sınırsız girebilir."], "Работники могут ставить акции и скидки": ["Staff may set promos and discounts", "Çalışanlar kampanya ve indirim girebilir"], "Срок": ["Period", "Süre"], "Пустое поле — без ограничения.": ["Empty field = no limit.", "Boş alan = sınır yok."], "С даты": ["From date", "Başlangıç tarihi"], "По дату (включительно)": ["To date (inclusive)", "Bitiş tarihi (dahil)"], "Часы с": ["Hours from", "Saat başlangıç"], "Часы до": ["Hours to", "Saat bitiş"], "Цена по акции на блюдо": ["Promo price per dish", "Yemek başına kampanya fiyatı"], "Разрешена": ["Allowed", "İzinli"], "Цена не ниже, % от цены меню": ["Price at least, % of menu price", "Fiyat en az, menü fiyatının %'si"], "0 — можно отдать в подарок. 50 — скидка не больше половины цены.": ["0 = gifts allowed. 50 = discount no more than half the price.", "0 = ikram serbest. 50 = indirim fiyatın yarısını geçemez."], "Не меньше, %": ["At least, %", "En az, %"], "Не больше, %": ["At most, %", "En çok, %"], "Акции и скидки сейчас": ["Promos and discounts are now", "Kampanya ve indirimler şu an"], "выключены администратором": ["turned off by the admin", "yönetici tarafından kapatıldı"], "начнутся": ["start on", "başlangıç:"], "закончились": ["ended on", "bitti:"], "действуют только в часы": ["only valid during hours", "yalnızca şu saatlerde geçerli:"], "Работникам акции и скидки выключены.": ["Promos and discounts are off for staff.", "Çalışanlar için kampanya ve indirimler kapalı."], "Работникам": ["For staff", "Çalışanlar için"], "без срока": ["no end date", "süresiz"],"срок": ["period", "süre"], "часы": ["hours", "saat"], "цена на блюдо не ниже": ["dish price at least", "yemek fiyatı en az"], "от меню": ["of menu", "menüden"], "цена на блюдо — нельзя": ["dish price — not allowed", "yemek fiyatı — yasak"], "скидка на заказ": ["order discount", "sipariş indirimi"], "скидка на заказ — нельзя": ["order discount — not allowed", "sipariş indirimi — yasak"], "Акции сейчас": ["Promos are now", "Kampanyalar şu an"], "Скидки сейчас": ["Discounts are now", "İndirimler şu an"], "Цена по акции сейчас запрещена администратором": ["Promo prices are currently disabled by the admin", "Kampanya fiyatı şu an yönetici tarafından kapalı"], "Скидка на заказ сейчас запрещена администратором": ["Order discounts are currently disabled by the admin", "Sipariş indirimi şu an yönetici tarafından kapalı"], "Цена по акции для": ["Promo price for", "Kampanya fiyatı:"], "не ниже": ["at least", "en az"], "от цены меню": ["of menu price", "menü fiyatının"], "Скидка на заказ:": ["Order discount:", "Sipariş indirimi:"], "Дата «с» позже даты «по»": ["Start date is after end date", "Başlangıç tarihi bitişten sonra"], "Укажите оба времени или ни одного": ["Enter both times or none", "İki saati de girin ya da hiçbirini"], "Цена не ниже: от 0 до 100%": ["Minimum price: 0 to 100%", "En düşük fiyat: %0–100"], "Правила акций и скидок": ["Promo and discount rules", "Kampanya ve indirim kuralları"], "Правила акций сохранены": ["Promo rules saved", "Kampanya kuralları kaydedildi"], "Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»": ["Order discount: 1 to 100%, “at least” must not exceed “at most”", "Sipariş indirimi: %1–100, «en az» «en çok»tan büyük olamaz"]});
+Object.assign(I18N, {"Срок действия. Пустое поле — без ограничения.": ["Valid period. Empty field = no limit.", "Geçerlilik süresi. Boş alan = sınır yok."], "Акции и скидки сейчас выключены администратором.": ["Promos and discounts are turned off by the admin.", "Kampanya ve indirimler yönetici tarafından kapatıldı."], "Цена по акции сейчас недоступна:": ["Promo price is not available now:", "Kampanya fiyatı şu an kullanılamaz:"], "Скидка на заказ сейчас недоступна:": ["Order discount is not available now:", "Sipariş indirimi şu an kullanılamaz:"], "начнётся": ["starts", "başlangıç"], "закончилась": ["ended", "bitiş"], "только в часы": ["only during hours", "yalnızca saatler"], "дата «с» позже даты «по»": ["start date is after end date", "başlangıç tarihi bitişten sonra"], "укажите оба времени или ни одного": ["enter both times or none", "iki saati de girin ya da hiçbirini"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
