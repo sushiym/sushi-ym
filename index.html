@@ -582,7 +582,6 @@ details.finun{margin-top:10px}
   <h3>Расход</h3>
   <p class="hint">Расходы не со склада: аренда, зарплата, коммуналка, комиссии агрегаторов. Учитываются в разделе «Финансы».</p>
   <div class="two"><label class="f">Статья<select id="eCat"></select></label><label class="f">Сумма, ₺<input id="eAmt" inputmode="decimal" autocomplete="off" placeholder="0"></label></div>
-  <p class="hint" id="eSalHint" hidden></p>
   <div class="two"><label class="f">Дата<input id="eDate" type="date"></label><label class="f">Кто вносит<input id="eWho" autocomplete="name" placeholder="Ваше имя"></label></div>
   <label class="f">Комментарий<input id="eNote" autocomplete="off" placeholder="Например: аренда за октябрь"></label>
   <div class="dlg-actions">
@@ -1811,6 +1810,7 @@ function renderFin(L){
       <div class="kpi"><small>Себестоимость продаж</small><b>${money(cogs)}</b><small>${pct(cogs,revenue)} от выручки</small></div>
       <div class="kpi"><small>Расходы и потери</small><b>${money(writeOff+manualOut+invLoss+expTotal)}</b></div>
       <div class="kpi finnet ${net<0?"minus":"plus"}"><small>Чистая прибыль</small><b>${money(net)}</b><small>${pct(net,revenue)} от выручки</small></div></div>
+    ${monthlyHtml()}
     <h2 class="cat"><span>Доходы и расходы</span></h2>
     <div class="sum finsum">
       ${line("Выручка", money(revenue), "", `${nChecks} ${plural(nChecks,"чек","чека","чеков")}${nChecks?`, средний ${money(revenue/nChecks)}`:""}`)}
@@ -1841,9 +1841,9 @@ function renderFin(L){
   } else {
     html += `<div class="empty-state" style="margin-top:14px">За этот период продаж нет.</div>`;
   }
-  const oexps = exps;   // monthly rows (old block, removed) are listed here too so they stay visible and deletable
+  const oexps = exps.filter(x=>!x.monthly);
   html += `<h2 class="cat"><span>Прочие расходы</span><span>${oexps.length}</span></h2>` + (oexps.length
-    ? `<div class="list">${oexps.map(x=>`<div class="hist"><span><span class="tag off">${esc(x.category||"Прочее")}</span>${x.monthly&&x.month?` <small class="hint">за ${esc(ymName(x.month))}</small>`:""} ${esc(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long"})}${x.who?", "+esc(x.who):""} <button class="del" data-delexp="${esc(x.id)}" aria-label="Удалить расход" title="Удалить расход">×</button></span></div>`).join("")}</div>`
+    ? `<div class="list">${oexps.map(x=>`<div class="hist"><span><span class="tag off">${esc(x.category||"Прочее")}</span> ${esc(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long"})}${x.who?", "+esc(x.who):""} <button class="del" data-delexp="${esc(x.id)}" aria-label="Удалить расход" title="Удалить расход">×</button></span></div>`).join("")}</div>`
     : `<p class="hint">Аренда, зарплата, коммуналка и другие расходы не со склада. Внесите их кнопкой «+ Расход», чтобы видеть настоящую чистую прибыль.</p>`);
   L.innerHTML = html;
 }
@@ -1870,19 +1870,8 @@ $("#promoForm").addEventListener("submit", async e=>{
   try { await commit("Правила акций и скидок", [{col:"settings", id:"promo", after:x}]); $("#promoDlg").close(); render(true); toast("Правила акций сохранены"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
-// salary: suggest the sum from worked shifts × hourly rates for the month of the chosen date
-function expSalHint(){
-  const h = $("#eSalHint"); if (!h) return;
-  if ($("#eCat").value!=="Зарплата"){ h.hidden = true; return; }
-  const ym = ($("#eDate").value||todayKey()).slice(0,7), sl = salaryByShifts(ym);
-  h.hidden = false;
-  h.textContent = sl.hrs ? `По сменам за ${ymName(ym)}: ${fmtH(sl.hrs)}${sl.sum?`, по ставкам ${money(sl.sum)}`:""}${sl.noRate?`, без ставки: ${sl.noRate}`:""}.` : `${ymName(ym)}: смен нет.`;
-  if (sl.sum && !$("#eAmt").value) $("#eAmt").value = String(sl.sum);
-}
-document.addEventListener("change", e=>{ if (e.target.id==="eCat" || e.target.id==="eDate") expSalHint(); });
 function openExp(){
   $("#eCat").innerHTML = EXP_CATS.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
-  expSalHint();
   $("#eAmt").value = ""; $("#eNote").value = ""; $("#eDate").value = todayKey(); $("#eWho").value = lsGet("sklad.who");
   $("#expDlg").showModal(); $("#eAmt").focus();
 }
@@ -2705,7 +2694,6 @@ Object.assign(I18N, {"Акция": ["Promo", "Kampanya"], "акция": ["promo"
 Object.assign(I18N, {"Скидка на весь заказ": ["Discount on the whole order", "Tüm siparişe indirim"], "Скидка, %": ["Discount, %", "İndirim, %"], "укажите процент скидки": ["enter the discount percent", "indirim yüzdesini girin"], "Укажите процент скидки: от 1 до 100": ["Enter the discount percent: 1 to 100", "İndirim yüzdesini girin: 1 ile 100 arası"], "Скидка на заказ": ["Order discount", "Sipariş indirimi"], "СКИДКА": ["DISCOUNT", "İNDİRİM"], "НА ЗАКАЗ": ["ON ORDER", "SİPARİŞE"], "Акции, подарки и скидки": ["Promos, gifts and discounts", "Kampanyalar, ikramlar ve indirimler"], "Заказ": ["Order", "Sipariş"], "заказов со скидкой": ["orders with discount", "indirimli sipariş"]});
 Object.assign(I18N, {"Акции и скидки": ["Promos and discounts", "Kampanyalar ve indirimler"], "Правила для работников. Админ может ставить акции и скидки всегда, без ограничений.": ["Rules for staff. The admin can always set promos and discounts, without limits.", "Çalışanlar için kurallar. Yönetici kampanya ve indirimleri her zaman, sınırsız girebilir."], "Работники могут ставить акции и скидки": ["Staff may set promos and discounts", "Çalışanlar kampanya ve indirim girebilir"], "Срок": ["Period", "Süre"], "Пустое поле — без ограничения.": ["Empty field = no limit.", "Boş alan = sınır yok."], "С даты": ["From date", "Başlangıç tarihi"], "По дату (включительно)": ["To date (inclusive)", "Bitiş tarihi (dahil)"], "Часы с": ["Hours from", "Saat başlangıç"], "Часы до": ["Hours to", "Saat bitiş"], "Цена по акции на блюдо": ["Promo price per dish", "Yemek başına kampanya fiyatı"], "Разрешена": ["Allowed", "İzinli"], "Цена не ниже, % от цены меню": ["Price at least, % of menu price", "Fiyat en az, menü fiyatının %'si"], "0 — можно отдать в подарок. 50 — скидка не больше половины цены.": ["0 = gifts allowed. 50 = discount no more than half the price.", "0 = ikram serbest. 50 = indirim fiyatın yarısını geçemez."], "Не меньше, %": ["At least, %", "En az, %"], "Не больше, %": ["At most, %", "En çok, %"], "Акции и скидки сейчас": ["Promos and discounts are now", "Kampanya ve indirimler şu an"], "выключены администратором": ["turned off by the admin", "yönetici tarafından kapatıldı"], "начнутся": ["start on", "başlangıç:"], "закончились": ["ended on", "bitti:"], "действуют только в часы": ["only valid during hours", "yalnızca şu saatlerde geçerli:"], "Работникам акции и скидки выключены.": ["Promos and discounts are off for staff.", "Çalışanlar için kampanya ve indirimler kapalı."], "Работникам": ["For staff", "Çalışanlar için"], "без срока": ["no end date", "süresiz"],"срок": ["period", "süre"], "часы": ["hours", "saat"], "цена на блюдо не ниже": ["dish price at least", "yemek fiyatı en az"], "от меню": ["of menu", "menüden"], "цена на блюдо — нельзя": ["dish price — not allowed", "yemek fiyatı — yasak"], "скидка на заказ": ["order discount", "sipariş indirimi"], "скидка на заказ — нельзя": ["order discount — not allowed", "sipariş indirimi — yasak"], "Акции сейчас": ["Promos are now", "Kampanyalar şu an"], "Скидки сейчас": ["Discounts are now", "İndirimler şu an"], "Цена по акции сейчас запрещена администратором": ["Promo prices are currently disabled by the admin", "Kampanya fiyatı şu an yönetici tarafından kapalı"], "Скидка на заказ сейчас запрещена администратором": ["Order discounts are currently disabled by the admin", "Sipariş indirimi şu an yönetici tarafından kapalı"], "Цена по акции для": ["Promo price for", "Kampanya fiyatı:"], "не ниже": ["at least", "en az"], "от цены меню": ["of menu price", "menü fiyatının"], "Скидка на заказ:": ["Order discount:", "Sipariş indirimi:"], "Дата «с» позже даты «по»": ["Start date is after end date", "Başlangıç tarihi bitişten sonra"], "Укажите оба времени или ни одного": ["Enter both times or none", "İki saati de girin ya da hiçbirini"], "Цена не ниже: от 0 до 100%": ["Minimum price: 0 to 100%", "En düşük fiyat: %0–100"], "Правила акций и скидок": ["Promo and discount rules", "Kampanya ve indirim kuralları"], "Правила акций сохранены": ["Promo rules saved", "Kampanya kuralları kaydedildi"], "Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»": ["Order discount: 1 to 100%, “at least” must not exceed “at most”", "Sipariş indirimi: %1–100, «en az» «en çok»tan büyük olamaz"]});
 Object.assign(I18N, {"Срок действия. Пустое поле — без ограничения.": ["Valid period. Empty field = no limit.", "Geçerlilik süresi. Boş alan = sınır yok."], "Акции и скидки сейчас выключены администратором.": ["Promos and discounts are turned off by the admin.", "Kampanya ve indirimler yönetici tarafından kapatıldı."], "Цена по акции сейчас недоступна:": ["Promo price is not available now:", "Kampanya fiyatı şu an kullanılamaz:"], "Скидка на заказ сейчас недоступна:": ["Order discount is not available now:", "Sipariş indirimi şu an kullanılamaz:"], "начнётся": ["starts", "başlangıç"], "закончилась": ["ended", "bitiş"], "только в часы": ["only during hours", "yalnızca saatler"], "дата «с» позже даты «по»": ["start date is after end date", "başlangıç tarihi bitişten sonra"], "укажите оба времени или ни одного": ["enter both times or none", "iki saati de girin ya da hiçbirini"]});
-Object.assign(I18N, {"По сменам за": ["By shifts for", "Vardiya toplamı,"], "по ставкам": ["at hourly rates", "saatlik ücretle"], "без ставки": ["without rate", "ücreti girilmemiş"], "смен нет.": ["no shifts.", "vardiya yok."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
