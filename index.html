@@ -367,14 +367,14 @@ details.finun{margin-top:10px}
 <button type="button" class="navbtn" id="navBtn" aria-label="Разделы" aria-expanded="false" aria-controls="navTabs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
 <div id="navShade" hidden></div>
 <nav class="tabs" id="navTabs" aria-label="Разделы"><div class="wrap" role="tablist">
-  <button role="tab" data-view="stock" aria-selected="true">Склад</button>
   <button role="tab" data-view="orders" aria-selected="false">Заказы</button>
   <button role="tab" data-view="sale" aria-selected="false">Продажи</button>
-  <button role="tab" data-view="menu" aria-selected="false">Меню</button>
   <button role="tab" data-view="hist" aria-selected="false">История</button>
+  <button role="tab" data-view="menu" aria-selected="false">Меню</button>
+  <button role="tab" data-view="stock" aria-selected="true">Склад</button>
   <button role="tab" data-view="inv" aria-selected="false">Инвентаризация</button>
-  <button role="tab" data-view="fin" aria-selected="false">Финансы</button>
   <button role="tab" data-view="staff" aria-selected="false">Сотрудники</button>
+  <button role="tab" data-view="fin" aria-selected="false">Финансы</button>
 </div></nav>
 <main><div class="wrap">
   <div id="notice"></div>
@@ -2293,7 +2293,7 @@ const roleOf = st => st && st.role==="admin" ? "admin" : "worker";
 const PERM = {
   worker: {views:["stock","orders","sale","menu","hist","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, sell:1, prices:1, menuView:1}
 };
-const ALL_VIEWS = ["stock","orders","sale","menu","hist","inv","fin","staff"];
+const ALL_VIEWS = ["orders","sale","hist","menu","stock","inv","staff","fin"];
 function can(k){ if (!S.me) return false; if (S.me.role==="admin") return true; const p = PERM[S.me.role]; return !!(p && p[k]); }
 function canView(v){ if (!S.me) return false; if (S.me.role==="admin") return true; return (PERM[S.me.role]||{views:[]}).views.includes(v); }
 const isAdmin = () => !!S.me && S.me.role==="admin";
