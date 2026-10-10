@@ -59,7 +59,6 @@ header.top{background:var(--nori);color:var(--on-nori);padding:18px 16px 14px}
 .ur.floating .t{display:none}
 @media (max-width:420px){.ur .t{display:none}}
 @media (prefers-reduced-motion: reduce){.ur{transition:none}}
-nav.tabs .wrap{padding-right:104px}
 header h1{font-family:var(--display);font-weight:700;font-size:1.6rem;letter-spacing:-.01em;margin:0}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .chip{border:1px solid rgba(255,255,255,.22);background:transparent;color:inherit;border-radius:999px;padding:4px 12px;font-size:.9rem}
@@ -67,20 +66,26 @@ header h1{font-family:var(--display);font-weight:700;font-size:1.6rem;letter-spa
 .chip.alert{background:var(--empty);border-color:var(--empty);color:#fff}
 .chip.warn{background:var(--low);border-color:var(--low);color:#1b1400}
 
-nav.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
-nav.tabs .wrap{display:flex;overflow-x:auto;gap:5px;padding-top:7px;padding-bottom:7px;padding-left:16px}
-nav.tabs button{flex:1 0 auto;background:var(--surface);border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:999px;padding:6px 11px;color:var(--ink);font-weight:600;font-size:.88rem;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.06)}
-nav.tabs button:hover{background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+/* sections: a column on the left. Wide landscape screens keep it open; portrait tablets and phones hide it behind the ☰ button */
+nav.tabs{position:fixed;left:0;top:0;bottom:0;width:240px;max-width:85vw;z-index:30;background:var(--surface);border-right:1px solid var(--line);overflow-y:auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);transform:translateX(-100%);visibility:hidden;transition:transform .2s, visibility .2s}
+body.navOpen nav.tabs{transform:none;visibility:visible;box-shadow:4px 0 24px rgba(0,0,0,.18)}
+nav.tabs .wrap{display:flex;flex-direction:column;max-width:none;margin:0;gap:4px;padding:16px 10px}
+nav.tabs button{width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:var(--radius-s);padding:11px 12px;color:var(--ink);font-weight:600;font-size:.95rem}
+nav.tabs button:hover{background:color-mix(in srgb,var(--accent) 12%,var(--surface))}
 nav.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-/* left sidebar on tablets and computers; phones keep the top row */
-@media (min-width:700px){
+#navShade{position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.35)}
+.navbtn{position:fixed;z-index:15;top:calc(env(safe-area-inset-top,0px) + 14px);left:max(12px, calc((100% - 860px) / 2 + 12px));width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-s);border:1px solid rgba(255,255,255,.3);background:transparent;color:var(--on-nori);transition:top .2s, background-color .2s, color .2s}
+.navbtn svg{width:22px;height:22px}
+.navbtn.floating{top:calc(env(safe-area-inset-top,0px) + 4px);color:var(--ink);background:color-mix(in srgb,var(--surface) 85%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-color:var(--line);box-shadow:0 2px 10px rgba(0,0,0,.08)}
+header.top .hrow{padding-left:56px}
+@media (prefers-reduced-motion: reduce){nav.tabs,.navbtn{transition:none}}
+@media (min-width:900px) and (orientation:landscape){
   :root{--side:196px}
   body{padding-left:var(--side)}
-  nav.tabs{position:fixed;left:0;top:0;bottom:0;width:var(--side);z-index:7;border-bottom:0;border-right:1px solid var(--line);background:var(--surface);overflow-y:auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-  nav.tabs .wrap{flex-direction:column;overflow:visible;max-width:none;margin:0;gap:4px;padding:16px 10px}
-  nav.tabs button{flex:none;width:100%;text-align:left;border-radius:var(--radius-s);border-color:transparent;background:transparent;box-shadow:none;padding:10px 12px;font-size:.95rem;white-space:normal}
-  nav.tabs button:hover{background:color-mix(in srgb,var(--accent) 12%,var(--surface))}
-  nav.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+  nav.tabs{width:var(--side);transform:none;visibility:visible;z-index:7;box-shadow:none}
+  body.navOpen nav.tabs{box-shadow:none}
+  .navbtn,#navShade{display:none}
+  header.top .hrow{padding-left:0}
   .ur{right:max(16px, calc((100% - var(--side) - 860px) / 2 + 16px))}
   .savebar{left:var(--side)}
 }
@@ -359,7 +364,9 @@ details.finun{margin-top:10px}
       <button id="undoBtn" disabled aria-label="Отменить последнее действие"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg><span class="t">Отменить</span></button>
       <button id="redoBtn" disabled aria-label="Вернуть отменённое действие"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg><span class="t">Вернуть</span></button>
     </div>
-<nav class="tabs" aria-label="Разделы"><div class="wrap" role="tablist">
+<button type="button" class="navbtn" id="navBtn" aria-label="Разделы" aria-expanded="false" aria-controls="navTabs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+<div id="navShade" hidden></div>
+<nav class="tabs" id="navTabs" aria-label="Разделы"><div class="wrap" role="tablist">
   <button role="tab" data-view="stock" aria-selected="true">Склад</button>
   <button role="tab" data-view="orders" aria-selected="false">Заказы</button>
   <button role="tab" data-view="sale" aria-selected="false">Продажи</button>
@@ -2331,7 +2338,7 @@ setInterval(()=>{ if (!S.me) return; const lim = S.me.role==="admin" ? ADMIN_IDL
 
 function applyRole(){
   const locked = !S.me;
-  ["header.top","nav.tabs","main","#ur","#savebarHost"].forEach(s=>{ const el = $(s); if (el) el.inert = locked; });
+  ["header.top","nav.tabs","main","#ur","#navBtn","#savebarHost"].forEach(s=>{ const el = $(s); if (el) el.inert = locked; });
   document.querySelectorAll("nav.tabs button[data-view]").forEach(b=>{ b.hidden = !canView(b.dataset.view); });
   const who = $("#whoChip");
   if (who) who.innerHTML = S.me ? `<span class="chip me">👤 <b>${N(S.me.name)}</b>${ROLES[S.me.role]}</span>${whoShiftHtml()}<button class="chip" id="logoutBtn" type="button">Выйти</button>` : "";
@@ -2749,8 +2756,16 @@ document.addEventListener("click", e=>{
 /* ---------- events ---------- */
 document.querySelector("nav.tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-view]"); if (!b) return;
-  S.view = b.dataset.view; render(true); window.scrollTo({top:0});
+  S.view = b.dataset.view; render(true); window.scrollTo({top:0}); setNav(false);
 });
+function setNav(open){
+  document.body.classList.toggle("navOpen", open); $("#navShade").hidden = !open;
+  $("#navBtn").setAttribute("aria-expanded", String(open));
+  if (open){ const b = document.querySelector('nav.tabs button[aria-selected="true"]'); if (b) b.focus({preventScroll:true}); }
+}
+$("#navBtn").addEventListener("click", ()=>setNav(!document.body.classList.contains("navOpen")));
+$("#navShade").addEventListener("click", ()=>setNav(false));
+document.addEventListener("keydown", e=>{ if (e.key==="Escape" && document.body.classList.contains("navOpen")) setNav(false); });
 document.addEventListener("click", async e => {
   const t = e.target.closest("[data-onew],[data-oedit],[data-onext],[data-opay],[data-ocancel],[data-oreopen],[data-ordview],#openPack,#openCut,[data-add],[data-editdish],[data-editset],#addDish,#addSet,#openCart,#quickSell,[data-new],[data-cook],[data-prod],[data-edit],[data-delmove],[data-go],#addProd,#invSave,#invReset");
   if (!t) return;
@@ -2841,7 +2856,7 @@ document.addEventListener("keydown", e=>{
   else if (k==="y"||k==="н"||((k==="z"||k==="я") && e.shiftKey)){ e.preventDefault(); guarded(redo); }
 });
 
-function placeUR(){ const h = document.querySelector("header.top").offsetHeight; $("#ur").classList.toggle("floating", window.scrollY > h - 20); }
+function placeUR(){ const h = document.querySelector("header.top").offsetHeight; $("#ur").classList.toggle("floating", window.scrollY > h - 20); $("#navBtn").classList.toggle("floating", window.scrollY > h - 20); }
 window.addEventListener("scroll", placeUR, {passive:true}); window.addEventListener("resize", placeUR); placeUR();
 
 /* ---------- languages ---------- */
