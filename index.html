@@ -72,6 +72,18 @@ nav.tabs .wrap{display:flex;overflow-x:auto;gap:5px;padding-top:7px;padding-bott
 nav.tabs button{flex:1 0 auto;background:var(--surface);border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:999px;padding:6px 11px;color:var(--ink);font-weight:600;font-size:.88rem;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 nav.tabs button:hover{background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
 nav.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+/* left sidebar on tablets and computers; phones keep the top row */
+@media (min-width:700px){
+  :root{--side:196px}
+  body{padding-left:var(--side)}
+  nav.tabs{position:fixed;left:0;top:0;bottom:0;width:var(--side);z-index:7;border-bottom:0;border-right:1px solid var(--line);background:var(--surface);overflow-y:auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+  nav.tabs .wrap{flex-direction:column;overflow:visible;max-width:none;margin:0;gap:4px;padding:16px 10px}
+  nav.tabs button{flex:none;width:100%;text-align:left;border-radius:var(--radius-s);border-color:transparent;background:transparent;box-shadow:none;padding:10px 12px;font-size:.95rem;white-space:normal}
+  nav.tabs button:hover{background:color-mix(in srgb,var(--accent) 12%,var(--surface))}
+  nav.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+  .ur{right:max(16px, calc((100% - var(--side) - 860px) / 2 + 16px))}
+  .savebar{left:var(--side)}
+}
 
 main{padding:14px 16px 90px}
 .notice{background:var(--low-bg);color:var(--ink);border-left:4px solid var(--low);padding:10px 12px;border-radius:var(--radius-s);margin-bottom:12px;font-size:.95rem}
