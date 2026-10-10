@@ -367,11 +367,11 @@ details.finun{margin-top:10px}
 <button type="button" class="navbtn" id="navBtn" aria-label="Разделы" aria-expanded="false" aria-controls="navTabs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
 <div id="navShade" hidden></div>
 <nav class="tabs" id="navTabs" aria-label="Разделы"><div class="wrap" role="tablist">
-  <button role="tab" data-view="orders" aria-selected="false">Заказы</button>
+  <button role="tab" data-view="orders" aria-selected="true">Заказы</button>
   <button role="tab" data-view="sale" aria-selected="false">Продажи</button>
   <button role="tab" data-view="hist" aria-selected="false">История</button>
   <button role="tab" data-view="menu" aria-selected="false">Меню</button>
-  <button role="tab" data-view="stock" aria-selected="true">Склад</button>
+  <button role="tab" data-view="stock" aria-selected="false">Склад</button>
   <button role="tab" data-view="inv" aria-selected="false">Инвентаризация</button>
   <button role="tab" data-view="staff" aria-selected="false">Сотрудники</button>
   <button role="tab" data-view="fin" aria-selected="false">Финансы</button>
@@ -674,7 +674,7 @@ const TYPES = {in:{label:"Приход",sign:1},out:{label:"Расход",sign:-
 const SUBUNIT = {"кг":["г",1000], "л":["мл",1000]};
 const HINTS = {in:"Товар пришёл от поставщика или с рынка.",out:"Товар ушёл в работу: на кухню, в заготовки.",off:"Испорчено, просрочено, брак — потери."};
 
-const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"month", me:null, products:[], moves:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"stock", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
+const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"month", me:null, products:[], moves:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
