@@ -407,6 +407,7 @@ details.finun{margin-top:10px}
 <dialog id="bulkDlg"><form method="dialog" id="bulkForm">
   <h3>Приход списком</h3>
   <p class="hint">Вставьте список — каждая строка: <b>продукт | количество | цена за 1 ед.</b> Например: <i>Соевый соус | 4 | 187,48</i>. Количество — в единице продукта на складе. Для нового продукта (только админ) добавьте раздел и единицу: <i>Кадаиф | 0,5 | 439,80 | Бакалея | кг</i>.</p>
+  <p class="hint">Количество 0 — меняется только цена закупки, остаток на складе не меняется.</p>
   <textarea id="bulkText" rows="8" autocomplete="off" placeholder="Продукт | количество | цена" style="padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink);font:inherit"></textarea>
   <div class="controls" style="margin:0"><button type="button" class="btn" id="bulkCheck">Проверить</button><button type="button" class="btn small" id="bulkCopy">Скопировать список продуктов</button></div>
   <div id="bulkPreview"></div>
@@ -1006,14 +1007,16 @@ function bulkParse(text){
     const r = {line, name:parts[0]||"", qty:num(parts[1]), price:num(parts[2]), cat:parts[3]||"", unit:parts[4]||"", err:""};
     r.p = byName.get(bulkKey(r.name)) || fresh.get(bulkKey(r.name)) || null;
     if (!r.name) r.err = "нет названия";
-    else if (!(r.qty>0)) r.err = "количество должно быть больше нуля";
+    else if (isNaN(r.qty) || r.qty<0) r.err = "количество должно быть больше нуля";
+    else if (r.qty===0 && !(r.price>0)) r.err = "при количестве 0 укажите новую цену";
     else if (isNaN(r.price) || r.price<0) r.err = "не указана цена";
     else if (!isAdmin() && !(r.price>0)) r.err = "укажите цену закупки";
     else if (!r.p){
-      if (!isAdmin()) r.err = "продукт не найден на складе";
+      if (!isAdmin() || r.qty===0) r.err = "продукт не найден на складе";
       else if (!r.cat || !UNITS.includes(r.unit)) r.err = "продукт не найден. Для нового укажите раздел и единицу (" + UNITS.join(", ") + ")";
       else { r.isNew = true; r.p = {id:uid("p"), name:r.name, name_en:"", name_tr:"", desc:"", category:r.cat, unit:r.unit, min:0, active:true, track:true, yieldPct:100, cost:r.price, order:0}; fresh.set(bulkKey(r.name), r.p); }
     }
+    r.priceOnly = !r.err && r.qty===0;
     rows.push(r);
   }
   return rows;
@@ -1024,6 +1027,7 @@ function bulkRender(){
   $("#bulkPreview").innerHTML = !rows.length ? `<p class="hint">Список пуст.</p>` :
     `<div class="box" style="gap:4px">${rows.map(r=> r.err
       ? `<div style="color:var(--empty)">✗ ${N(r.line)} — ${esc(r.err)}</div>`
+      : r.priceOnly ? `<div>✓ ${N(r.p.name)}: только цена ${money(Number(r.p.cost)||0)} → <b>${money(r.price)}</b> / ${esc(r.p.unit)}</div>`
       : `<div>✓ ${N(r.p.name)}${r.isNew?` <small class="hint">· новый продукт, ${esc(r.p.category)}</small>`:""}: ${fmt(r.qty)} ${esc(r.p.unit)} × ${money(r.price)} = <b>${money(r.qty*r.price)}</b></div>`).join("")}
     <div style="margin-top:6px">Строк: ${ok}${bad?` · с ошибками: <b style="color:var(--empty)">${bad}</b> — исправьте их, иначе сохранить нельзя`:""} · сумма: <b>${money(total)}</b></div></div>`;
   $("#bulkSave").disabled = !ok || !!bad;
@@ -1050,6 +1054,7 @@ $("#bulkForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async
   const who = lsGet("sklad.who") || (S.me && S.me.name) || "", note = $("#bulkNote").value.trim(), ts = Date.now(), ops = [], seen = new Set();
   rows.forEach((r,i)=>{
     if (r.isNew && !seen.has(r.p.id)){ r.p.order = Math.max(0, ...S.products.map(x=>x.order||0)) + 1 + i; seen.add(r.p.id); }
+    if (r.priceOnly) return;
     const mv = {id:uid("m"), productId:r.p.id, unit:r.p.unit, type:"in", delta:r.qty, price:r.price, note:[note, "приход списком"].filter(Boolean).join(", "), who, ts:ts+i};
     ops.push({col:"moves", id:mv.id, after:mv});
   });
@@ -2970,7 +2975,7 @@ Object.assign(I18N, {"автоматически": ["automatically", "otomatik"]
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
-Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"]});
+Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
