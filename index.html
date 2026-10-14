@@ -408,7 +408,7 @@ details.finun{margin-top:10px}
   <h3>Приход списком</h3>
   <p class="hint">Вставьте список — каждая строка: <b>продукт | количество | цена за 1 ед.</b> Например: <i>Соевый соус | 4 | 187,48</i>. Количество — в единице продукта на складе. Для нового продукта (только админ) добавьте раздел и единицу: <i>Кадаиф | 0,5 | 439,80 | Бакалея | кг</i>.</p>
   <textarea id="bulkText" rows="8" autocomplete="off" placeholder="Продукт | количество | цена" style="padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink);font:inherit"></textarea>
-  <button type="button" class="btn" id="bulkCheck" style="align-self:flex-start">Проверить</button>
+  <div class="controls" style="margin:0"><button type="button" class="btn" id="bulkCheck">Проверить</button><button type="button" class="btn small" id="bulkCopy">Скопировать список продуктов</button></div>
   <div id="bulkPreview"></div>
   <label class="f">Комментарий<input id="bulkNote" autocomplete="off" placeholder="Например: Metro 11.10"></label>
   <div class="dlg-actions">
@@ -1034,6 +1034,15 @@ document.addEventListener("click", e=>{
   $("#bulkDlg").showModal(); $("#bulkText").focus();
 });
 $("#bulkCheck").addEventListener("click", ()=>{ bulkRows = bulkParse($("#bulkText").value); bulkRender(); });
+function productListText(){
+  const cost = p => Number(p.cost)>0 ? String(Math.round(p.cost*100)/100).replace(".",",") : "";
+  return `SUSHI YM — продукты склада (${S.products.length}): раздел | продукт | единица | цена закупки\n\n` + sortedProducts().map(p=>[p.category||"", p.name, p.unit, cost(p)].join(" | ") + (p.active===false ? " | скрыт" : "")).join("\n");
+}
+$("#bulkCopy").addEventListener("click", async ()=>{
+  const t = productListText();
+  try { await navigator.clipboard.writeText(t); toast("Список продуктов скопирован. Вставьте его в чат с Claude."); }
+  catch(e){ $("#bulkText").value = t; $("#bulkText").select(); toast("Выделите текст в окошке и скопируйте его."); }
+});
 $("#bulkText").addEventListener("input", ()=>{ $("#bulkSave").disabled = true; });
 $("#bulkForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async ()=>{
   bulkRows = bulkParse($("#bulkText").value); bulkRender();
@@ -2960,6 +2969,7 @@ Object.assign(I18N, {"Срок действия. Пустое поле — бе�
 Object.assign(I18N, {"автоматически": ["automatically", "otomatik"], "вписано вручную": ["entered manually", "elle girildi"], "автоматически, последняя сумма": ["automatically, last amount", "otomatik, son tutar"], "Подставлена последняя сумма аренды.": ["The last rent amount is filled in.", "Son kira tutarı girildi."]});
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
+Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
