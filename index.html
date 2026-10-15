@@ -676,12 +676,11 @@ details.finun{margin-top:10px}
 <dialog id="cashDlg"><form method="dialog" id="cashForm">
   <h3 id="cashTitle">Кассовый расход</h3>
   <p class="hint">Деньги, взятые из кассы: обед, мелкие покупки (чай, соль, сахар, перец…). Вычитаются из дохода дня в «Финансах».</p>
-  <div class="seg seg4" role="radiogroup" aria-label="Вид траты">
+  <div class="seg" role="radiogroup" aria-label="Вид траты">
     <label><input type="radio" name="ckind" value="Обед" checked>Обед</label>
     <label><input type="radio" name="ckind" value="Покупка">Покупка</label>
-    <label><input type="radio" name="ckind" value="Другое">Другое</label>
-    <label><input type="radio" name="ckind" value="Курьер">Курьер</label></div>
-  <label class="f" id="cOrdWrap" hidden>Заказ с доставкой<select id="cOrd"></select></label>
+    <label><input type="radio" name="ckind" value="Другое">Другое</label></div>
+  <p class="hint">Курьер записывается сам: из заказа с доставкой, где указана сумма курьеру.</p>
   <label class="f">На что потрачено<input id="cNote" autocomplete="off" placeholder="Например: чай, сахар"></label>
   <div class="two"><label class="f">Сумма, ₺<input id="cAmt" inputmode="decimal" autocomplete="off" placeholder="0"></label><label class="f" id="cDateWrap">Дата<input id="cDate" type="date"></label></div>
   <p class="hint" id="cWhoLine"></p>
@@ -2230,7 +2229,7 @@ const cashTag = k => `<span class="tag ${k==="Обед"?"prod":k==="Покупк
 function cashRow(x, withDate){
   const d = new Date(x.ts||0);
   const when = (withDate ? d.toLocaleDateString(LOC(),{day:"numeric",month:"short"})+", " : "") + d.toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
-  const inner = `<span>${cashTag(x.kind)} ${x.orderNum!=null && x.note==="Заказ №"+x.orderNum ? "Заказ №"+esc(x.orderNum) : N(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${when}${x.who?", "+N(x.who):""}${x.editedBy?` · исправил(а) ${N(x.editedBy)}`:""}${x.fromOrder?" · из заказа, меняется в заказе":""}</span>`;
+  const inner = `<span>${cashTag(x.kind)} ${x.orderNum!=null ? "Заказ №"+esc(x.orderNum)+" · "+dmy(dayKey(x.ts||0)) : N(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${when}${x.who?", "+N(x.who):""}${x.editedBy?` · исправил(а) ${N(x.editedBy)}`:""}${x.fromOrder?" · из заказа, меняется в заказе":""}</span>`;
   return canEditCash(x) ? `<button type="button" class="hist" data-cash="${esc(x.id)}">${inner}</button>` : `<div class="hist">${inner}</div>`;
 }
 function renderCashControls(c){
@@ -2246,19 +2245,6 @@ function renderCash(L){
     + (list.length ? `<div class="list" style="margin-top:12px">${list.map(x=>cashRow(x)).join("")}</div>` : `<div class="empty-state" style="margin-top:14px">За этот день записей нет. Нажмите «+ Кассовый расход».</div>`);
 }
 let cashEdit = null;
-// «Курьер» chosen by hand: pick today's delivery order, its number and courier fee fill in
-function cashOrdFill(sel){
-  const k = (document.querySelector('input[name="ckind"]:checked')||{}).value;
-  $("#cOrdWrap").hidden = k!=="Курьер"; if (k!=="Курьер") return;
-  const dk = isAdmin() ? ($("#cDate").value||todayKey()) : todayKey();
-  const list = S.orders.filter(o=>o.type==="delivery" && o.status!=="cancelled" && dayKey(o.createdAt||0)===dk && (o.id===sel || !courRec(o.id))).sort((a,b)=>(Number(a.num)||0)-(Number(b.num)||0));
-  $("#cOrd").innerHTML = `<option value="">— без заказа —</option>` + list.map(o=>`<option value="${esc(o.id)}" ${o.id===sel?"selected":""}>№${esc(o.num)}${o.name||o.address?" · "+esc(o.name||o.address):""}${courFee(o)?" · "+money(courFee(o)):""}</option>`).join("");
-}
-document.addEventListener("change", e=>{
-  if (e.target.name==="ckind" || e.target.id==="cDate") cashOrdFill($("#cOrd").value);
-  if (e.target.id==="cOrd"){ const o = orderById(e.target.value); if (!o) return;
-    $("#cNote").value = "Заказ №" + o.num; if (courFee(o)) $("#cAmt").value = String(courFee(o)); else $("#cAmt").focus(); }
-});
 function openCash(id){
   const x = id ? S.expenses.find(y=>y.id===id) : null;
   if (!S.me || (x && !canEditCash(x))) return;
@@ -2270,7 +2256,6 @@ function openCash(id){
   $("#cDateWrap").hidden = !isAdmin(); $("#cDate").value = x ? dayKey(x.ts||0) : cashDay();
   $("#cWhoLine").textContent = x ? `Записал(а): ${x.who||"—"}` : `Записывает: ${S.me.name}`;
   $("#cashDel").hidden = !x;
-  cashOrdFill(x ? x.orderId||"" : "");
   $("#cashDlg").showModal(); (x ? $("#cAmt") : $("#cNote")).focus();
 }
 $("#cashForm").addEventListener("submit", async e=>{
@@ -2286,9 +2271,6 @@ $("#cashForm").addEventListener("submit", async e=>{
   const amount = Math.round(amt*100)/100;
   const x = old ? Object.assign({}, old, {kind, note, amount, ts, editedBy:S.me.name, editedAt:Date.now()})
     : {id:uid("c"), cash:true, category:"Кассовые расходы", kind, note, amount, who:S.me.name, whoId:S.me.id, ts, createdAt:Date.now()};
-  const ord = kind==="Курьер" ? orderById($("#cOrd").value) : null;
-  if (ord){ if (courRec(ord.id) && courRec(ord.id).id!==x.id){ toast(`Курьер по заказу №${ord.num} уже записан`); return; } x.orderId = ord.id; x.orderNum = ord.num; }
-  else { delete x.orderId; delete x.orderNum; }
   try { await commit(`Кассовый расход: ${kind}, ${money(amount)}`, [{col:"expenses", id:x.id, after:x}]); $("#cashDlg").close(); render(); toast(old ? "Исправлено" : `Записано: ${kind}, ${money(amount)}`); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
@@ -3191,7 +3173,7 @@ Object.assign(I18N, {"автоматически": ["automatically", "otomatik"]
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
-Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Заказ с доставкой": ["Delivery order", "Teslimat siparişi"], "— без заказа —": ["— no order —", "— siparişsiz —"], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"], "Курьер по заказу №": ["Courier for order #", "Kurye, sipariş #"], "уже записан": ["is already recorded", "zaten kayıtlı"]});
+Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Курьер записывается сам: из заказа с доставкой, где указана сумма курьеру.": ["The courier is recorded automatically from a delivery order with a courier fee.", "Kurye otomatik yazılır: kurye ücreti girilen teslimat siparişinden."], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"]});
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
