@@ -2498,7 +2498,7 @@ setInterval(()=>{ if (S.view==="orders" && S.ordView==="open" && !document.query
 const ROLES = {admin:"Админ", worker:"Работник ресторана"};
 const roleOf = st => st && st.role==="admin" ? "admin" : "worker";
 const PERM = {
-  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, sell:1, prices:1, menuView:1}
+  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, prices:1, menuView:1}
 };
 const ALL_VIEWS = ["orders","cash","hist","menu","stock","inv","staff","fin"];
 function can(k){ if (!S.me) return false; if (S.me.role==="admin") return true; const p = PERM[S.me.role]; return !!(p && p[k]); }
