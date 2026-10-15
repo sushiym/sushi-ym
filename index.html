@@ -3162,10 +3162,10 @@ function ticketHtml(o, edited){
     ${orderPct(o) ? `<div class="tk-com">SİPARİŞE %${fmt(orderPct(o))} İNDİRİM</div>` : ""}
     <div class="tk-c" style="margin-top:6px">Yazdırıldı: ${tm(new Date())}${S.me?` · ${esc(S.me.name)}`:""}</div></div>`;
 }
-/* payment receipt (for the customer): prices and total, only the customer's name (no phone, address or payment method); also in Turkish */
+/* payment receipt (for the customer): prices and total, no personal data (no name, phone, address) and no payment method; also in Turkish */
 function receiptHtml(o){
   const tm = d => d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
-  const now = new Date();
+  const dt = new Date(o.createdAt||Date.now());
   const m = v => fmt(v)+" ₺";
   const head = o.type==="hall" ? `MASA ${esc(o.table||"")}` : (o.type==="delivery" ? "TESLİMAT" : "GEL-AL");
   const lines = (o.lines||[]).map(l=>{
@@ -3183,8 +3183,7 @@ function receiptHtml(o){
     <div class="tk-c">ÖDEME FİŞİ</div>
     <div class="tk-hr"></div>
     <div class="tk-big">No ${esc(o.num)} · ${head}</div>
-    ${o.type!=="hall" && o.name ? `<div>${esc(o.name)}</div>` : ""}
-    <div>${now.toLocaleDateString("tr-TR")} ${tm(now)}</div>
+    <div>${dt.toLocaleDateString("tr-TR")} ${tm(dt)}</div>
     <div class="tk-hr"></div>${lines}<div class="tk-hr"></div>
     ${sums.join("")}
     <div class="tk-row tk-tot"><span>TOPLAM</span><span>${m(orderTotal(o))}</span></div>
