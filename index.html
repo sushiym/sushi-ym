@@ -3161,9 +3161,8 @@ function ticketHtml(o, edited){
     ${orderPct(o) ? `<div class="tk-com">SİPARİŞE %${fmt(orderPct(o))} İNDİRİM</div>` : ""}
     <div class="tk-c" style="margin-top:6px">Yazdırıldı: ${tm(new Date())}${S.me?` · ${esc(S.me.name)}`:""}</div></div>`;
 }
-/* payment receipt (for the customer): prices and total, no phone and no address; also in Turkish */
-const TK_PAYS = {"Наличные":"Nakit","Карта":"Kart","Перевод":"Havale","Агрегатор":"Agregatör"};
-function receiptHtml(o, payment){
+/* payment receipt (for the customer): prices and total, only the customer's name (no phone, address or payment method); also in Turkish */
+function receiptHtml(o){
   const tm = d => d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
   const now = new Date();
   const m = v => fmt(v)+" ₺";
@@ -3188,7 +3187,6 @@ function receiptHtml(o, payment){
     <div class="tk-hr"></div>${lines}<div class="tk-hr"></div>
     ${sums.join("")}
     <div class="tk-row tk-tot"><span>TOPLAM</span><span>${m(orderTotal(o))}</span></div>
-    ${payment ? `<div class="tk-row"><span>ÖDEME</span><span>${esc(TK_PAYS[payment]||payment)}</span></div>` : ""}
     <div class="tk-hr"></div>
     <div class="tk-c">Bilgi fişidir, mali değeri yoktur.</div>
     <div class="tk-c">Afiyet olsun! Teşekkür ederiz.</div></div>`;
@@ -3205,7 +3203,7 @@ function printHtml(html){
 function printOrder(o, edited){ if (o) printHtml(ticketHtml(o, edited)); }
 $("#payPrint").addEventListener("click", ()=>{
   const o = orderById(payId); if (!o) return;
-  printHtml(receiptHtml(o, (document.querySelector('input[name="paym"]:checked')||{}).value || ""));
+  printHtml(receiptHtml(o));
 });
 document.addEventListener("click", e=>{
   const b = e.target.closest("[data-oprint]"); if (!b || !S.me) return;
