@@ -284,6 +284,8 @@ details.wbox summary{display:flex;justify-content:space-between;align-items:cent
 details.wbox summary b{font-variant-numeric:tabular-nums}
 details.wbox div.slist{padding:0}
 details.wbox .srow{box-sizing:border-box}
+details.wbox details.wbox{padding:5px 6px}
+details.wbox details.wbox .srow{gap:6px;padding:6px 6px}
 details.det .slist .srow,.srow{display:grid;grid-template-columns:1fr auto auto;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-s);padding:6px 10px;text-align:left;font-size:.9rem;font-variant-numeric:tabular-nums;width:100%}
 .srow .auto{color:var(--low)}
 .srow.long{border-color:var(--empty);color:var(--empty)}
@@ -2744,24 +2746,27 @@ function shRange(){
 function weekStart(ts){ const d = new Date(ts); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d.getTime(); }
 function addDays(ts, n){ const d = new Date(ts); d.setDate(d.getDate()+n); return d.getTime(); }
 function weekNo(ts){ const d = new Date(ts); d.setHours(0,0,0,0); d.setDate(d.getDate()+3-((d.getDay()+6)%7)); const y = new Date(d.getFullYear(),0,4); return 1+Math.round(((d-y)/86400000-3+((y.getDay()+6)%7))/7); }
-function weekLabel(w){ const e = addDays(w,6), o = {day:"numeric",month:"short"};
-  return `Неделя ${weekNo(w)} · ${new Date(w).toLocaleDateString(LOC(),o)} – ${new Date(e).toLocaleDateString(LOC(),o)}`; }
+function weekLabel(w, from, to){ const a = Math.max(w, from||w), e = Math.min(addDays(w,6), to||Infinity), o = {day:"numeric",month:"short"};
+  return `Неделя ${weekNo(w)} · ${new Date(a).toLocaleDateString(LOC(),o)}${e>a?` – ${new Date(e).toLocaleDateString(LOC(),o)}`:""}`; }
 function shRowHtml(sh){
   const long = !sh.end ? hoursOf(sh)>LONG_SHIFT_H : false;
   const d = new Date(sh.start).toLocaleDateString(LOC(),{day:"numeric",month:"short",weekday:"short"});
   return `<button type="button" class="srow ${long?"long":""}" data-editshift="${esc(sh.id)}"><span>${d}</span><span>${hhmm(sh.start)} – ${sh.end?hhmm(sh.end)+(sh.autoClosed?" авто":""):(long?"не закрыта!":"сейчас")}</span><b>${fmtH(hoursOf(sh))}</b></button>`;
 }
-// finished weeks of one worker: each folds into «Неделя N», opens to the days
+// finished time of one worker folds up: weeks of this month → months of this quarter → earlier quarters; each opens down to the days
 function staffWeeksHtml(x){
-  const cur = weekStart(Date.now()), rate = Number(x.rate)||0, by = new Map();
-  for (const sh of S.shifts.filter(sh=>sh.staffId===x.id && sh.start && sh.start < cur)){ const w = weekStart(sh.start); if (!by.has(w)) by.set(w, []); by.get(w).push(sh); }
-  const weeks = [...by.keys()].sort((a,b)=>b-a).map(w=>{
-    const my = by.get(w).sort((a,b)=>a.start-b.start), h = my.reduce((a,sh)=>a+hoursOf(sh),0);
-    return `<details class="det wbox"><summary><span>${weekLabel(w)}</span><b>${fmtH(h)}${rate?` · ${money(h*rate)}`:""}</b></summary><div class="slist">${my.map(shRowHtml).join("")}</div></details>`;
-  });
-  if (!weeks.length) return "";
-  const SHOW = 4;
-  return weeks.slice(0,SHOW).join("") + (weeks.length>SHOW ? `<details class="det"><summary>Ранее: ${weeks.length-SHOW} ${plural(weeks.length-SHOW,"неделя","недели","недель")}</summary><div class="slist">${weeks.slice(SHOW).join("")}</div></details>` : "");
+  const now = Date.now(), cur = weekStart(now), rate = Number(x.rate)||0, curYM = ymOf(now), qOf = ts => { const d = new Date(ts); return d.getFullYear()+"-"+(Math.floor(d.getMonth()/3)+1); };
+  const past = S.shifts.filter(sh=>sh.staffId===x.id && sh.start && sh.start < cur).sort((a,b)=>a.start-b.start);
+  if (!past.length) return "";
+  const groups = (arr, key) => { const m = new Map(); for (const sh of arr){ const k = key(sh.start); if (!m.has(k)) m.set(k, []); m.get(k).push(sh); } return [...m.entries()].sort((a,b)=>a[0]<b[0]?1:-1); };
+  const box = (label, arr, inner) => { const h = arr.reduce((a,sh)=>a+hoursOf(sh),0);
+    return `<details class="det wbox"><summary><span>${label}</span><b>${fmtH(h)}${rate?` · ${money(h*rate)}`:""}</b></summary><div class="slist">${inner}</div></details>`; };
+  // weeks inside one month are cut at the month's edges, so a month adds up to the same hours as in Finance
+  const weeks = arr => groups(arr, weekStart).map(([w,a])=>{ const ym = ymOf(a[0].start); return box(weekLabel(w, ymStart(ym), addDays(ymStart(ymShift(ym,1)),-1)), a, a.map(shRowHtml).join("")); }).join("");
+  const months = arr => groups(arr, ymOf).map(([ym,a])=>box(ymName(ym), a, weeks(a))).join("");
+  const thisM = past.filter(sh=>ymOf(sh.start)===curYM), rest = past.filter(sh=>ymOf(sh.start)!==curYM);
+  const thisQ = rest.filter(sh=>qOf(sh.start)===qOf(now)), older = rest.filter(sh=>qOf(sh.start)!==qOf(now));
+  return weeks(thisM) + months(thisQ) + groups(older, qOf).map(([q,a])=>{ const [y,n] = q.split("-"); return box(`Квартал ${n} · ${y}`, a, months(a)); }).join("");
 }
 const AUTO_CLOSE_HOUR = 23;
 function autoCloseAt(start){ const d = new Date(start); d.setHours(AUTO_CLOSE_HOUR, 0, 0, 0); if (d.getTime() <= start) d.setDate(d.getDate()+1); return d.getTime(); }
@@ -3119,7 +3124,7 @@ Object.assign(I18N, {"Срок действия. Пустое поле — бе�
 Object.assign(I18N, {"автоматически": ["automatically", "otomatik"], "вписано вручную": ["entered manually", "elle girildi"], "автоматически, последняя сумма": ["automatically, last amount", "otomatik, son tutar"], "Подставлена последняя сумма аренды.": ["The last rent amount is filled in.", "Son kira tutarı girildi."]});
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
-Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Ранее": ["Earlier", "Daha önce"], "неделя": ["week", "hafta"], "недели": ["weeks", "hafta"], "недель": ["weeks", "hafta"], "сейчас": ["now", "şimdi"]});
+Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
