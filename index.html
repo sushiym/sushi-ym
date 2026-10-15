@@ -878,7 +878,7 @@ function renderControls(){
     renderFinControls(c);
   } else if (S.view==="staff"){
     c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${SH_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-shp="${k}" aria-pressed="${S.shPeriod===k}">${l}</button>`).join("")}</div>
-      <div class="controls"><button class="btn primary" id="addStaff">+ Сотрудник</button><button class="btn" id="addShift">+ Смена вручную</button><button class="btn" id="devSignOut">Отключить это устройство</button><button class="btn" id="importOld">Перенести данные из старой программы</button></div>
+      <div class="controls"><button class="btn primary" id="addStaff">+ Сотрудник</button><button class="btn" id="addShift">+ Смена вручную</button>${devIsMain()?"":`<button class="btn" id="devSignOut">Отключить это устройство</button>`}<button class="btn" id="importOld">Перенести данные из старой программы</button></div>
       <p class="hint" style="margin:0 0 10px">Смена начинается и заканчивается на экране входа. Незакрытые смены программа закрывает сама в 23:00 — такие помечены «авто». Нажмите на смену, чтобы исправить время.</p>`;
   }
 }
@@ -2546,7 +2546,7 @@ let lastAct = Date.now(), gateRole = "worker", gatePerson = null, pinFails = 0, 
 function setMe(st){
   S.me = st ? {id:st.id, name:st.name, role:roleOf(st)} : null;
   UNDO.length = 0; REDO.length = 0; updateUR();
-  if (st){ lsSet("sklad.who", st.name); try{ localStorage.setItem("sushi.me", JSON.stringify({id:st.id, ts:Date.now()})); }catch(e){} }
+  if (st){ lsSet("sklad.who", st.name); setTimeout(devTouch, 0); try{ localStorage.setItem("sushi.me", JSON.stringify({id:st.id, ts:Date.now()})); }catch(e){} }
   else { lsSet("sklad.who", ""); try{ localStorage.removeItem("sushi.me"); }catch(e){} }
   document.querySelectorAll("dialog[open]").forEach(d=>d.close());
   S.cart = []; S.invDraft = {};
@@ -2838,7 +2838,7 @@ function renderStaff(L){
   const list = S.staff.filter(x=>roleOf(x)!=="admin").sort((a,b)=>String(a.name).localeCompare(b.name,"ru"));
   const admins = S.staff.filter(x=>roleOf(x)==="admin").sort((a,b)=>String(a.name).localeCompare(b.name,"ru"));
   const adminHtml = `<h2 class="cat"><span>Админ</span><span>${admins.length}</span></h2><div class="list">${admins.map(x=>`<button class="row" style="border-left-color:var(--accent)" data-editstaff="${esc(x.id)}"><span class="nm">${N(x.name)}${x.id===S.me?.id?" (вы)":""}<small>Без учёта смен</small></span>${x.active===false?'<span class="tag hid">отключён</span>':""}</button>`).join("")}</div>`;
-  if (!list.length){ L.innerHTML = html + `<div class="empty-state">Работников ресторана пока нет. Нажмите «+ Сотрудник».</div>` + adminHtml; return; }
+  if (!list.length){ L.innerHTML = html + `<div class="empty-state">Работников ресторана пока нет. Нажмите «+ Сотрудник».</div>` + adminHtml + devListHtml(); return; }
   let totH = 0, totPay = 0;
   html += list.map(x=>{
     const shs = S.shifts.filter(sh=>sh.staffId===x.id && inR(sh)).sort((a,b)=>(b.start||0)-(a.start||0));
@@ -2861,7 +2861,7 @@ function renderStaff(L){
   }).join("");
   html += `<div class="sum" style="margin-top:12px"><div><span>Итого за период</span><b>${fmtH(totH)}${totPay?` · ${money(totPay)}`:""}</b></div></div>`;
   const keep = new Set([...L.querySelectorAll("details[data-k][open]")].map(d=>d.dataset.k));
-  L.innerHTML = html + adminHtml;
+  L.innerHTML = html + adminHtml + devListHtml();
   if (keep.size) L.querySelectorAll("details[data-k]").forEach(d=>{ if (keep.has(d.dataset.k)) d.open = true; });
 }
 let editingShift = null;
@@ -3147,6 +3147,7 @@ Object.assign(I18N, {"Скопировать список продуктов": [
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
 Object.assign(I18N, {"Кассовые расходы": ["Cash expenses", "Kasa giderleri"], "Кассовый расход": ["Cash expense", "Kasa gideri"], "+ Кассовый расход": ["+ Cash expense", "+ Kasa gideri"], "Исправить кассовый расход": ["Edit cash expense", "Kasa giderini düzelt"], "Обед": ["Lunch", "Öğle yemeği"], "Покупка": ["Purchase", "Alışveriş"], "Другое": ["Other", "Diğer"], "Вид траты": ["Expense type", "Gider türü"], "На что потрачено": ["What it was spent on", "Ne için harcandı"], "Например: чай, сахар": ["E.g.: tea, sugar", "Örn.: çay, şeker"], "Деньги, взятые из кассы: обед, мелкие покупки (чай, соль, сахар, перец…). Вычитаются из дохода дня в «Финансах».": ["Money taken from the till: lunch, small purchases (tea, salt, sugar, pepper…). Subtracted from the day's income in “Finance”.", "Kasadan alınan para: öğle yemeği, küçük alışverişler (çay, tuz, şeker, biber…). «Finans» bölümünde günün gelirinden düşülür."], "Записывайте каждый раз, когда берёте деньги из кассы: на обед или мелкие покупки (чай, соль, сахар…).": ["Record every time you take money from the till: for lunch or small purchases (tea, salt, sugar…).", "Kasadan her para aldığınızda yazın: öğle yemeği veya küçük alışverişler için (çay, tuz, şeker…)."], "Сумма вычитается из дохода дня в «Финансах». Нажмите на запись, чтобы исправить или удалить.": ["The amount is subtracted from the day's income in “Finance”. Tap a record to edit or delete it.", "Tutar «Finans» bölümünde günün gelirinden düşülür. Düzeltmek veya silmek için kayda dokunun."], "Свои записи за сегодня можно исправить: нажмите на запись.": ["You can edit your own records for today: tap a record.", "Bugünkü kendi kayıtlarınızı düzeltebilirsiniz: kayda dokunun."], "взято из кассы": ["taken from the till", "kasadan alındı"], "запись": ["record", "kayıt"], "записи": ["records", "kayıt"], "записей": ["records", "kayıt"], "За этот день записей нет. Нажмите «+ Кассовый расход».": ["No records for this day. Tap “+ Cash expense”.", "Bu gün için kayıt yok. «+ Kasa gideri»ne dokunun."], "Записал(а):": ["Recorded by:", "Kaydeden:"], "Записывает:": ["Recorded by:", "Kaydeden:"], "исправил(а)": ["edited by", "düzelten"], "Напишите, на что потрачено": ["Write what it was spent on", "Ne için harcandığını yazın"], "Исправлено": ["Corrected", "Düzeltildi"], "Записано:": ["Recorded:", "Kaydedildi:"], "Запись удалена": ["Record deleted", "Kayıt silindi"], "Удалить запись": ["Delete record", "Kaydı sil"], "Кассовые расходы за период:": ["Cash expenses for the period:", "Dönemin kasa giderleri:"], "Кассовые расходы за день": ["Cash expenses for the day", "Günün kasa giderleri"], "Касса (наличные)": ["Till (cash)", "Kasa (nakit)"], "Получено наличными": ["Received in cash", "Nakit alınan"], "Должно остаться в кассе": ["Should be left in the till", "Kasada kalması gereken"], "без учёта размена на начало дня": ["not counting the opening float", "gün başı bozuk para hariç"], "Быстрые продажи": ["Quick sales", "Hızlı satışlar"], "сюда не входят: у них не указан способ оплаты.": ["are not included: they have no payment method.", "dahil değil: ödeme yöntemi belirtilmemiş."], "обед": ["lunch", "öğle yemeği"], "покупка": ["purchase", "alışveriş"], "другое": ["other", "diğer"]});
+Object.assign(I18N, {"Телефон Android": ["Android phone", "Android telefon"], "Планшет Android": ["Android tablet", "Android tablet"], "Компьютер Windows": ["Windows computer", "Windows bilgisayar"], "Компьютер Linux": ["Linux computer", "Linux bilgisayar"], "Устройство": ["Device", "Cihaz"], "Устройства": ["Devices", "Cihazlar"], "главное": ["main", "ana"], "это устройство": ["this device", "bu cihaz"], "ждёт разрешения": ["waiting for approval", "onay bekliyor"], "отключено": ["disconnected", "bağlantısı kesildi"], "Переименовать": ["Rename", "Yeniden adlandır"], "Разрешить": ["Allow", "İzin ver"], "Сделать главным": ["Make main", "Ana cihaz yap"], "Снять «главное»": ["Remove «main»", "«Ana» işaretini kaldır"], "Отключить": ["Disconnect", "Bağlantıyı kes"], "Убрать из списка": ["Remove from list", "Listeden kaldır"], "Сделать это устройство главным": ["Make this device main", "Bu cihazı ana cihaz yap"], "(приложение)": ["(app)", "(uygulama)"], "код": ["code", "kod"], "В сети:": ["Online:", "Çevrimiçi:"], "вход:": ["login:", "giriş:"], "ждут:": ["waiting:", "bekleyen:"], "Новые устройства — только с разрешения": ["New devices only with approval", "Yeni cihazlar yalnızca onayla"], "Управлять устройствами можно только с главного устройства.": ["Devices can be managed only from a main device.", "Cihazlar yalnızca ana cihazdan yönetilebilir."], "Главного устройства пока нет — откройте программу на своём устройстве и нажмите «Сделать это устройство главным».": ["There is no main device yet: open the app on your device and press «Make this device main».", "Henüz ana cihaz yok: programı kendi cihazınızda açın ve «Bu cihazı ana cihaz yap» düğmesine basın."], "Главное устройство отключить нельзя. Отключённое устройство выходит из программы, как только появится интернет.": ["A main device cannot be disconnected. A disconnected device leaves the app as soon as it is online.", "Ana cihazın bağlantısı kesilemez. Bağlantısı kesilen cihaz internete bağlanır bağlanmaz programdan çıkar."], "Подтвердите PIN админа": ["Confirm the admin PIN", "Yönetici PIN'ini onaylayın"], "Подтвердить": ["Confirm", "Onayla"], "Неверный PIN": ["Wrong PIN", "Yanlış PIN"], "Это устройство теперь главное": ["This device is now main", "Bu cihaz artık ana cihaz"], "Устройство разрешено": ["Device allowed", "Cihaza izin verildi"], "Устройство отключено": ["Device disconnected", "Cihazın bağlantısı kesildi"], "Новые устройства будут ждать вашего разрешения": ["New devices will wait for your approval", "Yeni cihazlar onayınızı bekleyecek"], "Новые устройства подключаются без разрешения": ["New devices connect without approval", "Yeni cihazlar onaysız bağlanır"], "Новое устройство ждёт разрешения: Сотрудники → Устройства": ["A new device is waiting for approval: Staff → Devices", "Yeni bir cihaz onay bekliyor: Personel → Cihazlar"], "Новое устройство ждёт разрешения администратора.": ["This new device is waiting for the administrator's approval.", "Bu yeni cihaz yöneticinin onayını bekliyor."], "Попросите администратора: на главном устройстве откройте «Сотрудники» → «Устройства» и нажмите «Разрешить» у этого устройства. Программа откроется сама.": ["Ask the administrator to open «Staff» → «Devices» on a main device and press «Allow» for this device. The app will open by itself.", "Yöneticiden ana cihazda «Personel» → «Cihazlar» bölümünü açıp bu cihaz için «İzin ver» düğmesine basmasını isteyin. Program kendiliğinden açılacak."], "Код устройства:": ["Device code:", "Cihaz kodu:"], "Это устройство отключено администратором.": ["This device was disconnected by the administrator.", "Bu cihazın bağlantısı yönetici tarafından kesildi."], "Подключить его снова можно только после того, как администратор нажмёт «Разрешить» на главном устройстве.": ["It can be connected again only after the administrator presses «Allow» on a main device.", "Yönetici ana cihazda «İzin ver» düğmesine bastıktan sonra tekrar bağlanabilir."], "Название устройства (например: Планшет кухня):": ["Device name (for example: Kitchen tablet):", "Cihaz adı (örneğin: Mutfak tableti):"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
@@ -3243,11 +3244,156 @@ function startSubs(){
   subscribe("shifts", list => { S.shifts = list; S.loaded.shifts = true; autoCloseShifts(); applyRole(); render(); });
   subscribe("staff", list => { S.staff = list; S.loaded.staff = true; restoreMe(); applyRole(); render(); });
 }
+/* ---------- devices: list, main devices, approval, disconnect ---------- */
+const DEV_ID = (()=>{ let id = lsGet("sushi.dev"); if (!/^d[a-z0-9]{8,}$/.test(id)){ id = uid("d"); lsSet("sushi.dev", id); } return id; })();
+const DEV = {me:undefined, cfg:undefined, meCache:true, cfgCache:true, started:false, going:false, seenPending:null};
+S.devices = [];
+const DEV_KINDS = {iphone:"iPhone", ipad:"iPad", aphone:"Телефон Android", atab:"Планшет Android", win:"Компьютер Windows", mac:"Mac", linux:"Компьютер Linux", other:"Устройство"};
+function devKind(){
+  const u = navigator.userAgent || "", touch = (navigator.maxTouchPoints||0) > 1;
+  const kind = /iPhone|iPod/.test(u) ? "iphone" : (/iPad/.test(u) || (/Macintosh/.test(u) && touch)) ? "ipad" : /Android/.test(u) ? (/Mobile/.test(u) ? "aphone" : "atab") : /Windows/.test(u) ? "win" : /Macintosh|Mac OS X/.test(u) ? "mac" : /Linux/.test(u) ? "linux" : "other";
+  const br = /SamsungBrowser/.test(u) ? "Samsung Internet" : /Edg\//.test(u) ? "Edge" : /OPR\//.test(u) ? "Opera" : /Firefox|FxiOS/.test(u) ? "Firefox" : /CriOS|Chrome/.test(u) ? "Chrome" : /Safari/.test(u) ? "Safari" : "";
+  let app = false; try { app = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch(e){}
+  return {kind, br, app};
+}
+const devCode = id => String(id||"").slice(-4).toUpperCase();
+const devName = d => d.name || DEV_KINDS[d.kind] || DEV_KINDS.other;
+const devIsMain = () => !!(DEV.me && DEV.me.main && DEV.me.status==="ok");
+const devRef = id => FS.doc("devices/" + id);
+function devSet(id, data){ return devRef(id).set(data, {merge:true}).catch(writeErr); }
+function devWhen(t){ return t ? new Date(t).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}) : "—"; }
+function devErr(e){ console.error(e); S.dbErr = (e && e.code) || "error"; applyRole(); }
+function startDevice(){
+  FS.doc("settings/devices").onSnapshot(s => { DEV.cfg = s.exists ? s.data() : {}; DEV.cfgCache = s.metadata.fromCache; devDecide(); }, devErr);
+  devRef(DEV_ID).onSnapshot(s => { DEV.me = s.exists ? s.data() : null; DEV.meCache = s.metadata.fromCache; devDecide(); }, devErr);
+}
+function devDecide(){
+  if (DEV.me===undefined || DEV.cfg===undefined || DEV.going) return;
+  const me = DEV.me;
+  if (!me){
+    if (DEV.meCache || DEV.cfgCache){ devStart(); return; }   // offline: work now, register when online
+    const k = devKind();
+    devSet(DEV_ID, {kind:k.kind, br:k.br, app:k.app, created:Date.now(), lastSeen:Date.now(), lastWho:S.me ? S.me.name : "", status: DEV.cfg.approve ? "pending" : "ok"});
+    return;
+  }
+  if (me.status==="off"){ devOff(); return; }
+  if (me.status==="pending"){ if (S.me) setMe(null); devGate(); return; }
+  devGate(); devStart();
+}
+function devStart(){
+  lsSet("sushi.devoff", "");
+  if (DEV.started){ applyRole(); if (S.view==="staff") render(true); return; }
+  DEV.started = true;
+  S.db = makeDb(FS); startSubs();
+  subscribe("devices", list => { S.devices = list; devPendingToast(); if (S.view==="staff") render(true); });
+  devTouch();
+}
+function devTouch(){
+  if (!FS || !DEV.me || DEV.me.status!=="ok") return;
+  const k = devKind(), d = {kind:k.kind, br:k.br, app:k.app, lastSeen:Date.now()};
+  if (S.me) d.lastWho = S.me.name;
+  devSet(DEV_ID, d);
+}
+setInterval(()=>{ if (!document.hidden) devTouch(); }, 20*60*1000);
+function devPendingToast(){
+  const p = S.devices.filter(d=>d.status==="pending").map(d=>d.id).sort().join(",");
+  if (DEV.seenPending!==null && p && p!==DEV.seenPending && devIsMain() && isAdmin()) toast("Новое устройство ждёт разрешения: Сотрудники → Устройства");
+  DEV.seenPending = p;
+}
+function devGate(){
+  const a = $("#acct");
+  if (!DEV.me || DEV.me.status!=="pending"){ if (a.dataset.mode==="pending"){ a.hidden = true; a.innerHTML = ""; a.dataset.mode = ""; } return; }
+  a.hidden = false; a.dataset.mode = "pending";
+  a.innerHTML = `<div class="gbox"><h2>SUSHI YM takip</h2>
+    <p><b>Новое устройство ждёт разрешения администратора.</b></p>
+    <p class="hint">Попросите администратора: на главном устройстве откройте «Сотрудники» → «Устройства» и нажмите «Разрешить» у этого устройства. Программа откроется сама.</p>
+    <p>Код устройства: <b translate="no">${esc(devCode(DEV_ID))}</b><br><span class="hint">${esc(DEV_KINDS[devKind().kind])}</span></p></div>`;
+  trTree(a);
+}
+async function devOff(){
+  if (DEV.going) return; DEV.going = true;
+  lsSet("sushi.devoff", "1");
+  try { setMe(null); } catch(e){}
+  try { await firebase.auth().signOut(); } catch(e){ console.warn(e); }
+  try { await FS.terminate(); await FS.clearPersistence(); } catch(e){ console.warn(e); }
+  location.reload();
+}
+function devListHtml(){
+  if (!S.devices.length) return "";
+  const main = devIsMain();
+  const rank = d => d.id===DEV_ID ? 0 : d.status==="pending" ? 1 : d.main ? 2 : d.status==="off" ? 4 : 3;
+  const list = [...S.devices].sort((a,b)=>rank(a)-rank(b) || (b.lastSeen||0)-(a.lastSeen||0));
+  const npend = list.filter(d=>d.status==="pending").length;
+  const rows = list.map(d=>{
+    const me = d.id===DEV_ID, tags = [];
+    if (d.main) tags.push(`<span class="tag out">главное</span>`);
+    if (me) tags.push(`<span class="tag inv">это устройство</span>`);
+    if (d.status==="pending") tags.push(`<span class="tag low">ждёт разрешения</span>`);
+    if (d.status==="off") tags.push(`<span class="tag off">отключено</span>`);
+    const btns = [];
+    if (main){
+      btns.push(`<button type="button" class="btn small" data-devname="${esc(d.id)}">Переименовать</button>`);
+      if (d.status!=="ok") btns.push(`<button type="button" class="btn small primary" data-devok="${esc(d.id)}">Разрешить</button>`);
+      if (!d.main && d.status==="ok") btns.push(`<button type="button" class="btn small" data-devmain="${esc(d.id)}">Сделать главным</button>`);
+      if (d.main && !me) btns.push(`<button type="button" class="btn small" data-devunmain="${esc(d.id)}">Снять «главное»</button>`);
+      if (!d.main && d.status!=="off") btns.push(`<button type="button" class="btn small danger" data-devoff="${esc(d.id)}">Отключить</button>`);
+      if (!d.main && d.status!=="ok") btns.push(`<button type="button" class="btn small" data-devdel="${esc(d.id)}">Убрать из списка</button>`);
+    } else if (me && d.status==="ok") btns.push(`<button type="button" class="btn small" data-devmain="${esc(d.id)}">Сделать это устройство главным</button>`);
+    return `<div class="box sbox"><div class="shead" ${d.status==="off"?'style="opacity:.6"':""}><span class="sname"><span translate="no">${esc(d.name||"")}</span>${d.name?"":esc(DEV_KINDS[d.kind]||DEV_KINDS.other)} ${tags.join(" ")}
+        <small>${d.name?`${esc(DEV_KINDS[d.kind]||DEV_KINDS.other)} · `:""}${d.br?`<span translate="no">${esc(d.br)}</span>${d.app?" (приложение)":""} · `:""}код <span translate="no">${esc(devCode(d.id))}</span></small>
+        <small>В сети: ${esc(devWhen(d.lastSeen))}${d.lastWho?` · вход: <span translate="no">${esc(d.lastWho)}</span>`:""}${d.status==="off"&&d.offAt?` · отключено ${esc(devWhen(d.offAt))}`:""}</small></span></div>
+      ${btns.length?`<div class="controls" style="margin:0">${btns.join("")}</div>`:""}</div>`;
+  }).join("");
+  const approve = !!(DEV.cfg && DEV.cfg.approve);
+  const head = main
+    ? `<label class="toggle"><input type="checkbox" id="devApprove" ${approve?"checked":""}> Новые устройства — только с разрешения</label>`
+    : `<p class="hint" style="margin:0 0 8px">Управлять устройствами можно только с главного устройства.${S.devices.some(d=>d.main)?"":" Главного устройства пока нет — откройте программу на своём устройстве и нажмите «Сделать это устройство главным»."}</p>`;
+  return `<h2 class="cat"><span>Устройства</span><span>${list.length}${npend?` · ждут: ${npend}`:""}</span></h2>${head}
+    <p class="hint" style="margin:0 0 8px">Главное устройство отключить нельзя. Отключённое устройство выходит из программы, как только появится интернет.</p>${rows}`;
+}
+function devPinAsk(){
+  return new Promise(res=>{
+    const d = document.createElement("dialog");
+    d.innerHTML = `<form method="dialog"><h3>Подтвердите PIN админа</h3><label class="f">PIN-код<input type="password" inputmode="numeric" maxlength="6" autocomplete="off" required></label>
+      <div class="dlg-actions"><span class="spacer"></span><button type="button" class="btn" data-x>Отмена</button><button type="submit" class="btn primary">Подтвердить</button></div></form>`;
+    document.body.append(d); trTree(d);
+    let val = null;
+    d.querySelector("[data-x]").onclick = () => d.close();
+    d.querySelector("form").onsubmit = () => { val = d.querySelector("input").value.trim(); };
+    d.onclose = () => { d.remove(); res(val); };
+    d.showModal(); d.querySelector("input").focus();
+  });
+}
+document.addEventListener("change", e=>{
+  if (e.target.id!=="devApprove" || !devIsMain() || !isAdmin()) return;
+  FS.doc("settings/devices").set({id:"devices", approve:e.target.checked, by:S.me.name, ts:Date.now()}, {merge:true}).catch(writeErr);
+  toast(e.target.checked ? "Новые устройства будут ждать вашего разрешения" : "Новые устройства подключаются без разрешения");
+});
+document.addEventListener("click", async e=>{
+  const b = e.target.closest("[data-devname],[data-devok],[data-devmain],[data-devunmain],[data-devoff],[data-devdel]");
+  if (!b || !isAdmin()) return;
+  const id = b.dataset.devname || b.dataset.devok || b.dataset.devmain || b.dataset.devunmain || b.dataset.devoff || b.dataset.devdel;
+  const d = S.devices.find(x=>x.id===id); if (!d) return;
+  if (b.dataset.devmain && !devIsMain()){
+    if (id!==DEV_ID) return;
+    const pin = await devPinAsk(); if (!pin) return;
+    const st = S.staff.find(x=>x.id===S.me.id);
+    if (!st || await pinHash(st.id, pin) !== st.pinHash){ toast("Неверный PIN"); return; }
+    devSet(id, {main:true, mainAt:Date.now(), mainBy:S.me.name}); toast("Это устройство теперь главное"); return;
+  }
+  if (!devIsMain()) return;
+  if (b.dataset.devname){ const n = tPrompt("Название устройства (например: Планшет кухня):", d.name || DEV_KINDS[d.kind] || ""); if (n===null) return; devSet(id, {name:n.trim().slice(0,40)}); return; }
+  if (b.dataset.devok){ devSet(id, {status:"ok", okAt:Date.now(), okBy:S.me.name}); toast("Устройство разрешено"); return; }
+  if (b.dataset.devmain){ if (!tConfirm(`Сделать «${devName(d)}» главным? Главное устройство нельзя отключить, и с него можно управлять всеми устройствами.`)) return; devSet(id, {main:true, mainAt:Date.now(), mainBy:S.me.name}); return; }
+  if (b.dataset.devunmain){ if (!tConfirm(`Снять отметку «главное» с «${devName(d)}»? Например, если это устройство потеряно. После этого его можно будет отключить.`)) return; devSet(id, {main:false}); return; }
+  if (b.dataset.devoff){ if (d.main || id===DEV_ID) return; if (!tConfirm(`Отключить «${devName(d)}»? Оно выйдет из программы и удалит у себя копию данных. Вернуть его можно кнопкой «Разрешить».`)) return; devSet(id, {status:"off", offAt:Date.now(), offBy:S.me.name}); toast("Устройство отключено"); return; }
+  if (b.dataset.devdel){ if (d.main) return; if (!tConfirm(`Убрать «${devName(d)}» из списка? Если оно снова откроет программу, то появится как новое.`)) return; devRef(id).delete().catch(writeErr); }
+});
 /* device account sign-in */
 function showAcct(msg){
   const a = $("#acct"); a.hidden = false;
   a.innerHTML = `<form class="gbox" id="acctForm" autocomplete="on"><h2>SUSHI YM takip</h2>
-    <p>Вход устройства в базу ресторана. Делается один раз на каждом устройстве.</p>
+    ${lsGet("sushi.devoff") ? `<p><b>Это устройство отключено администратором.</b></p><p class="hint">Подключить его снова можно только после того, как администратор нажмёт «Разрешить» на главном устройстве. Код устройства: <b translate="no">${esc(devCode(DEV_ID))}</b></p>` : `<p>Вход устройства в базу ресторана. Делается один раз на каждом устройстве.</p>`}
     <label class="f">Почта (логин)<input id="acEmail" type="email" autocomplete="username" required></label>
     <label class="f">Пароль<input id="acPass" type="password" autocomplete="current-password" required></label>
     <p class="hint" id="acErr" role="alert">${esc(msg||"")}</p>
@@ -3262,7 +3408,7 @@ document.addEventListener("submit", async e=>{
   catch(er){ console.error(er); err.textContent = ({"auth/invalid-credential":"Неверная почта или пароль","auth/wrong-password":"Неверная почта или пароль","auth/user-not-found":"Неверная почта или пароль","auth/network-request-failed":"Нет интернета. Первый вход возможен только онлайн.","auth/too-many-requests":"Слишком много попыток, подождите немного"})[er.code] || ("Ошибка входа: " + (er.code||er.message)); }
 });
 document.addEventListener("click", async e=>{
-  if (e.target.closest("#devSignOut") && isAdmin()){
+  if (e.target.closest("#devSignOut") && isAdmin() && !devIsMain()){
     if (!tConfirm("Отключить это устройство от базы ресторана? Для повторного подключения понадобятся почта и пароль.")) return;
     setMe(null); await firebase.auth().signOut(); location.reload();
   }
@@ -3305,8 +3451,8 @@ if ("serviceWorker" in navigator) window.addEventListener("load", ()=>navigator.
   firebase.auth().onAuthStateChanged(user => {
     if (!user){ showAcct(); return; }
     $("#acct").hidden = true; $("#acct").innerHTML = "";
-    if (S.db) return;
-    S.db = makeDb(FS); startSubs();
+    if (DEV.listening) return;
+    DEV.listening = true; startDevice();
   });
 })();
 </script>
