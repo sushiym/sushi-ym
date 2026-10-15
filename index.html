@@ -172,6 +172,8 @@ label.f input,label.f select,label.f textarea{padding:10px 12px;border:1px solid
 .seg{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:var(--radius-s);overflow:hidden}
 .seg label{text-align:center;padding:9px 4px;cursor:pointer;font-weight:500;border-right:1px solid var(--line)}
 .seg label:last-child{border-right:0}
+.seg .segbtn{text-align:center;padding:9px 4px;cursor:pointer;font:inherit;font-weight:500;background:none;border:0;color:inherit}
+.seg .segbtn:hover{background:var(--line)}
 .seg input{position:absolute;opacity:0;pointer-events:none}
 .seg label:has(input:checked){background:var(--accent);color:var(--on-accent)}
 .seg label:has(input:focus-visible){outline:3px solid var(--accent);outline-offset:-3px}
@@ -251,6 +253,7 @@ s.oldp{color:var(--muted)}
 .ototal{font-size:1.05rem;text-align:right}
 .ototal b{font-family:var(--display);font-weight:500}
 .seg.seg4{grid-template-columns:repeat(4,1fr)}
+.seg.seg4>*{display:flex;align-items:center;justify-content:center}
 @media (max-width:480px){.seg.seg4{grid-template-columns:1fr 1fr}.seg.seg4 label:nth-child(2){border-right:0}.seg.seg4 label:nth-child(-n+2){border-bottom:1px solid var(--line)}}
 #gate,#acct{position:fixed;inset:0;z-index:40;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
 .gbox{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);padding:22px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
@@ -391,10 +394,11 @@ details.finun{margin-top:10px}
 
 <dialog id="moveDlg"><form method="dialog" id="moveForm">
   <h3 id="moveTitle">Движение запасов</h3>
-  <div class="seg" role="radiogroup" aria-label="Тип операции">
+  <div class="seg seg4" role="radiogroup" aria-label="Тип операции">
     <label><input type="radio" name="mtype" value="in" checked>Приход</label>
     <label><input type="radio" name="mtype" value="out">Расход</label>
     <label><input type="radio" name="mtype" value="off">Списание</label>
+    <button type="button" class="segbtn" id="openBulk">Приход списком</button>
   </div>
   <p class="hint" id="typeHint"></p>
   <label class="f">Продукт<select id="mProd" required></select></label>
@@ -828,7 +832,6 @@ function renderControls(){
   if (S.view==="stock"){
     c.innerHTML = (can("move") ? "" : "<!--") + `<div class="actions">
         <button class="btn act-in" data-new="in">Движение запасов</button>
-        <button class="btn act-in" id="openBulk">Приход списком</button>
         <button class="btn act-cook" data-cook="">Приготовить</button>
         <button class="btn act-cut" id="openCut">Разделка лосося</button></div>` + (can("move") ? "" : "-->") + `
       ${isAdmin() ? `<div class="controls"><button class="btn primary" id="addProd">Добавить продукт</button></div>` : ""}
@@ -1057,6 +1060,7 @@ function bulkRender(){
 }
 document.addEventListener("click", e=>{
   if (!e.target.closest("#openBulk") || !can("move")) return;
+  if ($("#moveDlg").open) $("#moveDlg").close();
   bulkRows = []; $("#bulkText").value = ""; $("#bulkNote").value = ""; $("#bulkPreview").innerHTML = ""; $("#bulkSave").disabled = true;
   $("#bulkDlg").showModal(); $("#bulkText").focus();
 });
