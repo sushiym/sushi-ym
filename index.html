@@ -776,6 +776,15 @@ function need(el, msg, quiet){
   else { const m = document.createElement("small"); m.className = "req-msg"; m.textContent = msg; el.insertAdjacentElement("afterend", m); }
   if (!quiet){ try { el.scrollIntoView({block:"center", behavior:"smooth"}); } catch(e){ el.scrollIntoView(); } try { el.focus({preventScroll:true}); } catch(e){ el.focus(); } }
 }
+// required fields that are empty: [[el, msg], …]; returns true when saving must stop. Only the admin may save without them (after a confirm)
+function needAll(list){
+  list = list.filter(Boolean); if (!list.length) return false;
+  list.forEach(([el, msg], i) => need(el, msg, !isAdmin() ? i>0 : true));
+  if (!isAdmin()) return true;
+  if (tConfirm("Не заполнено: " + list.map(x=>x[1]).join("; ") + ".\n\nВы админ — сохранить без этого?")){ list.forEach(([el])=>el && needClear(el)); return false; }
+  const el = list[0][0]; if (el){ try { el.scrollIntoView({block:"center"}); } catch(e){} el.focus(); }
+  return true;
+}
 function needClear(el){
   el.classList.remove("req-bad"); el.removeAttribute("aria-invalid");
   const nx = el.nextElementSibling; if (nx && nx.classList.contains("req-msg")) nx.remove();
@@ -2314,7 +2323,7 @@ $("#cashForm").addEventListener("submit", async e=>{
   e.preventDefault(); if (!S.me) return;
   const kind = (document.querySelector('input[name="ckind"]:checked')||{}).value || "Другое";
   const note = $("#cNote").value.trim(), amt = num($("#cAmt").value);
-  if (!note && kind!=="Обед" && kind!=="Курьер"){ need($("#cNote"), "Напишите, на что потрачено"); return; }
+  if (!note && kind!=="Обед" && kind!=="Курьер" && needAll([[$("#cNote"), "Напишите, на что потрачено"]])) return;
   if (!(amt>0)){ need($("#cAmt"), "Введите сумму больше нуля"); return; }
   const old = cashEdit ? S.expenses.find(y=>y.id===cashEdit) : null;
   if (cashEdit && (!old || !canEditCash(old))){ $("#cashDlg").close(); return; }
@@ -2473,8 +2482,8 @@ async function nextOrderNum(){
 }
 $("#orderForm").addEventListener("submit", async e=>{
   e.preventDefault(); readODFields();
-  if (OD.type==="hall" && !OD.table){ need($("#o_table"), "Укажите номер стола"); return; }
-  if (OD.type!=="hall"){ const miss = (OD.type==="delivery" ? ["phone","name"] : ["name","phone"]).filter(k=>!OD[k]); miss.forEach((k,i)=>need($("#o_"+k), k==="name" ? "Укажите имя клиента" : "Укажите телефон клиента", i>0)); if (miss.length) return; }
+  if (OD.type==="hall" && !OD.table && needAll([[$("#o_table"), "Укажите номер стола"]])) return;
+  if (OD.type!=="hall" && needAll((OD.type==="delivery" ? ["phone","name"] : ["name","phone"]).filter(k=>!OD[k]).map(k=>[$("#o_"+k), k==="name" ? "Укажите имя клиента" : "Укажите телефон клиента"]))) return;
   if (!OD.lines.length){ toast("Добавьте в заказ хотя бы одно блюдо"); return; }
   const badPromo = OD.lines.findIndex(l=>l.promo && !(Number(l.price)>=0 && l.price!==null && l.price!==""));
   if (badPromo>=0){ need(document.querySelector(`[data-oprice="${badPromo}"]`), "Укажите цену по акции (0 — подарок)"); return; }
@@ -2544,7 +2553,7 @@ $("#payForm").addEventListener("submit", async e=>{
 async function cancelOrder(id){
   const o = orderById(id); if (!o) return;
   const reason = (tPrompt(`Отмена заказа №${o.num}. Укажите причину (обязательно):`, "") || "").trim();
-  if (!reason){ toast("Заказ не отменён: нужно указать причину"); return; }
+  if (!reason && !(isAdmin() && tConfirm("Причина не указана. Вы админ — отменить заказ без причины?"))){ toast("Заказ не отменён: нужно указать причину"); return; }
   try { await commit(`Отменён заказ №${o.num}`, [...courOps(null, o.id), {col:"orders", id, after:Object.assign({}, o, {status:"cancelled", cancelReason:reason, cancelledBy:S.me?S.me.name:"", cancelledAt:Date.now(), updatedAt:Date.now()})}]); render(); toast(`Заказ №${o.num} отменён`); }
   catch(err){ console.error(err); toast("Не удалось отменить заказ."); }
 }
@@ -2596,7 +2605,7 @@ $("#voidForm").addEventListener("submit", async e=>{
   const o = orderById(voidId); if (!o || o.status!=="closed") return;
   const kind = (document.querySelector('input[name="vkind"]:checked')||{}).value || "cancel";
   const reason = $("#voidReason").value.trim();
-  if (!reason){ need($("#voidReason"), "Напишите комментарий: причину отмены или списания"); return; }
+  if (!reason && needAll([[$("#voidReason"), "Напишите комментарий: причину отмены или списания"]])) return;
   await guarded(async ()=>{
     try {
       if (isAdmin()) await applyVoid(o, kind, reason, null);
@@ -3287,7 +3296,7 @@ Object.assign(I18N, {"Способ приготовления": ["Cooking method
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Курьер по заказу с доставкой записывается сам. Здесь — курьер вручную, например за покупками.": ["The courier for a delivery order is recorded automatically. Here you add a courier by hand, e.g. sent for purchases.", "Teslimat siparişinin kuryesi otomatik yazılır. Burada kurye elle eklenir, örneğin alışverişe gönderildiğinde."], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"]});
-Object.assign(I18N, {"Укажите имя клиента": ["Enter the customer's name", "Müşterinin adını girin"], "Укажите телефон клиента": ["Enter the customer's phone", "Müşterinin telefonunu girin"], "Обязательно": ["Required", "Zorunlu"]});
+Object.assign(I18N, {"Укажите имя клиента": ["Enter the customer's name", "Müşterinin adını girin"], "Укажите телефон клиента": ["Enter the customer's phone", "Müşterinin telefonunu girin"], "Обязательно": ["Required", "Zorunlu"], "Не заполнено:": ["Not filled in:", "Doldurulmadı:"], "Вы админ — сохранить без этого?": ["You are the admin — save without it?", "Yöneticisiniz — bunsuz kaydedilsin mi?"], "Причина не указана. Вы админ — отменить заказ без причины?": ["No reason given. You are the admin — cancel the order without a reason?", "Sebep yazılmadı. Yöneticisiniz — sipariş sebepsiz iptal edilsin mi?"]});
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
