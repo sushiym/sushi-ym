@@ -337,6 +337,9 @@ label:has(> #mWho),label:has(> #cWho),label:has(> #sWho),label:has(> #cutWho),la
 .cb-head b{font-family:var(--display);font-weight:500;font-size:1.2rem}
 .cb-sub{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 10px;color:var(--muted);font-size:.86rem}
 .cb-miss{color:var(--empty);font-size:.86rem}
+.req-bad,label.f .req-bad,.oline .opromo .req-bad{border-color:var(--empty)!important;box-shadow:0 0 0 2px var(--empty-bg);background:var(--empty-bg)!important}
+.req-msg{display:block;color:var(--empty);font-size:.8rem;font-weight:600;margin-top:2px}
+.req-star{color:var(--empty);font-weight:700}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--nori);color:var(--on-nori);padding:10px 16px;border-radius:var(--radius-s);font-size:.95rem;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;max-width:90%}
 #toast.show{opacity:1}
 @media (prefers-reduced-motion: reduce){#toast {transition:none}}
@@ -763,6 +766,23 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const num = v => { if (v == null) return NaN; v = String(v).trim().replace(/\s/g,"").replace(",","."); return v === "" ? NaN : Number(v); };
 const fmt = n => (Math.round((n||0)*1000)/1000).toLocaleString(LOC(),{maximumFractionDigits:3});
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+// required field left empty: red outline + short note next to it, scroll to it and put the cursor there; cleared as soon as it is filled
+function need(el, msg, quiet){
+  if (!quiet) toast(msg);
+  if (!el) return;
+  el.classList.add("req-bad"); el.setAttribute("aria-invalid", "true");
+  const nx = el.nextElementSibling;
+  if (nx && nx.classList.contains("req-msg")) nx.textContent = msg;
+  else { const m = document.createElement("small"); m.className = "req-msg"; m.textContent = msg; el.insertAdjacentElement("afterend", m); }
+  if (!quiet){ try { el.scrollIntoView({block:"center", behavior:"smooth"}); } catch(e){ el.scrollIntoView(); } try { el.focus({preventScroll:true}); } catch(e){ el.focus(); } }
+}
+function needClear(el){
+  el.classList.remove("req-bad"); el.removeAttribute("aria-invalid");
+  const nx = el.nextElementSibling; if (nx && nx.classList.contains("req-msg")) nx.remove();
+}
+const needFix = e => { const el = e.target; if (el && el.classList && el.classList.contains("req-bad") && String(el.value||"").trim()!=="") needClear(el); };
+document.addEventListener("input", needFix); document.addEventListener("change", needFix);
+document.addEventListener("close", e => { if (e.target.querySelectorAll) e.target.querySelectorAll(".req-bad").forEach(needClear); }, true);
 function toast(t){ const el=$("#toast"); el.textContent=t; el.classList.add("show"); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove("show"),2600); }
 function lsGet(k){ try{ return localStorage.getItem(k) || ""; }catch(e){ return ""; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -1046,15 +1066,15 @@ $("#moveForm").addEventListener("submit", async e => {
   e.preventDefault();
   const type = document.querySelector('input[name="mtype"]:checked').value;
   const pid = $("#mProd").value, q0 = num($("#mQty").value);
-  if (!pid){ toast("Выберите продукт"); return; }
-  if (!(q0>0)){ toast("Введите количество больше нуля"); $("#mQty").focus(); return; }
+  if (!pid){ need($("#mProd"), "Выберите продукт"); return; }
+  if (!(q0>0)){ need($("#mQty"), "Введите количество больше нуля"); return; }
   const pu = byId(pid).unit, sub = SUBUNIT[pu] && $("#mUnit").value===SUBUNIT[pu][0];
   const q = sub ? Math.round(q0/SUBUNIT[pu][1]*100000)/100000 : q0;
   const who = $("#mWho").value.trim(); lsSet("sklad.who", who);
   const mv = {id:uid("m"), productId:pid, unit:byId(pid).unit, type, delta: TYPES[type].sign*q, note:[sub?`${fmt(q0)} ${SUBUNIT[pu][0]}`:"", $("#mNote").value.trim()].filter(Boolean).join(", "), who, ts:Date.now()};
   const label = `${TYPES[type].label}: ${byId(pid).name}, ${fmt(q)} ${byId(pid).unit}`;
   const mc = num($("#mCost").value);
-  if (type==="in" && !isAdmin() && !(mc>0)){ toast("Укажите цену закупки за единицу"); $("#mCost").focus(); return; }
+  if (type==="in" && !isAdmin() && !(mc>0)){ need($("#mCost"), "Укажите цену закупки за единицу"); return; }
   const mops = [{col:"moves", id:mv.id, after:mv}];
   if (type==="in" && mc>0){ mv.price = mc; mops.push({col:"products", id:pid, after:Object.assign({}, byId(pid), {cost:mc})}); }
   try { await commit(label, mops); $("#moveDlg").close(); render(); toast(label); }
@@ -1205,11 +1225,11 @@ $("#pCat").addEventListener("change", e => {
 });
 $("#prodForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const name = $("#pName").value.trim(); if (!name){ toast("Введите название"); return; }
+  const name = $("#pName").value.trim(); if (!name){ need($("#pName"), "Введите название"); return; }
   const old = editingId ? byId(editingId) : null;
   const min = num($("#pMin").value);
   const yv = num($("#pYield").value);
-  if (!isNaN(yv) && (yv<=0 || yv>100)){ toast("Выход после чистки должен быть от 1 до 100 %"); $("#pYield").focus(); return; }
+  if (!isNaN(yv) && (yv<=0 || yv>100)){ need($("#pYield"), "Выход после чистки должен быть от 1 до 100 %"); return; }
   const p = {id: old ? old.id : uid("p"), name, name_en:$("#pNameEn").value.trim(), name_tr:$("#pNameTr").value.trim(), desc:$("#pDesc").value.trim(), category:$("#pCat").value, unit:$("#pUnit").value, min: isNaN(min)?0:min, active:$("#pActive").checked, track: !$("#pNoTrack").checked, yieldPct: isNaN(yv) ? 100 : yv, cost: (()=>{ const c = num($("#pCost").value); return isNaN(c)||c<0 ? (old && old.cost) || 0 : c; })(),
     order: old ? (old.order ?? 9999) : Math.max(0, ...S.products.map(x=>x.order||0)) + 1};
   // unit change
@@ -1218,7 +1238,7 @@ $("#prodForm").addEventListener("submit", async e => {
     const st = stockMap()[old.id]||0;
     if (st!==0){
       const nv = num($("#ucNew").value);
-      if (isNaN(nv) || nv<0){ toast(`Укажите, сколько сейчас на складе в «${p.unit}»`); $("#ucNew").focus(); return; }
+      if (isNaN(nv) || nv<0){ need($("#ucNew"), `Укажите, сколько сейчас на складе в «${p.unit}»`); return; }
       conv = {id:uid("m"), productId:p.id, unit:p.unit, type:"inv", delta: Math.round((nv-st)*1000)/1000, note:`Смена единицы: ${fmt(st)} ${old.unit} → ${fmt(nv)} ${p.unit}`, who:lsGet("sklad.who"), ts:Date.now()};
     }
   }
@@ -1226,12 +1246,12 @@ $("#prodForm").addEventListener("submit", async e => {
   let recipe = null;
   if ($("#pHasRecipe").checked){
     const y = num($("#rYield").value);
-    if (!(y>0)){ toast("Укажите выход рецепта больше нуля"); $("#rYield").focus(); return; }
+    if (!(y>0)){ need($("#rYield"), "Укажите выход рецепта больше нуля"); return; }
     const items = [];
     for (const row of $("#rItems").querySelectorAll(".ritem")){
       const pid = row.querySelector(".rProd").value, q = num(row.querySelector(".rQty").value);
       if (!pid && isNaN(q)) continue;
-      if (!pid || !(q>0)){ toast("В рецепте у каждого продукта должно быть количество больше нуля"); row.querySelector(pid?".rQty":".rProd").focus(); return; }
+      if (!pid || !(q>0)){ need(row.querySelector(pid?".rQty":".rProd"), "В рецепте у каждого продукта должно быть количество больше нуля"); return; }
       items.push({productId:pid, qty:q});
     }
     if (!items.length){ toast("Добавьте в рецепт хотя бы один продукт"); return; }
@@ -1314,7 +1334,7 @@ $("#cookForm").addEventListener("submit", async e => {
   e.preventDefault();
   const p = byId($("#cProd").value), q = num($("#cQty").value);
   if (!p){ toast("Выберите заготовку"); return; }
-  if (!(q>0)){ toast("Введите количество больше нуля"); $("#cQty").focus(); return; }
+  if (!(q>0)){ need($("#cQty"), "Введите количество больше нуля"); return; }
   const who = $("#cWho").value.trim(); lsSet("sklad.who", who);
   const batchId = uid("b"), ts = Date.now(), plan = cookPlan(p.id, q);
   const moves = [{id:uid("m"), productId:p.id, unit:p.unit, type:"prod", delta:q, note: plan.length?"По рецепту":"Без рецепта", who, ts, batchId}]
@@ -1600,12 +1620,12 @@ $("#dCat").addEventListener("change", e=>{
 });
 $("#dishForm").addEventListener("submit", async e=>{
   e.preventDefault();
-  const name = $("#dName").value.trim(); if (!name){ toast("Введите название"); return; }
+  const name = $("#dName").value.trim(); if (!name){ need($("#dName"), "Введите название"); return; }
   const items = [];
   for (const row of $("#dItems").querySelectorAll(".ritem")){
     const pid = row.querySelector(".dProd").value, v = num(row.querySelector(".dQty").value);
     if (!pid && isNaN(v)) continue;
-    if (!pid || !(v>0)){ toast("У каждого продукта в техкарте должно быть количество больше нуля"); row.querySelector(pid?".dQty":".dProd").focus(); return; }
+    if (!pid || !(v>0)){ need(row.querySelector(pid?".dQty":".dProd"), "У каждого продукта в техкарте должно быть количество больше нуля"); return; }
     const p = byId(pid), q = Math.round(v/dispK(p.unit)*100000)/100000, ex = items.find(i=>i.productId===pid);
     if (ex) ex.qty = Math.round((ex.qty+q)*100000)/100000; else items.push({productId:pid, qty:q});
   }
@@ -1766,12 +1786,12 @@ $("#stAdd").addEventListener("click", ()=>{ $("#stItems").insertAdjacentHTML("be
 $("#stItems").addEventListener("click", e=>{ if (e.target.classList.contains("sDel")){ e.target.closest(".ritem").remove(); if (!$("#stItems").children.length) $("#stItems").innerHTML = sitemHtml(null); } });
 $("#setForm").addEventListener("submit", async e=>{
   e.preventDefault();
-  const name = $("#stName").value.trim(); if (!name){ toast("Введите название сета"); return; }
+  const name = $("#stName").value.trim(); if (!name){ need($("#stName"), "Введите название сета"); return; }
   const items = [];
   for (const row of $("#stItems").querySelectorAll(".ritem")){
     const did = row.querySelector(".sDish").value, q = num(row.querySelector(".sQty").value);
     if (!did) continue;
-    if (!(q>0)){ toast("Количество в сете должно быть больше нуля"); row.querySelector(".sQty").focus(); return; }
+    if (!(q>0)){ need(row.querySelector(".sQty"), "Количество в сете должно быть больше нуля"); return; }
     const ex = items.find(i=>i.dishId===did); if (ex) ex.qty += q; else items.push({dishId:did, qty:q});
   }
   if (!items.length){ toast("Добавьте в сет хотя бы один ролл"); return; }
@@ -1821,9 +1841,9 @@ $("#cutForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const sp = byId(SALMON_ID), fp = byId(FISHSET_ID); if (!sp || !fp) return;
   const w = num($("#cW").value), n = num($("#cN").value), f = num($("#cF").value);
-  if (!(w>0)){ toast("Введите общий вес рыбы"); $("#cW").focus(); return; }
-  if (!(n>0) || Math.round(n)!==n){ toast("Введите количество рыб целым числом"); $("#cN").focus(); return; }
-  if (f>w){ toast("Вес филе не может быть больше веса рыбы"); $("#cF").focus(); return; }
+  if (!(w>0)){ need($("#cW"), "Введите общий вес рыбы"); return; }
+  if (!(n>0) || Math.round(n)!==n){ need($("#cN"), "Введите количество рыб целым числом"); return; }
+  if (f>w){ need($("#cF"), "Вес филе не может быть больше веса рыбы"); return; }
   const who = $("#cutWho").value.trim(); lsSet("sklad.who", who);
   const y = Number(sp.yieldPct)>0 ? Number(sp.yieldPct) : 100;
   const useY = $("#cUpd").checked && f>0 ? Math.round(f/w*1000)/10 : y;
@@ -2209,10 +2229,10 @@ $("#promoForm").addEventListener("submit", async e=>{
   for (const [k, name] of [["Item","Цена по акции на блюдо"],["Ord","Скидка на весь заказ"]]){
     for (const f of ["From","To","TFrom","TTo"]) x[k.toLowerCase()+f] = $("#pr"+k+f).value;
     const p = k.toLowerCase();
-    if (x[p+"From"] && x[p+"To"] && x[p+"From"] > x[p+"To"]){ toast(name + ": дата «с» позже даты «по»"); $("#pr"+k+"From").focus(); return; }
-    if (!!x[p+"TFrom"] !== !!x[p+"TTo"]){ toast(name + ": укажите оба времени или ни одного"); $("#pr"+k+"TFrom").focus(); return; } }
-  if (x.itemMin<0 || x.itemMin>100){ toast("Цена не ниже: от 0 до 100%"); $("#prItemMin").focus(); return; }
-  if (x.ordMin<1 || x.ordMax>100 || x.ordMin>x.ordMax){ toast("Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»"); $("#prOrdMin").focus(); return; }
+    if (x[p+"From"] && x[p+"To"] && x[p+"From"] > x[p+"To"]){ need($("#pr"+k+"From"), name + ": дата «с» позже даты «по»"); return; }
+    if (!!x[p+"TFrom"] !== !!x[p+"TTo"]){ need($("#pr"+k+"TFrom"), name + ": укажите оба времени или ни одного"); return; } }
+  if (x.itemMin<0 || x.itemMin>100){ need($("#prItemMin"), "Цена не ниже: от 0 до 100%"); return; }
+  if (x.ordMin<1 || x.ordMax>100 || x.ordMin>x.ordMax){ need($("#prOrdMin"), "Скидка на заказ: от 1 до 100%, «не меньше» не больше «не больше»"); return; }
   try { await commit("Правила акций и скидок", [{col:"settings", id:"promo", after:x}]); $("#promoDlg").close(); render(true); toast("Правила акций сохранены"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
@@ -2224,7 +2244,7 @@ function openExp(){
 $("#expForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const amt = num($("#eAmt").value);
-  if (!(amt>0)){ toast("Введите сумму больше нуля"); $("#eAmt").focus(); return; }
+  if (!(amt>0)){ need($("#eAmt"), "Введите сумму больше нуля"); return; }
   const who = $("#eWho").value.trim(); lsSet("sklad.who", who);
   const d = $("#eDate").value, now = new Date();
   const ts = d ? new Date(d+"T"+String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0")).getTime() : Date.now();
@@ -2294,8 +2314,8 @@ $("#cashForm").addEventListener("submit", async e=>{
   e.preventDefault(); if (!S.me) return;
   const kind = (document.querySelector('input[name="ckind"]:checked')||{}).value || "Другое";
   const note = $("#cNote").value.trim(), amt = num($("#cAmt").value);
-  if (!note && kind!=="Обед" && kind!=="Курьер"){ toast("Напишите, на что потрачено"); $("#cNote").focus(); return; }
-  if (!(amt>0)){ toast("Введите сумму больше нуля"); $("#cAmt").focus(); return; }
+  if (!note && kind!=="Обед" && kind!=="Курьер"){ need($("#cNote"), "Напишите, на что потрачено"); return; }
+  if (!(amt>0)){ need($("#cAmt"), "Введите сумму больше нуля"); return; }
   const old = cashEdit ? S.expenses.find(y=>y.id===cashEdit) : null;
   if (cashEdit && (!old || !canEditCash(old))){ $("#cashDlg").close(); return; }
   let ts = old ? old.ts : Date.now();
@@ -2342,7 +2362,7 @@ function readODFields(){
   const c = $("#oComment"); if (c) OD.comment = c.value.trim();
 }
 function renderODFields(){
-  const f = (k, label, extra="") => `<label class="f">${label}<input id="o_${k}" value="${esc(OD[k])}" autocomplete="off" ${extra}></label>`;
+  const f = (k, label, extra="") => `<label class="f"><span>${label}${k==="name"||k==="phone"?' <span class="req-star" title="Обязательно">*</span>':""}</span><input id="o_${k}" value="${esc(OD[k])}" autocomplete="off" ${extra}></label>`;
   const src = `<label class="f">Источник<select id="o_source">${SOURCES.map(s=>`<option value="${esc(s)}" ${OD.source===s?"selected":""}>${esc(s)}</option>`).join("")}</select></label>`;
   let html = "";
   if (OD.type==="hall") html = `<div class="two">${f("table","Стол №",'inputmode="numeric"')}</div>`;
@@ -2453,12 +2473,12 @@ async function nextOrderNum(){
 }
 $("#orderForm").addEventListener("submit", async e=>{
   e.preventDefault(); readODFields();
+  if (OD.type==="hall" && !OD.table){ need($("#o_table"), "Укажите номер стола"); return; }
+  if (OD.type!=="hall"){ const miss = (OD.type==="delivery" ? ["phone","name"] : ["name","phone"]).filter(k=>!OD[k]); miss.forEach((k,i)=>need($("#o_"+k), k==="name" ? "Укажите имя клиента" : "Укажите телефон клиента", i>0)); if (miss.length) return; }
   if (!OD.lines.length){ toast("Добавьте в заказ хотя бы одно блюдо"); return; }
-  if (OD.type==="hall" && !OD.table){ toast("Укажите номер стола"); $("#o_table").focus(); return; }
-  if (OD.type==="delivery" && !OD.address && !OD.phone){ toast("Для доставки укажите адрес или телефон"); return; }
   const badPromo = OD.lines.findIndex(l=>l.promo && !(Number(l.price)>=0 && l.price!==null && l.price!==""));
-  if (badPromo>=0){ toast("Укажите цену по акции (0 — подарок)"); const inp = document.querySelector(`[data-oprice="${badPromo}"]`); if (inp) inp.focus(); return; }
-  if ($("#oDiscOn").checked && OD.discPct==null){ toast("Укажите процент скидки: от 1 до 100"); $("#oDiscPct").focus(); return; }
+  if (badPromo>=0){ need(document.querySelector(`[data-oprice="${badPromo}"]`), "Укажите цену по акции (0 — подарок)"); return; }
+  if ($("#oDiscOn").checked && OD.discPct==null){ need($("#oDiscPct"), "Укажите процент скидки: от 1 до 100"); return; }
   const old = OD.id ? orderById(OD.id) : null;
   if (!isAdmin()){
     const R = promoRules(), was = l => old && (old.lines||[]).some(x=>x.promo && x.kind===l.kind && x.id===l.id && Number(x.price)===Number(l.price));
@@ -2468,7 +2488,7 @@ $("#orderForm").addEventListener("submit", async e=>{
       if (Number(l.price) < minP){ toast(`Цена по акции для «${l.name}» не ниже ${money(minP)} (${fmt(R.itemMin)}% от цены меню)`); return; } }
     if ($("#oDiscOn").checked && !(old && Number(old.discPct)===OD.discPct)){
       if (!R.ord){ toast(R.ordWhy && !R.off ? "Скидка на заказ сейчас недоступна: " + R.ordWhy : "Скидка на заказ сейчас запрещена администратором"); return; }
-      if (OD.discPct < R.ordMin || OD.discPct > R.ordMax){ toast(`Скидка на заказ: ${fmt(R.ordMin)}–${fmt(R.ordMax)}%`); $("#oDiscPct").focus(); return; } }
+      if (OD.discPct < R.ordMin || OD.discPct > R.ordMax){ need($("#oDiscPct"), `Скидка на заказ: ${fmt(R.ordMin)}–${fmt(R.ordMax)}%`); return; } }
   }
   const o = Object.assign({}, old||{}, {type:OD.type, table:OD.type==="hall"?OD.table:"", name:OD.type!=="hall"?OD.name:"", phone:OD.type!=="hall"?OD.phone:"",
     address:OD.type==="delivery"?OD.address:"", courier:OD.type==="delivery"?OD.courier:"", due:OD.type==="delivery"?OD.due:"",
@@ -2576,7 +2596,7 @@ $("#voidForm").addEventListener("submit", async e=>{
   const o = orderById(voidId); if (!o || o.status!=="closed") return;
   const kind = (document.querySelector('input[name="vkind"]:checked')||{}).value || "cancel";
   const reason = $("#voidReason").value.trim();
-  if (!reason){ toast("Напишите комментарий: причину отмены или списания"); $("#voidReason").focus(); return; }
+  if (!reason){ need($("#voidReason"), "Напишите комментарий: причину отмены или списания"); return; }
   await guarded(async ()=>{
     try {
       if (isAdmin()) await applyVoid(o, kind, reason, null);
@@ -2602,7 +2622,7 @@ function readPList(el){
   for (const row of el.querySelectorAll(".ritem")){
     const pid = row.querySelector(".dProd").value, v = num(row.querySelector(".dQty").value);
     if (!pid && isNaN(v)) continue;
-    if (!pid || !(v>0)){ toast("У каждой позиции упаковки должно быть количество больше нуля"); row.querySelector(pid?".dQty":".dProd").focus(); return null; }
+    if (!pid || !(v>0)){ need(row.querySelector(pid?".dQty":".dProd"), "У каждой позиции упаковки должно быть количество больше нуля"); return null; }
     const p = byId(pid); items.push({productId:pid, qty: Math.round(v/dispK(p.unit)*100000)/100000});
   }
   return items;
@@ -2752,7 +2772,7 @@ document.addEventListener("submit", async e=>{
   if (e.target.id==="setupForm"){
     e.preventDefault();
     const name = $("#gsName").value.trim(), p1 = $("#gsPin").value.trim(), p2 = $("#gsPin2").value.trim();
-    if (!name){ toast("Введите имя"); return; }
+    if (!name){ need($("#gsName"), "Введите имя"); return; }
     if (!/^\d{4,6}$/.test(p1)){ toast("PIN — от 4 до 6 цифр"); return; }
     if (p1!==p2){ toast("PIN-коды не совпадают"); return; }
     const st = {id:uid("u"), name, role:"admin", active:true, createdAt:Date.now()}; st.pinHash = await pinHash(st.id, p1);
@@ -2785,8 +2805,8 @@ $("#staffForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const old = editingStaff ? S.staff.find(x=>x.id===editingStaff) : null;
   const name = $("#sfName").value.trim(), role = $("#sfRole").value, pin = $("#sfPin").value.trim(), active = $("#sfActive").checked;
-  if (!name){ toast("Введите имя"); return; }
-  if ((!old || pin) && !/^\d{4,6}$/.test(pin)){ toast("PIN — от 4 до 6 цифр"); $("#sfPin").focus(); return; }
+  if (!name){ need($("#sfName"), "Введите имя"); return; }
+  if ((!old || pin) && !/^\d{4,6}$/.test(pin)){ need($("#sfPin"), "PIN — от 4 до 6 цифр"); return; }
   if (old && roleOf(old)==="admin" && (role!=="admin" || !active) && !otherAdmins(old.id)){ toast("Должен остаться хотя бы один активный админ"); return; }
   const rate = num($("#sfRate").value);
   const st = Object.assign({}, old || {id:uid("u"), createdAt:Date.now()}, {name, role, active, rate: isNaN(rate)||rate<0 ? 0 : rate});
@@ -2996,7 +3016,7 @@ function openShiftDlg(id){
 $("#shiftForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const sid = $("#shStaff").value, st = S.staff.find(x=>x.id===sid), start = fromLocalInput($("#shStart").value), end = fromLocalInput($("#shEnd").value);
-  if (!st || !start){ toast("Укажите сотрудника и начало смены"); return; }
+  if (!st || !start){ need(st ? $("#shStart") : $("#shStaff"), "Укажите сотрудника и начало смены"); return; }
   if (end && end <= start){ toast("Конец смены должен быть позже начала"); return; }
   const old = editingShift ? S.shifts.find(x=>x.id===editingShift) : null;
   if (!end && S.shifts.some(x=>x.staffId===sid && !x.end && x.id!==old?.id)){ toast("У сотрудника уже есть открытая смена"); return; }
@@ -3078,7 +3098,7 @@ function openMonthly(cat){
 }
 $("#monthForm").addEventListener("submit", async e=>{
   e.preventDefault();
-  const amt = num($("#mAmt").value); if (!(amt>=0) || isNaN(amt)){ toast("Введите сумму"); $("#mAmt").focus(); return; }
+  const amt = num($("#mAmt").value); if (!(amt>=0) || isNaN(amt)){ need($("#mAmt"), "Введите сумму"); return; }
   const ym = S.finMonth, id = "mon_"+ym+"_"+MONTHLY.findIndex(x=>x[0]===mEdit);
   const doc = {id, monthly:true, month:ym, category:mEdit, amount:amt, note:$("#mNote").value.trim(), ts:ymStart(ym), who:S.me?S.me.name:""};
   try { await commit(`${mEdit} за ${ymName(ym)}`, [{col:"expenses", id, after:doc}]); $("#monthDlg").close(); render(); toast("Сохранено"); }
@@ -3267,6 +3287,7 @@ Object.assign(I18N, {"Способ приготовления": ["Cooking method
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Курьер по заказу с доставкой записывается сам. Здесь — курьер вручную, например за покупками.": ["The courier for a delivery order is recorded automatically. Here you add a courier by hand, e.g. sent for purchases.", "Teslimat siparişinin kuryesi otomatik yazılır. Burada kurye elle eklenir, örneğin alışverişe gönderildiğinde."], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"]});
+Object.assign(I18N, {"Укажите имя клиента": ["Enter the customer's name", "Müşterinin adını girin"], "Укажите телефон клиента": ["Enter the customer's phone", "Müşterinin telefonunu girin"], "Обязательно": ["Required", "Zorunlu"]});
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
