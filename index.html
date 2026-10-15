@@ -2905,7 +2905,7 @@ const ymName = ym => { const s = new Date(ymStart(ym)).toLocaleDateString(LOC(),
 const monthlyDoc = (cat, ym) => S.expenses.find(x=>x.monthly && x.category===cat && x.month===ym);
 function salaryByShifts(ym){
   const t0 = ymStart(ym), t1 = ymStart(ymShift(ym,1)); let sum = 0, hrs = 0, noRate = 0;
-  for (const st of S.staff.filter(x=>roleOf(x)!=="admin")){
+  for (const st of S.staff.filter(x=>roleOf(x)!=="admin" && !isDemoStaff(x))){
     const h = S.shifts.filter(sh=>sh.staffId===st.id && (sh.start||0)>=t0 && (sh.start||0)<t1).reduce((a,sh)=>a+hoursOf(sh),0);
     if (!h) continue; hrs += h; if (Number(st.rate)>0) sum += h*Number(st.rate); else noRate++;
   }
