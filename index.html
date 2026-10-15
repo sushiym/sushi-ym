@@ -827,9 +827,7 @@ function renderControls(){
   const c = $("#controls");
   if (S.view==="stock"){
     c.innerHTML = (can("move") ? "" : "<!--") + `<div class="actions">
-        <button class="btn act-in" data-new="in">+ Приход</button>
-        <button class="btn act-out" data-new="out">− Расход</button>
-        <button class="btn act-off" data-new="off">Списание</button>
+        <button class="btn act-in" data-new="in">Движение товара</button>
         <button class="btn act-in" id="openBulk">Приход списком</button>
         <button class="btn act-cook" data-cook="">Приготовить</button>
         <button class="btn act-cut" id="openCut">Разделка лосося</button></div>` + (can("move") ? "" : "-->") + `
