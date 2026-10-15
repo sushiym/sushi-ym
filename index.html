@@ -251,6 +251,10 @@ dialog .search{flex:none}
 .odisc .oprice{width:80px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);font-size:.95rem}
 s.oldp{color:var(--muted)}
 .ototal{font-size:1.05rem;text-align:right}
+.ocour{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 14px;padding:8px 10px;border:1px dashed var(--line);border-radius:var(--radius-s)}
+.ocour label{display:inline-flex;align-items:center;gap:6px}
+.ocour .oprice{width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);font-size:.95rem}
+.ocourl{display:flex;justify-content:space-between;gap:8px}
 .ototal b{font-family:var(--display);font-weight:500}
 .seg.seg4{grid-template-columns:repeat(4,1fr)}
 .seg.seg4>*,.seg.seg22>*{display:flex;align-items:center;justify-content:center}
@@ -600,6 +604,7 @@ details.finun{margin-top:10px}
   <input class="search" id="oq" type="search" placeholder="Найти блюдо или сет" aria-label="Поиск блюда">
   <div id="oPick" class="opick"></div>
   <div id="oLines"></div>
+  <div class="ocour" id="oCourRow" hidden><b>Курьер</b><label>Сумма курьеру, ₺ <input class="oprice" id="oCourFee" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Сумма курьеру, ₺"></label><small class="hint" style="flex-basis:100%">Прибавится к итогу заказа и сама запишется в «Кассовые расходы».</small></div>
   <label class="toggle"><input type="checkbox" id="oPrint"> Распечатать на кухню после сохранения</label>
   <label class="f">Комментарий к заказу<input id="oComment" autocomplete="off" placeholder="Например: без кунжута, позвонить за 10 минут"></label>
   <p id="oPromoOff" class="hint" hidden></p>
@@ -671,10 +676,12 @@ details.finun{margin-top:10px}
 <dialog id="cashDlg"><form method="dialog" id="cashForm">
   <h3 id="cashTitle">Кассовый расход</h3>
   <p class="hint">Деньги, взятые из кассы: обед, мелкие покупки (чай, соль, сахар, перец…). Вычитаются из дохода дня в «Финансах».</p>
-  <div class="seg" role="radiogroup" aria-label="Вид траты">
+  <div class="seg seg4" role="radiogroup" aria-label="Вид траты">
     <label><input type="radio" name="ckind" value="Обед" checked>Обед</label>
     <label><input type="radio" name="ckind" value="Покупка">Покупка</label>
-    <label><input type="radio" name="ckind" value="Другое">Другое</label></div>
+    <label><input type="radio" name="ckind" value="Другое">Другое</label>
+    <label><input type="radio" name="ckind" value="Курьер">Курьер</label></div>
+  <label class="f" id="cOrdWrap" hidden>Заказ с доставкой<select id="cOrd"></select></label>
   <label class="f">На что потрачено<input id="cNote" autocomplete="off" placeholder="Например: чай, сахар"></label>
   <div class="two"><label class="f">Сумма, ₺<input id="cAmt" inputmode="decimal" autocomplete="off" placeholder="0"></label><label class="f" id="cDateWrap">Дата<input id="cDate" type="date"></label></div>
   <p class="hint" id="cWhoLine"></p>
@@ -1877,7 +1884,10 @@ const orderSubtotal = o => Math.round((o.lines||[]).reduce((a,l)=>a+(Number(l.pr
 // whole-order discount in % (after promo line prices)
 const orderPct = o => { const v = Number(o && o.discPct)||0; return v>0 && v<=100 ? v : 0; };
 const orderDisc = o => Math.round(orderSubtotal(o)*orderPct(o))/100;
-const orderTotal = o => Math.round((orderSubtotal(o) - orderDisc(o))*100)/100;
+// courier fee (delivery only): added to what the customer pays, paid out of the till (cash expense «Курьер»)
+const courFee = o => o && o.type==="delivery" ? Math.max(0, Math.round((Number(o.courierFee)||0)*100)/100) : 0;
+const orderTotal = o => Math.round((orderSubtotal(o) - orderDisc(o) + courFee(o))*100)/100;
+const courLine = o => courFee(o) ? `<div class="ocourl"><span>Курьер</span><span>${money(courFee(o))}</span></div>` : "";
 const discLine = o => orderPct(o) ? `<div class="odiscl"><span>Скидка на заказ ${fmt(orderPct(o))}%${o.discBy?` <small class="hint">${esc(o.discBy)}</small>`:""}</span><span>−${money(orderDisc(o))}</span></div>` : "";
 // promo line: price set by hand (down to 0 = gift); basePrice = menu price at that moment
 const promoDisc = l => l && l.promo ? Math.max(0, ((Number(l.basePrice)||0) - (Number(l.price)||0)) * (Number(l.qty)||0)) : 0;
@@ -1954,7 +1964,7 @@ function orderCard(o){
     <div class="ometa"><span class="tag os-${o.status}">${statLabel(o)}</span> ${meta.join(" · ")}</div>
     <div class="olines">${lines || '<span class="hint">Пустой заказ</span>'}</div>
     ${o.comment ? `<div class="ocomment">${esc(o.comment)}</div>` : ""}
-    ${showMoney()?discLine(o):""}
+    ${showMoney()?discLine(o)+courLine(o):""}
     <div class="ofoot"><b>${showMoney()?money(orderTotal(o)):""}</b><span class="obtns">${btns}</span></div></div>`;
 }
 function renderOrders(L){
@@ -2046,7 +2056,7 @@ const saleK = sl => { const p = Number(sl && sl.discPct)||0; return p>0 && p<=10
 function promoSummary(sales){
   const r = {n:0, disc:0, gifts:0, orders:0, rows:[]};
   for (const sl of sales){ if (!(Number(sl.discPct)>0)) continue; const d = Number(sl.disc)||0; r.orders++; r.disc += d;
-    r.rows.push({order:true, num:sl.orderNum||"", pct:Number(sl.discPct), sub:Number(sl.subtotal)||0, total:Number(sl.total)||0, disc:d, by:sl.discBy||sl.who||"", ts:sl.ts}); }
+    r.rows.push({order:true, num:sl.orderNum||"", pct:Number(sl.discPct), sub:Number(sl.subtotal)||0, total:(Number(sl.total)||0)-(Number(sl.courierFee)||0), disc:d, by:sl.discBy||sl.who||"", ts:sl.ts}); }
   for (const sl of sales) for (const l of sl.lines||[]){ if (!l.promo) continue;
     const d = promoDisc(l); r.n += Number(l.qty)||0; r.disc += d; if (!(Number(l.price)>0)) r.gifts += Number(l.qty)||0;
     r.rows.push({name:l.name, qty:Number(l.qty)||0, price:Number(l.price)||0, base:Number(l.basePrice)||0, disc:d, by:l.promoBy||sl.who||"", ts:sl.ts}); }
@@ -2210,17 +2220,17 @@ document.addEventListener("change", e=>{
 });
 
 /* ----- cash expenses: money taken from the till (lunch, small purchases) ----- */
-const CASH_KINDS = ["Обед","Покупка","Другое"];
+const CASH_KINDS = ["Обед","Покупка","Курьер","Другое"];
 const isCash = x => !!(x && x.cash);
 const cashOfDay = dk => S.expenses.filter(x=>isCash(x) && dayKey(x.ts||0)===dk).sort((a,b)=>(b.ts||0)-(a.ts||0));
 const cashDay = () => isAdmin() ? (S.cashDate||todayKey()) : todayKey();
-const canEditCash = x => isAdmin() || (!!S.me && x.whoId===S.me.id && dayKey(x.ts||0)===todayKey());
+const canEditCash = x => !x.fromOrder && (isAdmin() || (!!S.me && x.whoId===S.me.id && dayKey(x.ts||0)===todayKey()));
 function cashSums(list){ const r = {total:0}; CASH_KINDS.forEach(k=>r[k]=0); for (const x of list){ const a = Number(x.amount)||0; r.total += a; r[CASH_KINDS.includes(x.kind)?x.kind:"Другое"] += a; } return r; }
-const cashTag = k => `<span class="tag ${k==="Обед"?"prod":k==="Покупка"?"out":"off"}">${esc(k||"Другое")}</span>`;
+const cashTag = k => `<span class="tag ${k==="Обед"?"prod":k==="Покупка"?"out":k==="Курьер"?"t-delivery":"off"}">${esc(k||"Другое")}</span>`;
 function cashRow(x, withDate){
   const d = new Date(x.ts||0);
   const when = (withDate ? d.toLocaleDateString(LOC(),{day:"numeric",month:"short"})+", " : "") + d.toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
-  const inner = `<span>${cashTag(x.kind)} ${N(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${when}${x.who?", "+N(x.who):""}${x.editedBy?` · исправил(а) ${N(x.editedBy)}`:""}</span>`;
+  const inner = `<span>${cashTag(x.kind)} ${x.orderNum!=null && x.note==="Заказ №"+x.orderNum ? "Заказ №"+esc(x.orderNum) : N(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${when}${x.who?", "+N(x.who):""}${x.editedBy?` · исправил(а) ${N(x.editedBy)}`:""}${x.fromOrder?" · из заказа, меняется в заказе":""}</span>`;
   return canEditCash(x) ? `<button type="button" class="hist" data-cash="${esc(x.id)}">${inner}</button>` : `<div class="hist">${inner}</div>`;
 }
 function renderCashControls(c){
@@ -2236,6 +2246,19 @@ function renderCash(L){
     + (list.length ? `<div class="list" style="margin-top:12px">${list.map(x=>cashRow(x)).join("")}</div>` : `<div class="empty-state" style="margin-top:14px">За этот день записей нет. Нажмите «+ Кассовый расход».</div>`);
 }
 let cashEdit = null;
+// «Курьер» chosen by hand: pick today's delivery order, its number and courier fee fill in
+function cashOrdFill(sel){
+  const k = (document.querySelector('input[name="ckind"]:checked')||{}).value;
+  $("#cOrdWrap").hidden = k!=="Курьер"; if (k!=="Курьер") return;
+  const dk = isAdmin() ? ($("#cDate").value||todayKey()) : todayKey();
+  const list = S.orders.filter(o=>o.type==="delivery" && o.status!=="cancelled" && dayKey(o.createdAt||0)===dk && (o.id===sel || !courRec(o.id))).sort((a,b)=>(Number(a.num)||0)-(Number(b.num)||0));
+  $("#cOrd").innerHTML = `<option value="">— без заказа —</option>` + list.map(o=>`<option value="${esc(o.id)}" ${o.id===sel?"selected":""}>№${esc(o.num)}${o.name||o.address?" · "+esc(o.name||o.address):""}${courFee(o)?" · "+money(courFee(o)):""}</option>`).join("");
+}
+document.addEventListener("change", e=>{
+  if (e.target.name==="ckind" || e.target.id==="cDate") cashOrdFill($("#cOrd").value);
+  if (e.target.id==="cOrd"){ const o = orderById(e.target.value); if (!o) return;
+    $("#cNote").value = "Заказ №" + o.num; if (courFee(o)) $("#cAmt").value = String(courFee(o)); else $("#cAmt").focus(); }
+});
 function openCash(id){
   const x = id ? S.expenses.find(y=>y.id===id) : null;
   if (!S.me || (x && !canEditCash(x))) return;
@@ -2247,6 +2270,7 @@ function openCash(id){
   $("#cDateWrap").hidden = !isAdmin(); $("#cDate").value = x ? dayKey(x.ts||0) : cashDay();
   $("#cWhoLine").textContent = x ? `Записал(а): ${x.who||"—"}` : `Записывает: ${S.me.name}`;
   $("#cashDel").hidden = !x;
+  cashOrdFill(x ? x.orderId||"" : "");
   $("#cashDlg").showModal(); (x ? $("#cAmt") : $("#cNote")).focus();
 }
 $("#cashForm").addEventListener("submit", async e=>{
@@ -2262,6 +2286,9 @@ $("#cashForm").addEventListener("submit", async e=>{
   const amount = Math.round(amt*100)/100;
   const x = old ? Object.assign({}, old, {kind, note, amount, ts, editedBy:S.me.name, editedAt:Date.now()})
     : {id:uid("c"), cash:true, category:"Кассовые расходы", kind, note, amount, who:S.me.name, whoId:S.me.id, ts, createdAt:Date.now()};
+  const ord = kind==="Курьер" ? orderById($("#cOrd").value) : null;
+  if (ord){ if (courRec(ord.id) && courRec(ord.id).id!==x.id){ toast(`Курьер по заказу №${ord.num} уже записан`); return; } x.orderId = ord.id; x.orderNum = ord.num; }
+  else { delete x.orderId; delete x.orderNum; }
   try { await commit(`Кассовый расход: ${kind}, ${money(amount)}`, [{col:"expenses", id:x.id, after:x}]); $("#cashDlg").close(); render(); toast(old ? "Исправлено" : `Записано: ${kind}, ${money(amount)}`); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
@@ -2278,9 +2305,22 @@ document.addEventListener("click", e=>{
 });
 document.addEventListener("change", e=>{ if (e.target.id==="cashDate"){ S.cashDate = e.target.value || todayKey(); renderList(); } });
 
+// one cash record «Курьер» per delivery order: created/updated when the order is saved, removed when the fee is cleared or the order is cancelled
+const courRec = oid => S.expenses.find(x=>isCash(x) && x.kind==="Курьер" && x.orderId===oid);
+function courOps(o, cancelId){
+  const oid = o ? o.id : cancelId, ex = courRec(oid), fee = o ? courFee(o) : 0;
+  if (!(fee>0)) return ex && ex.fromOrder ? [{col:"expenses", id:ex.id, after:null}] : [];
+  const note = "Заказ №" + o.num;
+  if (ex){ if (Number(ex.amount)===fee && ex.note===note) return [];
+    return [{col:"expenses", id:ex.id, after:Object.assign({}, ex, {amount:fee, note, editedBy:S.me?S.me.name:"", editedAt:Date.now()})}]; }
+  const x = {id:"cour_"+o.id, cash:true, category:"Кассовые расходы", kind:"Курьер", note, amount:fee, orderId:o.id, orderNum:o.num, fromOrder:true,
+    who:S.me?S.me.name:lsGet("sklad.who"), whoId:S.me?S.me.id:"", ts:o.createdAt||Date.now(), createdAt:Date.now()};
+  return [{col:"expenses", id:x.id, after:x}];
+}
+
 /* ----- order editor ----- */
 let OD = null;
-function newOD(type){ return {id:null, type, table:"", name:"", phone:"", address:"", courier:"", due:"", source:SOURCES[0], lines:[], comment:"", q:"", discPct:null, discBy:""}; }
+function newOD(type){ return {id:null, type, table:"", name:"", phone:"", address:"", courier:"", due:"", source:SOURCES[0], lines:[], comment:"", q:"", discPct:null, discBy:"", courierFee:null}; }
 function readODFields(){
   if (!OD) return;
   for (const k of ["table","name","phone","address","courier","due"]){ const el = $("#o_"+k); if (el) OD[k] = el.value.trim(); }
@@ -2293,7 +2333,7 @@ function renderODFields(){
   let html = "";
   if (OD.type==="hall") html = `<div class="two">${f("table","Стол №",'inputmode="numeric"')}</div>`;
   else if (OD.type==="takeaway") html = `<div class="two">${f("name","Имя или номер")}${f("phone","Телефон",'inputmode="tel"')}</div>${src}`;
-  else html = `<div class="two">${f("phone","Телефон",'inputmode="tel"')}${f("name","Имя")}</div>${f("address","Адрес")}<div class="two">${f("courier","Курьер")}${f("due","К какому времени",'type="time"')}</div>${src}`;
+  else html = `<div class="two">${f("phone","Телефон",'inputmode="tel"')}${f("name","Имя")}</div>${f("address","Адрес")}<div class="two">${f("courier","Имя курьера")}${f("due","К какому времени",'type="time"')}</div>${src}`;
   $("#oFields").innerHTML = html;
 }
 function renderODPick(){
@@ -2321,6 +2361,7 @@ function odTotal(){
   $("#oDiscBox").hidden = !on;
   const R = promoRules(); $("#oDiscPct").placeholder = R.ordMin>1||R.ordMax<100 ? `${fmt(R.ordMin)}–${fmt(R.ordMax)}` : "10";
   $("#oDiscInfo").innerHTML = on ? (p==null ? `<span class="neg">укажите процент скидки</span>` : `${money(orderSubtotal(OD))} − ${fmt(p)}% = −${money(orderDisc(OD))}`) : "";
+  $("#oCourRow").hidden = OD.type!=="delivery";
   $("#oTotal").textContent = money(orderTotal(OD));
 }
 function renderODLines(){
@@ -2343,6 +2384,7 @@ function openOrder(id, type){
   document.querySelector(`input[name="otype"][value="${OD.type}"]`).checked = true;
   $("#oq").value = ""; $("#oComment").value = OD.comment||"";
   if (!(orderPct(OD)>0)) OD.discPct = null;
+  $("#oCourFee").value = Number(OD.courierFee)>0 ? String(OD.courierFee) : "";
   $("#oDiscOn").checked = OD.discPct!=null; $("#oDiscPct").value = OD.discPct!=null ? String(OD.discPct) : "";
   renderODFields(); renderODPick(); renderODLines();
   $("#orderDlg").showModal();
@@ -2366,6 +2408,7 @@ $("#orderDlg").addEventListener("change", e=>{
 $("#orderDlg").addEventListener("input", e=>{
   if (e.target.id==="oq"){ OD.q = e.target.value; renderODPick(); }
   else if (e.target.dataset.ocom!==undefined){ const l = OD.lines[+e.target.dataset.ocom]; if (l) l.comment = e.target.value; }
+  else if (e.target.id==="oCourFee"){ const v = num(e.target.value); OD.courierFee = isNaN(v) || v<0 ? null : Math.round(v*100)/100; odTotal(); }
   else if (e.target.id==="oDiscPct"){
     const v = num(e.target.value); OD.discPct = isNaN(v) || v<=0 || v>100 ? null : Math.round(v*100)/100;
     if (S.me) OD.discBy = S.me.name;
@@ -2418,9 +2461,10 @@ $("#orderForm").addEventListener("submit", async e=>{
     source:OD.type!=="hall"?OD.source:"", lines:OD.lines.map(l=>Object.assign({kind:l.kind, id:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0, comment:(l.comment||"").trim()}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})),
     comment:OD.comment, updatedAt:Date.now()});
   if ($("#oDiscOn").checked && OD.discPct>0){ o.discPct = OD.discPct; o.discBy = OD.discBy||""; } else { delete o.discPct; delete o.discBy; }
+  if (OD.type==="delivery" && Number(OD.courierFee)>0) o.courierFee = Math.round(Number(OD.courierFee)*100)/100; else delete o.courierFee;
   if (!old){ o.id = uid("o"); o.num = await nextOrderNum(); o.status = "new"; o.createdAt = Date.now(); o.who = lsGet("sklad.who"); }
   o.total = orderTotal(o);
-  try { await commit((old?"Изменение заказа №":"Новый заказ №")+o.num, [{col:"orders", id:o.id, after:o}]); $("#orderDlg").close();
+  try { await commit((old?"Изменение заказа №":"Новый заказ №")+o.num, [{col:"orders", id:o.id, after:o}, ...courOps(o)]); $("#orderDlg").close();
     lsSet("sushi.autoprint", $("#oPrint").checked ? "1" : "0"); if ($("#oPrint").checked) setTimeout(()=>printOrder(o, !!old), 300); S.view="orders"; S.ordView="open"; render(true); toast(old?`Заказ №${o.num} сохранён`:`Заказ №${o.num} принят`); }
   catch(err){ console.error(err); toast("Не удалось сохранить заказ. Проверьте права на изменение."); }
 });
@@ -2440,7 +2484,7 @@ function openPay(id){
   const rows = Object.entries(ing).map(([pid,q])=>({p:byId(pid), q, after:(st[pid]||0)-q, pk:!!pack[pid]})).filter(r=>r.p).sort((a,b)=>order.indexOf(a.p)-order.indexOf(b.p));
   $("#payTitle").textContent = `Заказ №${o.num} · ${OTYPES[o.type]}${o.type==="hall"&&o.table?", стол "+o.table:""}`;
   $("#payBody").innerHTML = `<div class="prev">${(o.lines||[]).map(l=>`<div><span>${fmt(l.qty)} × ${NL(l)}${promoTag(l)}</span><span>${l.price||l.promo?promoPrice(l)+money(l.price*l.qty):"—"}</span></div>`).join("")}</div>
-    ${discLine(o)}
+    ${discLine(o)}${courLine(o)}
     <div class="ototal">К оплате: <b>${money(orderTotal(o))}</b></div>
     <div class="seg seg4" role="radiogroup" aria-label="Способ оплаты">${PAYS.map(pm=>`<label><input type="radio" name="paym" value="${esc(pm)}" ${pm===def?"checked":""}>${esc(pm)}</label>`).join("")}</div>
     <details class="det"><summary>Спишется со склада: ${rows.length} ${plural(rows.length,"позиция","позиции","позиций")}${Object.keys(pack).length?", включая упаковку":""}</summary>
@@ -2458,7 +2502,7 @@ $("#payForm").addEventListener("submit", async e=>{
   const ops = Object.entries(ing).map(([pid,q])=>{ const mv = {id:uid("m"), productId:pid, unit:byId(pid).unit, type:"sale", delta:-q, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id}; return {col:"moves", id:mv.id, after:mv}; });
   if (!ops.length){ const mv = {id:uid("m"), productId:"", unit:"", type:"sale", delta:0, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id}; ops.push({col:"moves", id:mv.id, after:mv}); }
   const total = orderTotal(o);
-  ops.push({col:"sales", id:batchId, after:Object.assign({id:batchId, lines:(o.lines||[]).map(l=>Object.assign({kind:l.kind, refId:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})), who, ts, orderId:o.id, orderType:o.type, source:o.source||"", payment, total}, orderPct(o) ? {discPct:orderPct(o), disc:orderDisc(o), subtotal:orderSubtotal(o), discBy:o.discBy||"", orderNum:o.num} : {})});
+  ops.push({col:"sales", id:batchId, after:Object.assign({id:batchId, lines:(o.lines||[]).map(l=>Object.assign({kind:l.kind, refId:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})), who, ts, orderId:o.id, orderType:o.type, source:o.source||"", payment, total}, courFee(o) ? {courierFee:courFee(o)} : {}, orderPct(o) ? {discPct:orderPct(o), disc:orderDisc(o), subtotal:orderSubtotal(o), discBy:o.discBy||"", orderNum:o.num} : {})});
   ops.push({col:"orders", id:o.id, after:Object.assign({}, o, {status:"closed", payment, total, closedAt:ts, saleBatchId:batchId, updatedAt:ts})});
   try { await commit(`Закрыт заказ №${o.num}`, ops); $("#payDlg").close(); render(); toast(`Заказ №${o.num} закрыт: ${money(total)}, ${payment}`); }
   catch(err){ console.error(err); render(); toast(err.done && err.done.length ? "Сохранено частично. Нажмите «Отменить» и повторите." : "Не удалось закрыть заказ. Проверьте права на изменение."); }
@@ -2467,7 +2511,7 @@ async function cancelOrder(id){
   const o = orderById(id); if (!o) return;
   const reason = (tPrompt(`Отмена заказа №${o.num}. Укажите причину (обязательно):`, "") || "").trim();
   if (!reason){ toast("Заказ не отменён: нужно указать причину"); return; }
-  try { await commit(`Отменён заказ №${o.num}`, [{col:"orders", id, after:Object.assign({}, o, {status:"cancelled", cancelReason:reason, cancelledBy:S.me?S.me.name:"", cancelledAt:Date.now(), updatedAt:Date.now()})}]); render(); toast(`Заказ №${o.num} отменён`); }
+  try { await commit(`Отменён заказ №${o.num}`, [...courOps(null, o.id), {col:"orders", id, after:Object.assign({}, o, {status:"cancelled", cancelReason:reason, cancelledBy:S.me?S.me.name:"", cancelledAt:Date.now(), updatedAt:Date.now()})}]); render(); toast(`Заказ №${o.num} отменён`); }
   catch(err){ console.error(err); toast("Не удалось отменить заказ."); }
 }
 async function reopenOrder(id){
@@ -2995,7 +3039,7 @@ function ticketHtml(o, edited){
   }).join("");
   const info = [];
   if (o.type!=="hall"){ if (o.name) info.push(esc(o.name)); if (o.phone) info.push(esc(o.phone)); }
-  if (o.type==="delivery"){ if (o.address) info.push(esc(o.address)); if (o.due) info.push("saat "+esc(o.due)); if (o.courier) info.push("kurye: "+esc(o.courier)); }
+  if (o.type==="delivery"){ if (o.address) info.push(esc(o.address)); if (o.due) info.push("saat "+esc(o.due)); if (o.courier) info.push("kurye: "+esc(o.courier)); if (courFee(o)) info.push("KURYE ÜCRETİ: "+fmt(courFee(o))+" ₺"); }
   if (o.type!=="hall" && o.source && o.source!==SOURCES[0]) info.push(esc(TK_SOURCES[o.source]||o.source));
   return `<div class="tk">
     <div class="tk-c">SUSHI YM</div>
@@ -3147,6 +3191,7 @@ Object.assign(I18N, {"автоматически": ["automatically", "otomatik"]
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
+Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Заказ с доставкой": ["Delivery order", "Teslimat siparişi"], "— без заказа —": ["— no order —", "— siparişsiz —"], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"], "Курьер по заказу №": ["Courier for order #", "Kurye, sipariş #"], "уже записан": ["is already recorded", "zaten kayıtlı"]});
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
