@@ -3161,7 +3161,7 @@ function ticketHtml(o, edited){
     ${orderPct(o) ? `<div class="tk-com">SİPARİŞE %${fmt(orderPct(o))} İNDİRİM</div>` : ""}
     <div class="tk-c" style="margin-top:6px">Yazdırıldı: ${tm(new Date())}${S.me?` · ${esc(S.me.name)}`:""}</div></div>`;
 }
-/* payment receipt (for the customer): prices, total and the customer's details; also in Turkish */
+/* payment receipt (for the customer): prices and total, no phone and no address; also in Turkish */
 const TK_PAYS = {"Наличные":"Nakit","Карта":"Kart","Перевод":"Havale","Агрегатор":"Agregatör"};
 function receiptHtml(o, payment){
   const tm = d => d.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
@@ -3174,9 +3174,6 @@ function receiptHtml(o, payment){
     const tag = l.promo ? (pr>0 ? " · KAMPANYA" : " · İKRAM") : "";
     return `<div class="tk-row"><span>${fmt(q)} × ${esc(tkName(st || dishById(l.id), l.name))}${tag}</span><span>${old}${m(pr*q)}</span></div>${q>1&&pr>0?`<div class="tk-sub">${fmt(q)} × ${m(pr)}</div>`:""}`;
   }).join("");
-  const cust = [];
-  if (o.type!=="hall"){ if (o.name) cust.push(esc(o.name)); if (o.phone) cust.push("Tel: "+esc(o.phone)); }
-  if (o.type==="delivery"){ if (o.address) cust.push("Adres: "+esc(o.address)); if (o.due) cust.push("Saat: "+esc(o.due)); }
   const sums = [];
   if (orderPct(o) || courFee(o)) sums.push(`<div class="tk-row"><span>ARA TOPLAM</span><span>${m(orderSubtotal(o))}</span></div>`);
   if (orderPct(o)) sums.push(`<div class="tk-row"><span>İNDİRİM %${fmt(orderPct(o))}</span><span>−${m(orderDisc(o))}</span></div>`);
@@ -3186,7 +3183,7 @@ function receiptHtml(o, payment){
     <div class="tk-c">ÖDEME FİŞİ</div>
     <div class="tk-hr"></div>
     <div class="tk-big">No ${esc(o.num)} · ${head}</div>
-    ${cust.length ? `<div>${cust.join("<br>")}</div>` : ""}
+    ${o.type!=="hall" && o.name ? `<div>${esc(o.name)}</div>` : ""}
     <div>${now.toLocaleDateString("tr-TR")} ${tm(now)}</div>
     <div class="tk-hr"></div>${lines}<div class="tk-hr"></div>
     ${sums.join("")}
