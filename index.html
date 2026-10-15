@@ -279,6 +279,11 @@ s.oldp{color:var(--muted)}
 .sname small,.stot small{display:block;font-weight:400;color:var(--muted);font-size:.82rem}
 .stot{text-align:right;font-variant-numeric:tabular-nums}
 .slist{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+details.wbox{display:block;background:var(--surface);margin-bottom:8px;font-size:.95rem}
+details.wbox summary{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--ink);flex-wrap:wrap}
+details.wbox summary b{font-variant-numeric:tabular-nums}
+details.wbox div.slist{padding:0}
+details.wbox .srow{box-sizing:border-box}
 details.det .slist .srow,.srow{display:grid;grid-template-columns:1fr auto auto;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-s);padding:6px 10px;text-align:left;font-size:.9rem;font-variant-numeric:tabular-nums;width:100%}
 .srow .auto{color:var(--low)}
 .srow.long{border-color:var(--empty);color:var(--empty)}
@@ -719,7 +724,7 @@ const TYPES = {in:{label:"Приход",sign:1},out:{label:"Расход",sign:-
 const SUBUNIT = {"кг":["г",1000], "л":["мл",1000]};
 const HINTS = {in:"Товар пришёл от поставщика или с рынка.",out:"Товар ушёл в работу: на кухню, в заготовки.",off:"Испорчено, просрочено, брак — потери."};
 
-const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"month", me:null, products:[], moves:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
+const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -2727,13 +2732,36 @@ const hhmm = ts => new Date(ts).toLocaleTimeString(LOC(),{hour:"2-digit",minute:
 const toLocalInput = ts => ts ? new Date(ts - new Date(ts).getTimezoneOffset()*60000).toISOString().slice(0,16) : "";
 const fromLocalInput = v => v ? new Date(v).getTime() : null;
 const LONG_SHIFT_H = 14;
-const SH_PERIODS = [["today","Сегодня"],["week","7 дней"],["month","Этот месяц"],["prev","Прошлый месяц"]];
+const SH_PERIODS = [["today","Сегодня"],["week","Эта неделя"],["month","Этот месяц"],["prev","Прошлый месяц"]];
 function shRange(){
   const now = new Date(), d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if (S.shPeriod==="today") return [d0.getTime(), d0.getTime()+86400000];
-  if (S.shPeriod==="week") return [d0.getTime()-6*86400000, d0.getTime()+86400000];
+  if (S.shPeriod==="week"){ const w = weekStart(now.getTime()); return [w, addDays(w,7)]; }
   if (S.shPeriod==="prev") return [new Date(now.getFullYear(), now.getMonth()-1, 1).getTime(), new Date(now.getFullYear(), now.getMonth(), 1).getTime()];
   return [new Date(now.getFullYear(), now.getMonth(), 1).getTime(), new Date(now.getFullYear(), now.getMonth()+1, 1).getTime()];
+}
+// weeks run Monday 00:00 – Sunday 23:59; a shift belongs to the week it started in
+function weekStart(ts){ const d = new Date(ts); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d.getTime(); }
+function addDays(ts, n){ const d = new Date(ts); d.setDate(d.getDate()+n); return d.getTime(); }
+function weekNo(ts){ const d = new Date(ts); d.setHours(0,0,0,0); d.setDate(d.getDate()+3-((d.getDay()+6)%7)); const y = new Date(d.getFullYear(),0,4); return 1+Math.round(((d-y)/86400000-3+((y.getDay()+6)%7))/7); }
+function weekLabel(w){ const e = addDays(w,6), o = {day:"numeric",month:"short"};
+  return `Неделя ${weekNo(w)} · ${new Date(w).toLocaleDateString(LOC(),o)} – ${new Date(e).toLocaleDateString(LOC(),Object.assign({year:"numeric"},o))}`; }
+function pastWeeksHtml(list){
+  const cur = weekStart(Date.now()), ids = new Set(list.map(x=>x.id));
+  const shs = S.shifts.filter(sh=>sh.start && ids.has(sh.staffId) && sh.start < cur);
+  if (!shs.length) return "";
+  const by = new Map();
+  for (const sh of shs){ const w = weekStart(sh.start); if (!by.has(w)) by.set(w, []); by.get(w).push(sh); }
+  const weeks = [...by.keys()].sort((a,b)=>b-a);
+  return `<h2 class="cat" style="margin-top:16px"><span>Прошлые недели</span><span>${weeks.length}</span></h2>` + weeks.map(w=>{
+    let tH = 0, tP = 0;
+    const rows = list.map(x=>{
+      const my = by.get(w).filter(sh=>sh.staffId===x.id); if (!my.length) return "";
+      const h = my.reduce((a,sh)=>a+hoursOf(sh),0), pay = h*(Number(x.rate)||0); tH += h; tP += pay;
+      return `<div class="srow"><span>${N(x.name)}</span><span>${my.length} ${plural(my.length,"смена","смены","смен")}</span><b>${fmtH(h)}${pay?` · ${money(pay)}`:""}</b></div>`;
+    }).join("");
+    return `<details class="box det wbox"><summary><span>${weekLabel(w)}</span><b>${fmtH(tH)}${tP?` · ${money(tP)}`:""}</b></summary><div class="slist">${rows}</div></details>`;
+  }).join("");
 }
 const AUTO_CLOSE_HOUR = 23;
 function autoCloseAt(start){ const d = new Date(start); d.setHours(AUTO_CLOSE_HOUR, 0, 0, 0); if (d.getTime() <= start) d.setDate(d.getDate()+1); return d.getTime(); }
@@ -2793,7 +2821,7 @@ function renderStaff(L){
   const [t0,t1] = shRange();
   const inR = sh => (sh.start||0) < t1 && (sh.end||Date.now()) > t0;
   const now = S.staff.filter(x=>roleOf(x)!=="admin" && openShiftOf(x.id));
-  let html = `<div class="sum" style="margin-bottom:12px"><div><span>Сейчас на смене</span><b>${now.length ? now.map(x=>N(x.name)+" с "+hhmm(openShiftOf(x.id).start)).join(", ") : "никого"}</b></div></div>`;
+  let html = (S.shPeriod==="week" ? `<h2 class="cat" style="margin-top:0"><span>${weekLabel(t0)}</span><span>сейчас</span></h2>` : "") + `<div class="sum" style="margin-bottom:12px"><div><span>Сейчас на смене</span><b>${now.length ? now.map(x=>N(x.name)+" с "+hhmm(openShiftOf(x.id).start)).join(", ") : "никого"}</b></div></div>`;
   const list = S.staff.filter(x=>roleOf(x)!=="admin").sort((a,b)=>String(a.name).localeCompare(b.name,"ru"));
   const admins = S.staff.filter(x=>roleOf(x)==="admin").sort((a,b)=>String(a.name).localeCompare(b.name,"ru"));
   const adminHtml = `<h2 class="cat"><span>Админ</span><span>${admins.length}</span></h2><div class="list">${admins.map(x=>`<button class="row" style="border-left-color:var(--accent)" data-editstaff="${esc(x.id)}"><span class="nm">${N(x.name)}${x.id===S.me?.id?" (вы)":""}<small>Без учёта смен</small></span>${x.active===false?'<span class="tag hid">отключён</span>':""}</button>`).join("")}</div>`;
@@ -2812,6 +2840,7 @@ function renderStaff(L){
       ${rows ? `<details class="det"><summary>Смены</summary><div class="slist">${rows}</div></details>` : ""}</div>`;
   }).join("");
   html += `<div class="sum" style="margin-top:12px"><div><span>Итого за период</span><b>${fmtH(totH)}${totPay?` · ${money(totPay)}`:""}</b></div></div>`;
+  html += pastWeeksHtml(list);
   L.innerHTML = html + adminHtml;
 }
 let editingShift = null;
@@ -3092,6 +3121,7 @@ Object.assign(I18N, {"Срок действия. Пустое поле — бе�
 Object.assign(I18N, {"автоматически": ["automatically", "otomatik"], "вписано вручную": ["entered manually", "elle girildi"], "автоматически, последняя сумма": ["automatically, last amount", "otomatik, son tutar"], "Подставлена последняя сумма аренды.": ["The last rent amount is filled in.", "Son kira tutarı girildi."]});
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
+Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Прошлые недели": ["Past weeks", "Geçmiş haftalar"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
