@@ -145,6 +145,8 @@ h2.cat{font-size:.95rem;font-weight:600;color:var(--muted);margin:20px 0 6px;dis
 
 .hist{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-s);padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:2px 10px}
 .hist .meta{grid-column:1/-1;color:var(--muted);font-size:.84rem}
+button.hist{width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+button.hist:hover{border-color:var(--accent)}
 .hist .del{background:none;border:0;color:var(--muted);padding:0 4px;font-size:1.1rem}
 .day{font-size:.9rem;font-weight:600;color:var(--muted);margin:18px 0 6px}
 
@@ -370,6 +372,7 @@ details.finun{margin-top:10px}
 <div id="navShade" hidden></div>
 <nav class="tabs" id="navTabs" aria-label="Разделы"><div class="wrap" role="tablist">
   <button role="tab" data-view="orders" aria-selected="true">Продажи</button>
+  <button role="tab" data-view="cash" aria-selected="false">Кассовые расходы</button>
   <button role="tab" data-view="hist" aria-selected="false">История</button>
   <button role="tab" data-view="menu" aria-selected="false">Меню</button>
   <button role="tab" data-view="stock" aria-selected="false">Склад</button>
@@ -640,6 +643,23 @@ details.finun{margin-top:10px}
   </div>
 </form></dialog>
 
+<dialog id="cashDlg"><form method="dialog" id="cashForm">
+  <h3 id="cashTitle">Кассовый расход</h3>
+  <p class="hint">Деньги, взятые из кассы: обед, мелкие покупки (чай, соль, сахар, перец…). Вычитаются из дохода дня в «Финансах».</p>
+  <div class="seg" role="radiogroup" aria-label="Вид траты">
+    <label><input type="radio" name="ckind" value="Обед" checked>Обед</label>
+    <label><input type="radio" name="ckind" value="Покупка">Покупка</label>
+    <label><input type="radio" name="ckind" value="Другое">Другое</label></div>
+  <label class="f">На что потрачено<input id="cNote" autocomplete="off" placeholder="Например: чай, сахар"></label>
+  <div class="two"><label class="f">Сумма, ₺<input id="cAmt" inputmode="decimal" autocomplete="off" placeholder="0"></label><label class="f" id="cDateWrap">Дата<input id="cDate" type="date"></label></div>
+  <p class="hint" id="cWhoLine"></p>
+  <div class="dlg-actions">
+    <button type="button" class="btn danger" id="cashDel" hidden>Удалить</button>
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
 <dialog id="staffDlg"><form method="dialog" id="staffForm" autocomplete="off">
   <h3 id="staffTitle">Сотрудник</h3>
   <label class="f">Имя<input id="sfName" required autocomplete="off"></label>
@@ -830,6 +850,8 @@ function renderControls(){
   } else if (S.view==="inv"){
     c.innerHTML = `<p class="hint" style="margin:0 0 10px">Пересчитайте продукты и впишите фактическое количество. Пустые поля не меняются. Так же вносятся начальные остатки в первый раз.</p>
       <div class="controls"><input class="search" id="iq" type="search" placeholder="Найти продукт" value="${esc(S.invQ)}" aria-label="Поиск продукта"></div>`;
+  } else if (S.view==="cash"){
+    renderCashControls(c);
   } else if (S.view==="fin"){
     renderFinControls(c);
   } else if (S.view==="staff"){
@@ -848,6 +870,7 @@ function renderList(){
   if (S.view==="orders") return renderOrders(L);
   if (S.view==="menu") return renderMenu(L);
   if (S.view==="inv") return renderInv(L, st);
+  if (S.view==="cash") return renderCash(L);
   if (S.view==="fin") return renderFin(L);
   if (S.view==="staff") return renderStaff(L);
 }
@@ -1950,14 +1973,21 @@ function renderReport(L){
   for (const sl of sales) for (const l of sl.lines||[]){ const k=(l.kind||"dish")+":"+l.refId; dishes[k] = dishes[k] || {name:l.name, kind:l.kind, qty:0, sum:0}; dishes[k].qty += Number(l.qty)||0; dishes[k].sum += (Number(l.price)||0)*(Number(l.qty)||0)*saleK(sl); }
   const top = Object.values(dishes).sort((a,b)=>b.qty-a.qty);
   const table = (title, rows) => rows.length ? `<h2 class="cat"><span>${title}</span></h2><div class="sum">${rows.map(([k,v])=>`<div><span>${esc(k)} <small class="hint">(${v.n})</small></span><b>${money(v.sum)}</b></div>`).join("")}</div>` : "";
-  if (!sales.length && !cancelled.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>`; return; }
+  const cashList = cashOfDay(dk), cashOut = cashSums(cashList).total;
+  if (!sales.length && !cancelled.length && !cashList.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>`; return; }
   const ps = promoSummary(sales);
+  const cashIn = sales.filter(sl=>(sl.payment||"Наличные")==="Наличные").reduce((a,sl)=>a+saleTotal(sl),0);
   L.innerHTML = `<div class="kpis">
       <div class="kpi"><small>Выручка</small><b>${money(total)}</b></div>
       <div class="kpi"><small>Закрыто заказов</small><b>${nOrders}</b></div>
       <div class="kpi"><small>Средний чек</small><b>${nOrders?money(closed.reduce((a,o)=>a+(Number(o.total)||orderTotal(o)),0)/nOrders):"—"}</b></div>
       <div class="kpi"><small>Отменено</small><b>${cancelled.length}</b></div>${ps.n||ps.orders?`
       <div class="kpi"><small>Скидки по акциям</small><b>${money(ps.disc)}</b><small>${[ps.n?fmt(ps.n)+" шт":"", ps.gifts?"подарков "+fmt(ps.gifts):"", ps.orders?"заказов со скидкой "+ps.orders:""].filter(Boolean).join(", ")}</small></div>`:""}</div>
+    <h2 class="cat"><span>Касса (наличные)</span></h2><div class="sum">
+      <div><span>Получено наличными${sales.some(sl=>!sl.payment)?` <small class="hint">быстрые продажи считаются наличными</small>`:""}</span><b>${money(cashIn)}</b></div>
+      <div><span>Кассовые расходы <small class="hint">(${cashList.length})</small></span><b>${cashOut ? "− "+money(cashOut) : money(0)}</b></div>
+      <div class="subtot"><span>Должно остаться в кассе <small class="hint">без учёта размена на начало дня</small></span><b>${money(cashIn-cashOut)}</b></div></div>
+    ${cashList.length ? `<details class="det"><summary>Кассовые расходы за день</summary><div class="list" style="margin-top:8px">${cashList.map(x=>cashRow(x)).join("")}</div></details>` : ""}
     ${table("По типу заказа", agg(typeName))}
     ${table("По способу оплаты", agg(sl=>sl.payment||"Не указан"))}
     ${table("По источнику", agg(sl=>sl.orderType && sl.orderType!=="hall" ? (sl.source||"Не указан") : (sl.orderType==="hall"?"Зал":"Продажи без заказа")))}
@@ -2049,7 +2079,8 @@ function renderFin(L){
   const catRows = Object.entries(cats).sort((a,b)=>b[1].rev-a[1].rev);
   const soldIds = new Set(Object.keys(items));
   const unsold = [...S.menu.filter(d=>d.active!==false && !soldIds.has("dish:"+d.id)).map(d=>dn(d)), ...S.sets.filter(x=>x.active!==false && !soldIds.has("set:"+x.id)).map(x=>dn(x)+" (сет)")];
-  const expByCat = {}; exps.forEach(x=>{ expByCat[x.category||"Прочее"] = (expByCat[x.category||"Прочее"]||0) + (Number(x.amount)||0); });
+  const cashExps = exps.filter(isCash), cashS = cashSums(cashExps);
+  const expByCat = {}; exps.filter(x=>!isCash(x)).forEach(x=>{ expByCat[x.category||"Прочее"] = (expByCat[x.category||"Прочее"]||0) + (Number(x.amount)||0); });
 
   const line = (label, val, cls="", hint="") => `<div class="${cls}"><span>${label}${hint?` <small class="hint">${hint}</small>`:""}</span><b>${val}</b></div>`;
   const neg = v => v>0 ? "− "+money(v) : v<0 ? "+ "+money(-v) : money(0);
@@ -2068,6 +2099,7 @@ function renderFin(L){
       ${line("Списания (порча, брак)", neg(writeOff))}
       ${manualOut ? line("Расход со склада вручную", neg(manualOut), "", "питание персонала, кухня") : ""}
       ${invLoss ? line(invLoss>0?"Недостача по инвентаризации":"Излишки по инвентаризации", neg(invLoss)) : ""}
+      ${cashExps.length ? line("Кассовые расходы", neg(cashS.total), "", CASH_KINDS.filter(k=>cashS[k]).map(k=>k.toLowerCase()+" "+money(cashS[k])).join(", ")) : ""}
       ${Object.entries(expByCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>line(esc(k), neg(v))).join("")}
       ${line("Чистая прибыль", money(net), "total "+(net<0?"minus":"plus"))}
     </div>
@@ -2089,7 +2121,8 @@ function renderFin(L){
   } else {
     html += `<div class="empty-state" style="margin-top:14px">За этот период продаж нет.</div>`;
   }
-  const oexps = exps.filter(x=>!x.monthly && !x.auto);
+  if (cashExps.length) html += `<details class="det"><summary>Кассовые расходы за период: ${cashExps.length} ${plural(cashExps.length,"запись","записи","записей")}, ${money(cashS.total)}</summary><div class="list" style="margin-top:8px">${cashExps.slice(0,300).map(x=>cashRow(x, true)).join("")}</div></details>`;
+  const oexps = exps.filter(x=>!x.monthly && !x.auto && !isCash(x));
   html += `<h2 class="cat"><span>Прочие расходы</span><span>${oexps.length}</span></h2>` + (oexps.length
     ? `<div class="list">${oexps.map(x=>`<div class="hist"><span><span class="tag off">${esc(x.category||"Прочее")}</span> ${esc(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long"})}${x.who?", "+esc(x.who):""} <button class="del" data-delexp="${esc(x.id)}" aria-label="Удалить расход" title="Удалить расход">×</button></span></div>`).join("")}</div>`
     : `<p class="hint">Аренда, зарплата, коммуналка и другие расходы не со склада. Внесите их кнопкой «+ Расход», чтобы видеть настоящую чистую прибыль.</p>`);
@@ -2151,6 +2184,75 @@ document.addEventListener("change", e=>{
   if (e.target.id==="finFrom"){ S.finFrom = e.target.value; renderList(); }
   if (e.target.id==="finTo"){ S.finTo = e.target.value; renderList(); }
 });
+
+/* ----- cash expenses: money taken from the till (lunch, small purchases) ----- */
+const CASH_KINDS = ["Обед","Покупка","Другое"];
+const isCash = x => !!(x && x.cash);
+const cashOfDay = dk => S.expenses.filter(x=>isCash(x) && dayKey(x.ts||0)===dk).sort((a,b)=>(b.ts||0)-(a.ts||0));
+const cashDay = () => isAdmin() ? (S.cashDate||todayKey()) : todayKey();
+const canEditCash = x => isAdmin() || (!!S.me && x.whoId===S.me.id && dayKey(x.ts||0)===todayKey());
+function cashSums(list){ const r = {total:0}; CASH_KINDS.forEach(k=>r[k]=0); for (const x of list){ const a = Number(x.amount)||0; r.total += a; r[CASH_KINDS.includes(x.kind)?x.kind:"Другое"] += a; } return r; }
+const cashTag = k => `<span class="tag ${k==="Обед"?"prod":k==="Покупка"?"out":"off"}">${esc(k||"Другое")}</span>`;
+function cashRow(x, withDate){
+  const d = new Date(x.ts||0);
+  const when = (withDate ? d.toLocaleDateString(LOC(),{day:"numeric",month:"short"})+", " : "") + d.toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
+  const inner = `<span>${cashTag(x.kind)} ${N(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${when}${x.who?", "+N(x.who):""}${x.editedBy?` · исправил(а) ${N(x.editedBy)}`:""}</span>`;
+  return canEditCash(x) ? `<button type="button" class="hist" data-cash="${esc(x.id)}">${inner}</button>` : `<div class="hist">${inner}</div>`;
+}
+function renderCashControls(c){
+  c.innerHTML = `<div class="controls"><button class="btn primary" id="addCash">+ Кассовый расход</button>
+    ${isAdmin() ? `<input type="date" id="cashDate" class="search" style="flex:0 1 170px" value="${esc(cashDay())}" aria-label="Дата">` : ""}</div>
+    <p class="hint" style="margin:0 0 10px">Записывайте каждый раз, когда берёте деньги из кассы: на обед или мелкие покупки (чай, соль, сахар…). ${isAdmin() ? "Сумма вычитается из дохода дня в «Финансах». Нажмите на запись, чтобы исправить или удалить." : "Свои записи за сегодня можно исправить: нажмите на запись."}</p>`;
+}
+function renderCash(L){
+  const dk = cashDay(), list = cashOfDay(dk), s = cashSums(list);
+  const dayName = dk===todayKey() ? "Сегодня" : new Date(dk+"T00:00").toLocaleDateString(LOC(),{day:"numeric",month:"long"});
+  L.innerHTML = `<div class="kpis"><div class="kpi"><small>${dayName}: взято из кассы</small><b>${money(s.total)}</b><small>${list.length} ${plural(list.length,"запись","записи","записей")}</small></div>
+    ${CASH_KINDS.filter(k=>s[k]).map(k=>`<div class="kpi"><small>${k}</small><b>${money(s[k])}</b></div>`).join("")}</div>`
+    + (list.length ? `<div class="list" style="margin-top:12px">${list.map(x=>cashRow(x)).join("")}</div>` : `<div class="empty-state" style="margin-top:14px">За этот день записей нет. Нажмите «+ Кассовый расход».</div>`);
+}
+let cashEdit = null;
+function openCash(id){
+  const x = id ? S.expenses.find(y=>y.id===id) : null;
+  if (!S.me || (x && !canEditCash(x))) return;
+  cashEdit = x ? x.id : null;
+  $("#cashTitle").textContent = x ? "Исправить кассовый расход" : "Кассовый расход";
+  const k = x && CASH_KINDS.includes(x.kind) ? x.kind : "Обед";
+  document.querySelectorAll('input[name="ckind"]').forEach(r=>{ r.checked = r.value===k; });
+  $("#cNote").value = x ? x.note||"" : ""; $("#cAmt").value = x ? String(x.amount) : "";
+  $("#cDateWrap").hidden = !isAdmin(); $("#cDate").value = x ? dayKey(x.ts||0) : cashDay();
+  $("#cWhoLine").textContent = x ? `Записал(а): ${x.who||"—"}` : `Записывает: ${S.me.name}`;
+  $("#cashDel").hidden = !x;
+  $("#cashDlg").showModal(); (x ? $("#cAmt") : $("#cNote")).focus();
+}
+$("#cashForm").addEventListener("submit", async e=>{
+  e.preventDefault(); if (!S.me) return;
+  const kind = (document.querySelector('input[name="ckind"]:checked')||{}).value || "Другое";
+  const note = $("#cNote").value.trim(), amt = num($("#cAmt").value);
+  if (!note && kind!=="Обед"){ toast("Напишите, на что потрачено"); $("#cNote").focus(); return; }
+  if (!(amt>0)){ toast("Введите сумму больше нуля"); $("#cAmt").focus(); return; }
+  const old = cashEdit ? S.expenses.find(y=>y.id===cashEdit) : null;
+  if (cashEdit && (!old || !canEditCash(old))){ $("#cashDlg").close(); return; }
+  let ts = old ? old.ts : Date.now();
+  if (isAdmin()){ const d = $("#cDate").value; if (d && d!==dayKey(ts)){ const t = new Date(ts); ts = new Date(d+"T"+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0")).getTime(); } }
+  const amount = Math.round(amt*100)/100;
+  const x = old ? Object.assign({}, old, {kind, note, amount, ts, editedBy:S.me.name, editedAt:Date.now()})
+    : {id:uid("c"), cash:true, category:"Кассовые расходы", kind, note, amount, who:S.me.name, whoId:S.me.id, ts, createdAt:Date.now()};
+  try { await commit(`Кассовый расход: ${kind}, ${money(amount)}`, [{col:"expenses", id:x.id, after:x}]); $("#cashDlg").close(); render(); toast(old ? "Исправлено" : `Записано: ${kind}, ${money(amount)}`); }
+  catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
+});
+$("#cashDel").addEventListener("click", async ()=>{
+  const x = S.expenses.find(y=>y.id===cashEdit); if (!x || !canEditCash(x)) return;
+  if (!tConfirm(`Удалить запись «${x.note||x.kind}» на ${money(x.amount)}?`)) return;
+  try { await commit(`Удалён кассовый расход: ${x.note||x.kind}`, [{col:"expenses", id:x.id, after:null}]); $("#cashDlg").close(); render(); toast("Запись удалена"); }
+  catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
+});
+document.addEventListener("click", e=>{
+  const t = e.target.closest("#addCash,[data-cash]"); if (!t) return;
+  if (t.id==="addCash") return openCash(null);
+  openCash(t.dataset.cash);
+});
+document.addEventListener("change", e=>{ if (e.target.id==="cashDate"){ S.cashDate = e.target.value || todayKey(); renderList(); } });
 
 /* ----- order editor ----- */
 let OD = null;
@@ -2394,9 +2496,9 @@ setInterval(()=>{ if (S.view==="orders" && S.ordView==="open" && !document.query
 const ROLES = {admin:"Админ", worker:"Работник ресторана"};
 const roleOf = st => st && st.role==="admin" ? "admin" : "worker";
 const PERM = {
-  worker: {views:["stock","orders","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, sell:1, prices:1, menuView:1}
+  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, sell:1, prices:1, menuView:1}
 };
-const ALL_VIEWS = ["orders","hist","menu","stock","inv","staff","fin"];
+const ALL_VIEWS = ["orders","cash","hist","menu","stock","inv","staff","fin"];
 function can(k){ if (!S.me) return false; if (S.me.role==="admin") return true; const p = PERM[S.me.role]; return !!(p && p[k]); }
 function canView(v){ if (!S.me) return false; if (S.me.role==="admin") return true; return (PERM[S.me.role]||{views:[]}).views.includes(v); }
 const isAdmin = () => !!S.me && S.me.role==="admin";
@@ -2977,6 +3079,7 @@ Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Del
 Object.assign(I18N, {"Скопировать список продуктов": ["Copy product list", "Ürün listesini kopyala"]});
 Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giriş"], "Проверить": ["Check", "Kontrol et"], "Сохранить приход": ["Save receipt", "Girişi kaydet"], "Список пуст.": ["The list is empty.", "Liste boş."], "Строк:": ["Lines:", "Satır:"], "сумма:": ["total:", "toplam:"], "с ошибками:": ["with errors:", "hatalı:"], "исправьте их, иначе сохранить нельзя": ["fix them, otherwise saving is blocked", "düzeltin, yoksa kaydedilemez"], "новый продукт": ["new product", "yeni ürün"], "продукт не найден на складе": ["product not found in stock", "ürün depoda bulunamadı"], "количество должно быть больше нуля": ["quantity must be greater than zero", "miktar sıfırdan büyük olmalı"], "не указана цена": ["price missing", "fiyat yok"], "укажите цену закупки": ["enter the purchase price", "alış fiyatını girin"], "нет названия": ["no name", "isim yok"], "Продукт | количество | цена": ["Product | quantity | price", "Ürün | miktar | fiyat"], "Например: Metro 11.10": ["For example: Metro 11.10", "Örneğin: Metro 11.10"], "Количество 0 — меняется только цена закупки, остаток на складе не меняется.": ["Quantity 0 — only the purchase price changes, the stock level stays the same.", "Miktar 0 — yalnızca alış fiyatı değişir, stok miktarı değişmez."], "только цена": ["price only", "yalnızca fiyat"], "при количестве 0 укажите новую цену": ["with quantity 0, enter the new price", "miktar 0 ise yeni fiyatı girin"]});
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
+Object.assign(I18N, {"Кассовые расходы": ["Cash expenses", "Kasa giderleri"], "Кассовый расход": ["Cash expense", "Kasa gideri"], "+ Кассовый расход": ["+ Cash expense", "+ Kasa gideri"], "Исправить кассовый расход": ["Edit cash expense", "Kasa giderini düzelt"], "Обед": ["Lunch", "Öğle yemeği"], "Покупка": ["Purchase", "Alışveriş"], "Другое": ["Other", "Diğer"], "Вид траты": ["Expense type", "Gider türü"], "На что потрачено": ["What it was spent on", "Ne için harcandı"], "Например: чай, сахар": ["E.g.: tea, sugar", "Örn.: çay, şeker"], "Деньги, взятые из кассы: обед, мелкие покупки (чай, соль, сахар, перец…). Вычитаются из дохода дня в «Финансах».": ["Money taken from the till: lunch, small purchases (tea, salt, sugar, pepper…). Subtracted from the day's income in “Finance”.", "Kasadan alınan para: öğle yemeği, küçük alışverişler (çay, tuz, şeker, biber…). «Finans» bölümünde günün gelirinden düşülür."], "Записывайте каждый раз, когда берёте деньги из кассы: на обед или мелкие покупки (чай, соль, сахар…).": ["Record every time you take money from the till: for lunch or small purchases (tea, salt, sugar…).", "Kasadan her para aldığınızda yazın: öğle yemeği veya küçük alışverişler için (çay, tuz, şeker…)."], "Сумма вычитается из дохода дня в «Финансах». Нажмите на запись, чтобы исправить или удалить.": ["The amount is subtracted from the day's income in “Finance”. Tap a record to edit or delete it.", "Tutar «Finans» bölümünde günün gelirinden düşülür. Düzeltmek veya silmek için kayda dokunun."], "Свои записи за сегодня можно исправить: нажмите на запись.": ["You can edit your own records for today: tap a record.", "Bugünkü kendi kayıtlarınızı düzeltebilirsiniz: kayda dokunun."], "взято из кассы": ["taken from the till", "kasadan alındı"], "запись": ["record", "kayıt"], "записи": ["records", "kayıt"], "записей": ["records", "kayıt"], "За этот день записей нет. Нажмите «+ Кассовый расход».": ["No records for this day. Tap “+ Cash expense”.", "Bu gün için kayıt yok. «+ Kasa gideri»ne dokunun."], "Записал(а):": ["Recorded by:", "Kaydeden:"], "Записывает:": ["Recorded by:", "Kaydeden:"], "исправил(а)": ["edited by", "düzelten"], "Напишите, на что потрачено": ["Write what it was spent on", "Ne için harcandığını yazın"], "Исправлено": ["Corrected", "Düzeltildi"], "Записано:": ["Recorded:", "Kaydedildi:"], "Запись удалена": ["Record deleted", "Kayıt silindi"], "Удалить запись": ["Delete record", "Kaydı sil"], "Кассовые расходы за период:": ["Cash expenses for the period:", "Dönemin kasa giderleri:"], "Кассовые расходы за день": ["Cash expenses for the day", "Günün kasa giderleri"], "Касса (наличные)": ["Till (cash)", "Kasa (nakit)"], "Получено наличными": ["Received in cash", "Nakit alınan"], "Должно остаться в кассе": ["Should be left in the till", "Kasada kalması gereken"], "без учёта размена на начало дня": ["not counting the opening float", "gün başı bozuk para hariç"], "быстрые продажи считаются наличными": ["quick sales are counted as cash", "hızlı satışlar nakit sayılır"], "обед": ["lunch", "öğle yemeği"], "покупка": ["purchase", "alışveriş"], "другое": ["other", "diğer"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
