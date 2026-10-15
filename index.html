@@ -3134,7 +3134,7 @@ document.addEventListener("click", e=>{
 
 /* ---------- kitchen ticket printing (80 mm) ---------- */
 const autoPrint = () => lsGet("sushi.autoprint")!=="0";
-/* the kitchen ticket is always printed in Turkish (the cooks are Turkish), whatever the app language */
+/* the kitchen ticket is always printed in Turkish (the cooks are Turkish), whatever the app language; no money on it (no prices, promo marks, discount or courier fee) */
 const TK_SOURCES = {"Собственный: сайт":"Kendi: web sitesi","Собственный: Telegram-бот":"Kendi: Telegram botu","Другое":"Diğer"};
 const tkName = (x, fallback) => (x && x.name_tr) || fallback || (x && x.name) || "?";
 function ticketHtml(o, edited){
@@ -3144,11 +3144,11 @@ function ticketHtml(o, edited){
   const lines = (o.lines||[]).map(l=>{
     const st = l.kind==="set" ? setById(l.id) : null;
     const inner = st ? (st.items||[]).map(it=>{ const d = dishById(it.dishId); return `<div class="tk-sub">- ${esc(tkName(d))}${(Number(it.qty)||1)*(Number(l.qty)||1)>1?` ×${fmt((Number(it.qty)||1)*(Number(l.qty)||1))}`:""}</div>`; }).join("") : "";
-    return `<div class="tk-line"><b>${fmt(l.qty)} ×</b> ${esc(tkName(st || dishById(l.id), l.name))}${st?" (set)":""}${l.promo?(Number(l.price)>0?" · KAMPANYA":" · İKRAM"):""}</div>${inner}${l.comment?`<div class="tk-com">! ${esc(l.comment)}</div>`:""}`;
+    return `<div class="tk-line"><b>${fmt(l.qty)} ×</b> ${esc(tkName(st || dishById(l.id), l.name))}${st?" (set)":""}</div>${inner}${l.comment?`<div class="tk-com">! ${esc(l.comment)}</div>`:""}`;
   }).join("");
   const info = [];
   if (o.type!=="hall"){ if (o.name) info.push(esc(o.name)); if (o.phone) info.push(esc(o.phone)); }
-  if (o.type==="delivery"){ if (o.address) info.push(esc(o.address)); if (o.due) info.push("saat "+esc(o.due)); if (o.courier) info.push("kurye: "+esc(o.courier)); if (courFee(o)) info.push("KURYE ÜCRETİ: "+fmt(courFee(o))+" ₺"); }
+  if (o.type==="delivery"){ if (o.address) info.push(esc(o.address)); if (o.due) info.push("saat "+esc(o.due)); if (o.courier) info.push("kurye: "+esc(o.courier)); }
   if (o.type!=="hall" && o.source && o.source!==SOURCES[0]) info.push(esc(TK_SOURCES[o.source]||o.source));
   return `<div class="tk">
     <div class="tk-c">SUSHI YM</div>
@@ -3159,7 +3159,6 @@ function ticketHtml(o, edited){
     ${info.length ? `<div>${info.join("<br>")}</div>` : ""}
     <div class="tk-hr"></div>${lines}<div class="tk-hr"></div>
     ${o.comment ? `<div class="tk-com">! ${esc(o.comment)}</div>` : ""}
-    ${orderPct(o) ? `<div class="tk-com">SİPARİŞE %${fmt(orderPct(o))} İNDİRİM</div>` : ""}
     <div class="tk-c" style="margin-top:6px">Yazdırıldı: ${tm(new Date())}${S.me?` · ${esc(S.me.name)}`:""}</div></div>`;
 }
 /* payment receipt (for the customer): prices and total, no personal data (no name, phone, address) and no payment method; also in Turkish */
