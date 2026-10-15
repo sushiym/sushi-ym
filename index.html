@@ -244,6 +244,8 @@ dialog .search{flex:none}
 .oline .opromo .oprice{width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);font-size:.95rem}
 .oline.promo{background:color-mix(in srgb, #e9a400 9%, transparent)}
 .tag.promo{background:#e9a400;color:#1a1300}
+.oreq{font-size:.88rem;background:var(--low-bg);border-left:3px solid #c98a00;border-radius:var(--radius-s);padding:5px 8px}
+.oreq.rej{border-left-color:var(--line);color:var(--muted)}
 .odiscl{display:flex;justify-content:space-between;gap:8px;color:#9a6a00;font-weight:600}
 .odisc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:8px 10px;border:1px dashed var(--line);border-radius:var(--radius-s)}
 .odisc label{display:inline-flex;align-items:center;gap:6px}
@@ -692,6 +694,19 @@ details.finun{margin-top:10px}
   </div>
 </form></dialog>
 
+<dialog id="voidDlg"><form method="dialog" id="voidForm">
+  <h3 id="voidTitle">Отмена или списание заказа</h3>
+  <div class="seg seg22" role="radiogroup" aria-label="Что сделать с заказом">
+    <label><input type="radio" name="vkind" value="cancel" checked>Отмена заказа</label>
+    <label><input type="radio" name="vkind" value="writeoff">Списание заказа</label></div>
+  <p class="hint" id="voidHint"></p>
+  <label class="f"><span>Комментарий: причина <span class="hint">(обязательно)</span></span><textarea id="voidReason" rows="2" maxlength="300" autocomplete="off" placeholder="Например: тестовый заказ; клиент отказался платить"></textarea></label>
+  <p class="hint" id="voidNote"></p>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Закрыть</button>
+    <button type="submit" class="btn primary" id="voidOk">Отправить админу</button>
+  </div>
+</form></dialog>
 <dialog id="staffDlg"><form method="dialog" id="staffForm" autocomplete="off">
   <h3 id="staffTitle">Сотрудник</h3>
   <label class="f">Имя<input id="sfName" required autocomplete="off"></label>
@@ -949,13 +964,13 @@ function renderHist(L){
     const time = d.toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
     const del = !isAdmin() ? "" : `<button class="del" data-delmove="${esc(m.id)}" aria-label="Удалить операцию" title="Удалить операцию">×</button>`;
     if (e.batch){
-      const isSale = e.moves.some(x=>x.type==="sale");
-      const head = isSale ? e.moves.find(x=>x.type==="sale") : (e.moves.find(x=>x.type==="prod") || m);
+      const isSale = e.moves.some(x=>x.type==="sale"), isOff = !isSale && e.moves.some(x=>x.type==="off" && x.orderId);
+      const head = isSale ? e.moves.find(x=>x.type==="sale") : isOff ? m : (e.moves.find(x=>x.type==="prod") || m);
       const hp = byId(head.productId);
-      const title = isSale ? (head.batchLabel || "Продажа") : `${hp?hp.name:"?"}, ${fmt(head.delta)} ${head.unit||(hp?hp.unit:"")}`;
+      const title = isSale || isOff ? (head.batchLabel || "Продажа") + (isOff && head.note ? " — " + head.note.replace(/^Списание заказа: /, "") : "") : `${hp?hp.name:"?"}, ${fmt(head.delta)} ${head.unit||(hp?hp.unit:"")}`;
       const parts = e.moves.filter(x=>x.type!=="prod" && x.productId);
       const det = parts.length ? `<details class="det"><summary>Списано продуктов: ${parts.length}</summary>${parts.map(x=>{ const p=byId(x.productId); return `<div><span>${p?N(dn(p)):"Удалённый продукт"}</span><span>${fmt(x.delta)} ${esc(x.unit||(p?p.unit:""))}</span></div>`; }).join("")}</details>` : "";
-      html += `<div class="hist"><span><span class="tag ${isSale?"out":"prod"}">${isSale?"Продажа":"Приготовлено"}</span> ${esc(title)}</span><span></span>
+      html += `<div class="hist"><span><span class="tag ${isSale?"out":isOff?"off":"prod"}">${isSale?"Продажа":isOff?"Списание":"Приготовлено"}</span> ${esc(title)}</span><span></span>
         <span class="meta">${time}${m.who?", "+esc(m.who):""} ${del}</span>${det}</div>`;
     } else {
       const p = byId(m.productId); const t = TYPES[m.type]||TYPES.inv; const delta = Number(m.delta)||0;
@@ -1829,7 +1844,7 @@ $("#cutForm").addEventListener("submit", async e=>{
 const OTYPES = {hall:"Зал", takeaway:"Самовывоз", delivery:"Доставка"};
 const OSTAT = {new:"Принят", cooking:"Готовится", ready:"Готов", served:"Выдан", closed:"Закрыт", cancelled:"Отменён"};
 const servedLabel = t => t==="hall" ? "Подан" : t==="delivery" ? "Отправлен" : "Выдан";
-const statLabel = o => o.status==="served" ? servedLabel(o.type) : (OSTAT[o.status]||o.status);
+const statLabel = o => o.status==="cancelled" && o.voidKind==="writeoff" ? "Списан" : o.status==="served" ? servedLabel(o.type) : (OSTAT[o.status]||o.status);
 const SOURCES = ["Свои (телефон, на месте)","Собственный: сайт","Собственный: Telegram-бот","Yemeksepeti","Uber Eats","Migros Yemek","Другое"];
 const AGGREGATORS = ["Yemeksepeti","Uber Eats","Migros Yemek","Trendyol Yemek","Getir"];
 const PAYS = ["Наличные","Карта","Перевод","Агрегатор"];
@@ -1895,6 +1910,8 @@ const promoTag = l => l && l.promo ? ` <span class="tag promo">${Number(l.price)
 const promoPrice = l => l && l.promo && Number(l.basePrice)>0 && Number(l.basePrice)!==Number(l.price) ? `<s class="oldp">${money(l.basePrice*l.qty)}</s> ` : "";
 const orderById = id => S.orders.find(o=>o.id===id);
 const isOpen = o => o.status!=="closed" && o.status!=="cancelled";
+const VKIND = {cancel:"Отмена заказа", writeoff:"Списание заказа"};
+const voidReqOf = o => o && o.status==="closed" && o.voidReq && o.voidReq.status==="pending" ? o.voidReq : null;
 
 function packIng(o){
   const ing = {}; if (o.type==="hall") return ing;
@@ -1928,24 +1945,24 @@ function isLate(o){
 
 /* ----- board ----- */
 function renderOrdersControls(c){
-  const open = S.orders.filter(isOpen).length;
+  const open = S.orders.filter(isOpen).length, nReq = S.orders.filter(voidReqOf).length;
   const seg = (v, t) => `<button class="btn small ${S.ordView===v?"primary":""}" data-ordview="${v}">${t}</button>`;
   const acts = (can("orderEdit") ? `
       <button class="btn act-in" data-onew="hall">+ Новый заказ</button>` : "")
     + (can("sell") ? `<button class="btn act-cut ${S.ordView==="quick"?"primary":""}" data-ordview="quick">+ Быстрый заказ</button>` : "");
   c.innerHTML = (acts ? `<div class="actions oacts">${acts}</div>` : "") + `
-    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}
+    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}
       ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}</div>`;
 }
 function orderCard(o){
   const late = isLate(o), m = minsSince(o.createdAt);
   const lines = (o.lines||[]).map(l=>`<div><span>${fmt(l.qty)} × ${NL(l)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}${promoTag(l)}${l.comment?` <i>— ${esc(l.comment)}</i>`:""}</span><span>${showMoney()&&(l.price||l.promo)?promoPrice(l)+money(l.price*l.qty):""}</span></div>`).join("");
   const meta = [];
-  if (o.status==="cancelled" && o.cancelReason) meta.push("причина: "+esc(o.cancelReason)+(o.cancelledBy?" ("+esc(o.cancelledBy)+")":""));
+  if (o.status==="cancelled" && o.cancelReason) meta.push("причина: "+esc(o.cancelReason)+(o.cancelledBy?" ("+esc(o.cancelledBy)+(o.approvedBy?", одобрил(а) "+esc(o.approvedBy):"")+")":""));
   if (o.type!=="hall" && o.source) meta.push(esc(o.source));
   if (o.type==="delivery"){ if (o.address) meta.push(esc(o.address)); if (o.courier) meta.push("курьер: "+esc(o.courier)); if (o.due) meta.push("к "+esc(o.due)); }
   if (o.status==="closed" && o.payment) meta.push("оплата: "+esc(o.payment));
-  let btns = "";
+  let btns = "", reqBox = "";
   if (isOpen(o)){
     const next = {new:["cooking","Готовить"], cooking:["ready","Готов"], ready:["served", servedLabel(o.type)]}[o.status];
     const nextOk = next && (next[0]==="served" ? can("orderServe") : can("orderStatus"));
@@ -1953,8 +1970,16 @@ function orderCard(o){
       + (nextOk ? `<button class="btn small" data-onext="${esc(o.id)}" data-to="${next[0]}">${next[1]}</button>` : "")
       + (can("orderPay") ? `<button class="btn small primary" data-opay="${esc(o.id)}">Оплата и закрытие</button>` : "")
       + (can("orderCancel") ? `<button class="btn small danger" data-ocancel="${esc(o.id)}">Отменить заказ</button>` : "");
-  } else if (o.status==="closed" && isAdmin()){
-    btns = `<button class="btn small" data-oreopen="${esc(o.id)}">Вернуть в работу</button>`;
+  } else if (o.status==="closed"){
+    const rq = o.voidReq;
+    if (voidReqOf(o)){
+      reqBox = `<div class="oreq">Запрос: <b>${VKIND[rq.kind]||""}</b> — ${esc(rq.reason)} <small class="hint">(${esc(rq.by||"")})</small>${isAdmin()?"":`<br><small class="hint">Ждёт решения админа</small>`}</div>`;
+      if (isAdmin()) btns = `<button class="btn small" data-vno="${esc(o.id)}">Отклонить</button><button class="btn small primary" data-vok="${esc(o.id)}">Одобрить: ${VKIND[rq.kind]||""}</button>`;
+    } else {
+      if (rq && rq.status==="rejected") reqBox = `<div class="oreq rej">Админ отклонил запрос: ${VKIND[rq.kind]||""} — ${esc(rq.reason)}${rq.decidedBy?` <small class="hint">(${esc(rq.decidedBy)})</small>`:""}</div>`;
+      btns = (isAdmin() ? `<button class="btn small" data-oreopen="${esc(o.id)}">Вернуть в работу</button>` : "")
+        + (can("orderCancel") ? `<button class="btn small danger" data-ovoid="${esc(o.id)}">Отменить / Списать</button>` : "");
+    }
   }
   btns = `<button class="btn small" data-oprint="${esc(o.id)}" title="Распечатать на кухню">🖨 Печать</button>` + btns;
   const t = new Date(o.createdAt).toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
@@ -1964,6 +1989,7 @@ function orderCard(o){
     <div class="ometa"><span class="tag os-${o.status}">${statLabel(o)}</span> ${meta.join(" · ")}</div>
     <div class="olines">${lines || '<span class="hint">Пустой заказ</span>'}</div>
     ${o.comment ? `<div class="ocomment">${esc(o.comment)}</div>` : ""}
+    ${reqBox}
     ${showMoney()?discLine(o)+courLine(o):""}
     <div class="ofoot"><b>${showMoney()?money(orderTotal(o)):""}</b><span class="obtns">${btns}</span></div></div>`;
 }
@@ -1972,13 +1998,15 @@ function renderOrders(L){
   if (S.ordView==="report") return renderReport(L);
   if (S.ordView==="quick") return renderSale(L, stockMap());
   let list;
+  if (S.ordView==="req" && !isAdmin()) S.ordView = "open";
   if (S.ordView==="open") list = S.orders.filter(isOpen).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  else if (S.ordView==="req") list = S.orders.filter(voidReqOf).sort((a,b)=>(a.voidReq.ts||0)-(b.voidReq.ts||0));
   else { const dk = S.repDate||todayKey(); list = S.orders.filter(o=>!isOpen(o) && dayKey(o.closedAt||o.cancelledAt||o.createdAt)===dk).sort((a,b)=>(b.closedAt||b.cancelledAt||0)-(a.closedAt||a.cancelledAt||0)); }
   let quick = "";
   if (S.ordView==="closed"){ const dk = S.repDate||todayKey(); const qs = S.sales.filter(x=>!x.orderId && dayKey(x.ts||0)===dk).sort((a,b)=>(b.ts||0)-(a.ts||0));
     if (qs.length) quick = `<h2 class="cat"><span>Быстрые продажи</span><span>${qs.length}</span></h2><div class="ogrid">${qs.map(quickCard).join("")}</div>`; }
   L.innerHTML = list.length || quick ? (list.length ? `<div class="ogrid">${list.map(orderCard).join("")}</div>` : "") + quick
-    : `<div class="empty-state">${S.ordView==="open" ? "Открытых заказов нет. Нажмите «+ Новый заказ»." : "За этот день закрытых заказов нет."}</div>`;
+    : `<div class="empty-state">${S.ordView==="open" ? "Открытых заказов нет. Нажмите «+ Новый заказ»." : S.ordView==="req" ? "Запросов на отмену и списание нет." : "За этот день закрытых заказов нет."}</div>`;
 }
 
 function quickCard(sl){
@@ -1995,7 +2023,8 @@ function renderReport(L){
   const dk = S.repDate||todayKey();
   const sales = S.sales.filter(x=>dayKey(x.ts||0)===dk);
   const closed = S.orders.filter(o=>o.status==="closed" && dayKey(o.closedAt||0)===dk);
-  const cancelled = S.orders.filter(o=>o.status==="cancelled" && dayKey(o.cancelledAt||o.createdAt||0)===dk);
+  const voidedAll = S.orders.filter(o=>o.status==="cancelled" && dayKey(o.wasClosed ? (o.closedAt||0) : (o.cancelledAt||o.createdAt||0))===dk);
+  const cancelled = voidedAll.filter(o=>o.voidKind!=="writeoff"), writtenOff = voidedAll.filter(o=>o.voidKind==="writeoff");
   const saleTotal = sl => sl.total!=null ? Number(sl.total) : (sl.lines||[]).reduce((a,l)=>a+(Number(l.price)||itemPrice({kind:l.kind,id:l.refId}))*(Number(l.qty)||0),0);
   const agg = (keyFn) => { const m = {}; for (const sl of sales){ const k = keyFn(sl); m[k] = m[k] || {n:0, sum:0}; m[k].n++; m[k].sum += saleTotal(sl); } return Object.entries(m).sort((a,b)=>b[1].sum-a[1].sum); };
   const total = sales.reduce((a,sl)=>a+saleTotal(sl),0);
@@ -2006,7 +2035,7 @@ function renderReport(L){
   const top = Object.values(dishes).sort((a,b)=>b.qty-a.qty);
   const table = (title, rows) => rows.length ? `<h2 class="cat"><span>${title}</span></h2><div class="sum">${rows.map(([k,v])=>`<div><span>${esc(k)} <small class="hint">(${v.n})</small></span><b>${money(v.sum)}</b></div>`).join("")}</div>` : "";
   const cashList = cashOfDay(dk), cashOut = cashSums(cashList).total;
-  if (!sales.length && !cancelled.length && !cashList.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>`; return; }
+  if (!sales.length && !voidedAll.length && !cashList.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>`; return; }
   const ps = promoSummary(sales);
   const cashIn = sales.filter(sl=>sl.payment==="Наличные").reduce((a,sl)=>a+saleTotal(sl),0);
   const noPay = sales.filter(sl=>!sl.payment), noPaySum = noPay.reduce((a,sl)=>a+saleTotal(sl),0);
@@ -2014,7 +2043,8 @@ function renderReport(L){
       <div class="kpi"><small>Выручка</small><b>${money(total)}</b></div>
       <div class="kpi"><small>Закрыто заказов</small><b>${nOrders}</b></div>
       <div class="kpi"><small>Средний чек</small><b>${nOrders?money(closed.reduce((a,o)=>a+(Number(o.total)||orderTotal(o)),0)/nOrders):"—"}</b></div>
-      <div class="kpi"><small>Отменено</small><b>${cancelled.length}</b></div>${ps.n||ps.orders?`
+      <div class="kpi"><small>Отменено</small><b>${cancelled.length}</b></div>${writtenOff.length?`
+      <div class="kpi"><small>Списано (не оплачено)</small><b>${writtenOff.length}</b><small>${money(writtenOff.reduce((a,o)=>a+(Number(o.total)||orderTotal(o)),0))}</small></div>`:""}${ps.n||ps.orders?`
       <div class="kpi"><small>Скидки по акциям</small><b>${money(ps.disc)}</b><small>${[ps.n?fmt(ps.n)+" шт":"", ps.gifts?"подарков "+fmt(ps.gifts):"", ps.orders?"заказов со скидкой "+ps.orders:""].filter(Boolean).join(", ")}</small></div>`:""}</div>
     <h2 class="cat"><span>Касса (наличные)</span></h2><div class="sum">
       <div><span>Получено наличными</span><b>${money(cashIn)}</b></div>
@@ -2022,6 +2052,7 @@ function renderReport(L){
       <div class="subtot"><span>Должно остаться в кассе <small class="hint">без учёта размена на начало дня</small></span><b>${money(cashIn-cashOut)}</b></div></div>
     ${noPay.length ? `<p class="hint">Быстрые продажи (${noPay.length}, ${money(noPaySum)}) сюда не входят: у них не указан способ оплаты.</p>` : ""}
     ${cashList.length ? `<details class="det"><summary>Кассовые расходы за день</summary><div class="list" style="margin-top:8px">${cashList.map(x=>cashRow(x)).join("")}</div></details>` : ""}
+    ${voidedAll.some(o=>o.wasClosed) ? `<h2 class="cat"><span>Отменённые и списанные после закрытия</span></h2><div class="sum">${voidedAll.filter(o=>o.wasClosed).map(o=>`<div><span>№${esc(o.num)} <span class="tag os-cancelled">${statLabel(o)}</span> ${esc(o.cancelReason||"")} <small class="hint">${esc(o.cancelledBy||"")}${o.approvedBy?", одобрил(а) "+esc(o.approvedBy):""}</small></span><b>${money(Number(o.total)||orderTotal(o))}</b></div>`).join("")}</div>` : ""}
     ${table("По типу заказа", agg(typeName))}
     ${table("По способу оплаты", agg(sl=>sl.payment||"Не указан"))}
     ${table("По источнику", agg(sl=>sl.orderType && sl.orderType!=="hall" ? (sl.source||"Не указан") : (sl.orderType==="hall"?"Зал":"Продажи без заказа")))}
@@ -2130,7 +2161,7 @@ function renderFin(L){
       ${ps.n||ps.orders ? line("Скидки по акциям и подарки", money(ps.disc), "", "уже учтены в выручке, для сведения") : ""}
       ${line("Себестоимость проданного", neg(cogs), "", "продукты, списанные по техкартам")}
       ${line("Валовая прибыль", money(gross), "subtot", pct(gross,revenue))}
-      ${line("Списания (порча, брак)", neg(writeOff))}
+      ${line("Списания (порча, брак)", neg(writeOff), "", "и неоплаченные заказы")}
       ${manualOut ? line("Расход со склада вручную", neg(manualOut), "", "питание персонала, кухня") : ""}
       ${invLoss ? line(invLoss>0?"Недостача по инвентаризации":"Излишки по инвентаризации", neg(invLoss)) : ""}
       ${cashExps.length ? line("Кассовые расходы", neg(cashS.total), "", CASH_KINDS.filter(k=>cashS[k]).map(k=>k.toLowerCase()+" "+money(cashS[k])).join(", ")) : ""}
@@ -2502,10 +2533,67 @@ async function reopenOrder(id){
   if (!tConfirm(`Вернуть заказ №${o.num} в работу? Продажа будет отменена, продукты вернутся на склад.`)) return;
   const ops = S.moves.filter(m=>m.batchId && m.batchId===o.saleBatchId).map(m=>({col:"moves", id:m.id, after:null}));
   if (S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
-  const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.closedAt; delete n.saleBatchId;
+  const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.closedAt; delete n.saleBatchId; delete n.voidReq;
   ops.push({col:"orders", id, after:n});
   try { await commit(`Заказ №${o.num} возвращён в работу`, ops); S.ordView="open"; render(true); toast(`Заказ №${o.num} снова открыт`); }
   catch(err){ console.error(err); toast("Не удалось вернуть заказ."); }
+}
+
+/* ----- closed order: cancel (never happened, e.g. a test) or write off (not paid, products used) ----- */
+// worker sends a request (o.voidReq), nothing changes until the admin approves; the admin acts at once. The order is kept, marked cancelled.
+let voidId = null;
+function voidHint(){
+  const o = orderById(voidId); if (!o) return;
+  const k = (document.querySelector('input[name="vkind"]:checked')||{}).value || "cancel", cf = courFee(o)>0;
+  $("#voidHint").textContent = k==="cancel"
+    ? "Заказа не было (тест, ошибка). Выручка убирается, продукты возвращаются на склад." + (cf ? " Запись курьера в кассовых расходах удаляется." : "")
+    : "Оплату не получили, продукты израсходованы. Выручка убирается, продукты записываются в списание." + (cf ? " Запись курьера в кассовых расходах остаётся." : "");
+  $("#voidOk").textContent = isAdmin() ? (k==="cancel" ? "Отменить заказ" : "Списать заказ") : "Отправить админу";
+}
+function openVoid(id){
+  const o = orderById(id); if (!o || o.status!=="closed" || voidReqOf(o)) return; voidId = id;
+  $("#voidTitle").textContent = `Заказ №${o.num} · ${money(Number(o.total)||orderTotal(o))}`;
+  document.querySelector('input[name="vkind"][value="cancel"]').checked = true;
+  $("#voidReason").value = "";
+  $("#voidNote").textContent = isAdmin() ? "" : "Запрос уйдёт админу. Пока он не одобрит, ничего не изменится.";
+  voidHint(); $("#voidDlg").showModal(); $("#voidReason").focus();
+}
+document.addEventListener("change", e=>{ if (e.target.name==="vkind") voidHint(); });
+async function applyVoid(o, kind, reason, req){
+  const ts = Date.now(), me = S.me ? S.me.name : "", ops = [];
+  for (const m of S.moves.filter(m=>m.batchId && m.batchId===o.saleBatchId))
+    ops.push({col:"moves", id:m.id, after: kind==="cancel" ? null : Object.assign({}, m, {type:"off", note:"Списание заказа: "+reason, offAt:ts})});
+  if (S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
+  if (kind==="cancel") ops.push(...courOps(null, o.id));
+  const n = Object.assign({}, o, {status:"cancelled", voidKind:kind, wasClosed:true, cancelReason:reason, cancelledBy:req ? (req.by||"") : me, cancelledAt:ts, updatedAt:ts});
+  delete n.voidReq; if (req) n.approvedBy = me; else delete n.approvedBy;
+  ops.push({col:"orders", id:o.id, after:n});
+  await commit(`${kind==="cancel"?"Отменён":"Списан"} заказ №${o.num}`, ops);
+  toast(kind==="cancel" ? `Заказ №${o.num} отменён, продукты вернулись на склад` : `Заказ №${o.num} списан`);
+}
+$("#voidForm").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const o = orderById(voidId); if (!o || o.status!=="closed") return;
+  const kind = (document.querySelector('input[name="vkind"]:checked')||{}).value || "cancel";
+  const reason = $("#voidReason").value.trim();
+  if (!reason){ toast("Напишите комментарий: причину отмены или списания"); $("#voidReason").focus(); return; }
+  await guarded(async ()=>{
+    try {
+      if (isAdmin()) await applyVoid(o, kind, reason, null);
+      else { const rq = {kind, reason, by:S.me?S.me.name:"", byId:S.me?S.me.id:"", ts:Date.now(), status:"pending"};
+        await commit(`Запрос: ${VKIND[kind]} №${o.num}`, [{col:"orders", id:o.id, after:Object.assign({}, o, {voidReq:rq, updatedAt:Date.now()})}]);
+        toast("Запрос отправлен админу на согласование"); }
+      $("#voidDlg").close(); render();
+    } catch(err){ console.error(err); render(); toast("Не удалось сохранить. Проверьте права на изменение."); }
+  });
+});
+async function decideVoid(id, ok){
+  const o = orderById(id), rq = voidReqOf(o); if (!rq || !isAdmin()) return;
+  try {
+    if (ok){ if (!tConfirm(`${VKIND[rq.kind]} №${o.num}: одобрить?`)) return; await applyVoid(o, rq.kind, rq.reason, rq); }
+    else { await commit(`Отклонён запрос по заказу №${o.num}`, [{col:"orders", id, after:Object.assign({}, o, {voidReq:Object.assign({}, rq, {status:"rejected", decidedBy:S.me?S.me.name:"", decidedAt:Date.now()}), updatedAt:Date.now()})}]); toast("Запрос отклонён"); }
+    render();
+  } catch(err){ console.error(err); render(); toast("Не удалось сохранить. Проверьте права на изменение."); }
 }
 
 /* ----- packaging settings ----- */
@@ -3066,7 +3154,7 @@ $("#navBtn").addEventListener("click", ()=>setNav(!document.body.classList.conta
 $("#navShade").addEventListener("click", ()=>setNav(false));
 document.addEventListener("keydown", e=>{ if (e.key==="Escape" && document.body.classList.contains("navOpen")) setNav(false); });
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-onew],[data-oedit],[data-onext],[data-opay],[data-ocancel],[data-oreopen],[data-ordview],#openPack,#openCut,[data-add],[data-editdish],[data-editset],#addDish,#addSet,#openCart,#quickSell,[data-new],[data-cook],[data-prod],[data-edit],[data-delmove],[data-go],#addProd,#invSave,#invReset");
+  const t = e.target.closest("[data-onew],[data-oedit],[data-onext],[data-opay],[data-ocancel],[data-oreopen],[data-ovoid],[data-vok],[data-vno],[data-ordview],#openPack,#openCut,[data-add],[data-editdish],[data-editset],#addDish,#addSet,#openCart,#quickSell,[data-new],[data-cook],[data-prod],[data-edit],[data-delmove],[data-go],#addProd,#invSave,#invReset");
   if (!t) return;
   if ((t.dataset.new || t.dataset.cook!==undefined || t.id==="openCut") && !can("move")) return;
   if ((t.dataset.edit || t.id==="addProd" || t.dataset.delmove || t.dataset.oreopen || t.id==="openPack" || t.id==="addDish" || t.id==="addSet") && !isAdmin()) return;
@@ -3080,6 +3168,10 @@ document.addEventListener("click", async e => {
   if (t.dataset.opay) return openPay(t.dataset.opay);
   if (t.dataset.ocancel) return guarded(()=>cancelOrder(t.dataset.ocancel));
   if (t.dataset.oreopen) return guarded(()=>reopenOrder(t.dataset.oreopen));
+  if (t.dataset.ovoid){ if (!can("orderCancel")) return; return openVoid(t.dataset.ovoid); }
+  if ((t.dataset.vok || t.dataset.vno) && !isAdmin()) return;
+  if (t.dataset.vok) return guarded(()=>decideVoid(t.dataset.vok, true));
+  if (t.dataset.vno) return guarded(()=>decideVoid(t.dataset.vno, false));
   if (t.dataset.ordview){ S.ordView = t.dataset.ordview; return render(true); }
   if (t.id==="openPack") return openPack();
   if (t.id==="openCut") return openCut();
@@ -3101,7 +3193,7 @@ document.addEventListener("click", async e => {
   if (t.dataset.delmove){
     const m = S.moves.find(x=>x.id===t.dataset.delmove); const p = m && byId(m.productId);
     const group = m.batchId ? S.moves.filter(x=>x.batchId===m.batchId) : [m];
-    const msg = group.some(x=>x.type==="sale") ? `Удалить продажу «${m.batchLabel||""}» целиком? Списанные продукты вернутся на склад.` : group.length>1 ? `Это часть приготовления (${group.length} записей: заготовка и списанные продукты). Удалить всё приготовление целиком? Остатки пересчитаются.`
+    const msg = group.some(x=>x.type==="off" && x.orderId) ? `Удалить списание «${m.batchLabel||""}» целиком? Продукты вернутся на склад.` : group.some(x=>x.type==="sale") ? `Удалить продажу «${m.batchLabel||""}» целиком? Списанные продукты вернутся на склад.` : group.length>1 ? `Это часть приготовления (${group.length} записей: заготовка и списанные продукты). Удалить всё приготовление целиком? Остатки пересчитаются.`
       : `Удалить операцию «${TYPES[m.type]?.label||""}: ${p?p.name:""}, ${fmt(m.delta)}»? Остаток пересчитается.`;
     if (!tConfirm(msg)) return;
     const dops = group.map(g=>({col:"moves", id:g.id, after:null}));
@@ -3180,6 +3272,7 @@ Object.assign(I18N, {"Приход списком": ["Bulk receipt", "Toplu giri
 Object.assign(I18N, {"Скопировать список блюд": ["Copy dish list", "Yemek listesini kopyala"], "Вставить готовые тексты": ["Paste ready texts", "Hazır metinleri yapıştır"], "Подставить тексты": ["Fill in texts", "Metinleri yerleştir"], "уже заполнено": ["already filled", "zaten dolu"], "Блюд пока нет.": ["No dishes yet.", "Henüz yemek yok."]});
 Object.assign(I18N, {"Кассовые расходы": ["Cash expenses", "Kasa giderleri"], "Кассовый расход": ["Cash expense", "Kasa gideri"], "+ Кассовый расход": ["+ Cash expense", "+ Kasa gideri"], "Исправить кассовый расход": ["Edit cash expense", "Kasa giderini düzelt"], "Обед": ["Lunch", "Öğle yemeği"], "Покупка": ["Purchase", "Alışveriş"], "Другое": ["Other", "Diğer"], "Вид траты": ["Expense type", "Gider türü"], "На что потрачено": ["What it was spent on", "Ne için harcandı"], "Например: чай, сахар": ["E.g.: tea, sugar", "Örn.: çay, şeker"], "Деньги, взятые из кассы: обед, мелкие покупки (чай, соль, сахар, перец…). Вычитаются из дохода дня в «Финансах».": ["Money taken from the till: lunch, small purchases (tea, salt, sugar, pepper…). Subtracted from the day's income in “Finance”.", "Kasadan alınan para: öğle yemeği, küçük alışverişler (çay, tuz, şeker, biber…). «Finans» bölümünde günün gelirinden düşülür."], "Записывайте каждый раз, когда берёте деньги из кассы: на обед или мелкие покупки (чай, соль, сахар…).": ["Record every time you take money from the till: for lunch or small purchases (tea, salt, sugar…).", "Kasadan her para aldığınızda yazın: öğle yemeği veya küçük alışverişler için (çay, tuz, şeker…)."], "Сумма вычитается из дохода дня в «Финансах». Нажмите на запись, чтобы исправить или удалить.": ["The amount is subtracted from the day's income in “Finance”. Tap a record to edit or delete it.", "Tutar «Finans» bölümünde günün gelirinden düşülür. Düzeltmek veya silmek için kayda dokunun."], "Свои записи за сегодня можно исправить: нажмите на запись.": ["You can edit your own records for today: tap a record.", "Bugünkü kendi kayıtlarınızı düzeltebilirsiniz: kayda dokunun."], "взято из кассы": ["taken from the till", "kasadan alındı"], "запись": ["record", "kayıt"], "записи": ["records", "kayıt"], "записей": ["records", "kayıt"], "За этот день записей нет. Нажмите «+ Кассовый расход».": ["No records for this day. Tap “+ Cash expense”.", "Bu gün için kayıt yok. «+ Kasa gideri»ne dokunun."], "Записал(а):": ["Recorded by:", "Kaydeden:"], "Записывает:": ["Recorded by:", "Kaydeden:"], "исправил(а)": ["edited by", "düzelten"], "Напишите, на что потрачено": ["Write what it was spent on", "Ne için harcandığını yazın"], "Исправлено": ["Corrected", "Düzeltildi"], "Записано:": ["Recorded:", "Kaydedildi:"], "Запись удалена": ["Record deleted", "Kayıt silindi"], "Удалить запись": ["Delete record", "Kaydı sil"], "Кассовые расходы за период:": ["Cash expenses for the period:", "Dönemin kasa giderleri:"], "Кассовые расходы за день": ["Cash expenses for the day", "Günün kasa giderleri"], "Касса (наличные)": ["Till (cash)", "Kasa (nakit)"], "Получено наличными": ["Received in cash", "Nakit alınan"], "Должно остаться в кассе": ["Should be left in the till", "Kasada kalması gereken"], "без учёта размена на начало дня": ["not counting the opening float", "gün başı bozuk para hariç"], "Быстрые продажи": ["Quick sales", "Hızlı satışlar"], "сюда не входят: у них не указан способ оплаты.": ["are not included: they have no payment method.", "dahil değil: ödeme yöntemi belirtilmemiş."], "обед": ["lunch", "öğle yemeği"], "покупка": ["purchase", "alışveriş"], "другое": ["other", "diğer"]});
 Object.assign(I18N, {"Телефон Android": ["Android phone", "Android telefon"], "Планшет Android": ["Android tablet", "Android tablet"], "Компьютер Windows": ["Windows computer", "Windows bilgisayar"], "Компьютер Linux": ["Linux computer", "Linux bilgisayar"], "Устройство": ["Device", "Cihaz"], "Устройства": ["Devices", "Cihazlar"], "главное": ["main", "ana"], "это устройство": ["this device", "bu cihaz"], "ждёт разрешения": ["waiting for approval", "onay bekliyor"], "отключено": ["disconnected", "bağlantısı kesildi"], "Переименовать": ["Rename", "Yeniden adlandır"], "Разрешить": ["Allow", "İzin ver"], "Сделать главным": ["Make main", "Ana cihaz yap"], "Снять «главное»": ["Remove «main»", "«Ana» işaretini kaldır"], "Отключить": ["Disconnect", "Bağlantıyı kes"], "Убрать из списка": ["Remove from list", "Listeden kaldır"], "Сделать это устройство главным": ["Make this device main", "Bu cihazı ana cihaz yap"], "(приложение)": ["(app)", "(uygulama)"], "код": ["code", "kod"], "В сети:": ["Online:", "Çevrimiçi:"], "вход:": ["login:", "giriş:"], "ждут:": ["waiting:", "bekleyen:"], "Новые устройства — только с разрешения": ["New devices only with approval", "Yeni cihazlar yalnızca onayla"], "Управлять устройствами можно только с главного устройства.": ["Devices can be managed only from a main device.", "Cihazlar yalnızca ana cihazdan yönetilebilir."], "Главного устройства пока нет — откройте программу на своём устройстве и нажмите «Сделать это устройство главным».": ["There is no main device yet: open the app on your device and press «Make this device main».", "Henüz ana cihaz yok: programı kendi cihazınızda açın ve «Bu cihazı ana cihaz yap» düğmesine basın."], "Главное устройство отключить нельзя. Отключённое устройство выходит из программы, как только появится интернет.": ["A main device cannot be disconnected. A disconnected device leaves the app as soon as it is online.", "Ana cihazın bağlantısı kesilemez. Bağlantısı kesilen cihaz internete bağlanır bağlanmaz programdan çıkar."], "Подтвердите PIN админа": ["Confirm the admin PIN", "Yönetici PIN'ini onaylayın"], "Подтвердить": ["Confirm", "Onayla"], "Неверный PIN": ["Wrong PIN", "Yanlış PIN"], "Это устройство теперь главное": ["This device is now main", "Bu cihaz artık ana cihaz"], "Устройство разрешено": ["Device allowed", "Cihaza izin verildi"], "Устройство отключено": ["Device disconnected", "Cihazın bağlantısı kesildi"], "Новые устройства будут ждать вашего разрешения": ["New devices will wait for your approval", "Yeni cihazlar onayınızı bekleyecek"], "Новые устройства подключаются без разрешения": ["New devices connect without approval", "Yeni cihazlar onaysız bağlanır"], "Новое устройство ждёт разрешения: Сотрудники → Устройства": ["A new device is waiting for approval: Staff → Devices", "Yeni bir cihaz onay bekliyor: Personel → Cihazlar"], "Новое устройство ждёт разрешения администратора.": ["This new device is waiting for the administrator's approval.", "Bu yeni cihaz yöneticinin onayını bekliyor."], "Попросите администратора: на главном устройстве откройте «Сотрудники» → «Устройства» и нажмите «Разрешить» у этого устройства. Программа откроется сама.": ["Ask the administrator to open «Staff» → «Devices» on a main device and press «Allow» for this device. The app will open by itself.", "Yöneticiden ana cihazda «Personel» → «Cihazlar» bölümünü açıp bu cihaz için «İzin ver» düğmesine basmasını isteyin. Program kendiliğinden açılacak."], "Код устройства:": ["Device code:", "Cihaz kodu:"], "Это устройство отключено администратором.": ["This device was disconnected by the administrator.", "Bu cihazın bağlantısı yönetici tarafından kesildi."], "Подключить его снова можно только после того, как администратор нажмёт «Разрешить» на главном устройстве.": ["It can be connected again only after the administrator presses «Allow» on a main device.", "Yönetici ana cihazda «İzin ver» düğmesine bastıktan sonra tekrar bağlanabilir."], "Название устройства (например: Планшет кухня):": ["Device name (for example: Kitchen tablet):", "Cihaz adı (örneğin: Mutfak tableti):"]});
+Object.assign(I18N, {"Отмена или списание заказа": ["Cancel or write off order", "Siparişi iptal et veya fireye yaz"], "Что сделать с заказом": ["What to do with the order", "Siparişle ne yapılacak"], "Отменить / Списать": ["Cancel / Write off", "İptal / Fire"], "Списать заказ": ["Write off order", "Siparişi fireye yaz"], "Списан": ["Written off", "Fireye yazıldı"], "Комментарий: причина": ["Comment: reason", "Açıklama: neden"], "Например: тестовый заказ; клиент отказался платить": ["E.g.: test order; customer refused to pay", "Örn.: deneme siparişi; müşteri ödemeyi reddetti"], "Отправить админу": ["Send to admin", "Yöneticiye gönder"], "Заказа не было (тест, ошибка). Выручка убирается, продукты возвращаются на склад.": ["The order never happened (test, mistake). Revenue is removed, products go back to stock.", "Sipariş hiç olmadı (deneme, hata). Ciro silinir, ürünler stoğa geri döner."], "Оплату не получили, продукты израсходованы. Выручка убирается, продукты записываются в списание.": ["Payment not received, products were used. Revenue is removed, products are recorded as write-off.", "Ödeme alınmadı, ürünler kullanıldı. Ciro silinir, ürünler fireye yazılır."], "Запись курьера в кассовых расходах удаляется.": ["The courier record in cash expenses is removed.", "Kasa giderlerindeki kurye kaydı silinir."], "Запись курьера в кассовых расходах остаётся.": ["The courier record in cash expenses stays.", "Kasa giderlerindeki kurye kaydı kalır."], "Запрос уйдёт админу. Пока он не одобрит, ничего не изменится.": ["The request goes to the admin. Nothing changes until it is approved.", "Talep yöneticiye gider. Onaylanana kadar hiçbir şey değişmez."], "Напишите комментарий: причину отмены или списания": ["Write a comment: the reason for cancelling or writing off", "Açıklama yazın: iptal veya fire nedeni"], "Запрос отправлен админу на согласование": ["Request sent to the admin for approval", "Talep onay için yöneticiye gönderildi"], "Ждёт решения админа": ["Waiting for the admin's decision", "Yönetici kararı bekleniyor"], "Админ отклонил запрос": ["The admin rejected the request", "Yönetici talebi reddetti"], "Одобрить": ["Approve", "Onayla"], "Запросы на отмену": ["Cancel requests", "İptal talepleri"], "Запросов на отмену и списание нет.": ["No cancel or write-off requests.", "İptal veya fire talebi yok."], "одобрил(а)": ["approved by", "onaylayan"], "Запрос отклонён": ["Request rejected", "Talep reddedildi"], "Списано (не оплачено)": ["Written off (unpaid)", "Fire (ödenmedi)"], "Отменённые и списанные после закрытия": ["Cancelled and written off after closing", "Kapandıktan sonra iptal ve fire"], "и неоплаченные заказы": ["and unpaid orders", "ve ödenmemiş siparişler"], "отменён, продукты вернулись на склад": ["cancelled, products returned to stock", "iptal edildi, ürünler stoğa döndü"], "списан": ["written off", "fireye yazıldı"], "одобрить?": ["approve?", "onaylansın mı?"], "Удалить списание": ["Delete write-off", "Fire kaydını sil"], "Отмена заказа": ["Order cancellation", "Sipariş iptali"], "Списание заказа": ["Order write-off", "Sipariş firesi"], "Одобрить:": ["Approve:", "Onayla:"], "Запрос": ["Request", "Talep"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
