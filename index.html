@@ -3198,7 +3198,7 @@ window.addEventListener("afterprint", ()=>{ document.title = APP_TITLE; });
 function printHtml(html, title){
   const pa = $("#printArea"); if (!pa) return;
   pa.innerHTML = html;
-  if (title){ document.title = title; setTimeout(()=>{ document.title = APP_TITLE; }, 60000); }
+  if (title){ document.title = title; clearTimeout(printHtml.t); printHtml.t = setTimeout(()=>{ document.title = APP_TITLE; }, 60000); }
   try { trObs.disconnect(); } catch(e){}
   let ok = true;
   try { if (typeof window.print !== "function") ok = false; else window.print(); } catch(e){ ok = false; }
