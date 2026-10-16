@@ -460,6 +460,7 @@ details.finun{margin-top:10px}
 
 <dialog id="prodDlg"><form method="dialog" id="prodForm">
   <h3 id="prodTitle">Продукт</h3>
+  <div class="oreq" id="pPropNote" hidden></div>
   <label class="f">Название<input id="pName" required autocomplete="off"></label>
   <div class="two"><label class="f">Название EN<input id="pNameEn" autocomplete="off"></label><label class="f">Название TR<input id="pNameTr" autocomplete="off"></label></div>
   <label class="f">Раздел<select id="pCat"></select></label>
@@ -486,11 +487,13 @@ details.finun{margin-top:10px}
         <span class="inline"><input id="rYield" inputmode="decimal" autocomplete="off" aria-label="Выход"><span id="rYieldUnit"></span></span></label>
       <div class="f" style="gap:6px"><span>Продукты на этот выход</span><div id="rItems" style="display:flex;flex-direction:column;gap:6px"></div></div>
       <button type="button" class="btn small" id="rAdd" style="align-self:flex-start">+ Добавить продукт</button>
+      <button type="button" class="btn small" id="rNewProd" style="align-self:flex-start" hidden>+ Новый продукт (нет на складе)</button>
     </div>
   </div>
+  <label class="f" id="pPropMsgBox" hidden>Комментарий для админа<input id="pPropMsg" autocomplete="off" placeholder="Например: где покупать, для какого блюда"></label>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
-    <button type="submit" class="btn primary">Сохранить</button>
+    <button type="submit" class="btn primary" id="pSave">Сохранить</button>
   </div>
 </form></dialog>
 
@@ -500,7 +503,22 @@ details.finun{margin-top:10px}
   <div class="actions" id="pcActs" style="margin:0"></div>
   <div class="dlg-actions">
     <button type="button" class="btn" id="pcEdit">Изменить продукт</button>
+    <button type="button" class="btn" id="pcPropose" hidden>Предложить изменения</button>
     <button type="button" class="btn" data-close>Закрыть</button>
+  </div>
+</form></dialog>
+
+<dialog id="npDlg"><form method="dialog" id="npForm">
+  <h3 id="npTitle">Новый продукт для склада</h3>
+  <p class="hint" style="margin:0">Продукт появится на складе только после одобрения админа.</p>
+  <label class="f">Название<input id="npName" autocomplete="off"></label>
+  <div class="two"><label class="f">Раздел<select id="npCat"></select></label><label class="f">Единица<select id="npUnit"></select></label></div>
+  <label class="f"><span>Цена закупки за 1 <span id="npCostUnit">кг</span>, ₺ <small class="hint">(если знаете)</small></span><input id="npCost" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+  <label class="f">Описание<textarea id="npDesc" rows="2" autocomplete="off" placeholder="Например: где покупать, как хранить"></textarea></label>
+  <div class="dlg-actions">
+    <button type="button" class="btn danger" id="npDel" hidden>Убрать из предложения</button><span class="spacer"></span>
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Готово</button>
   </div>
 </form></dialog>
 
@@ -529,6 +547,7 @@ details.finun{margin-top:10px}
 
 <dialog id="dishDlg"><form method="dialog" id="dishForm">
   <h3 id="dishTitle">Блюдо</h3>
+  <div class="oreq" id="dPropNote" hidden></div>
   <label class="f">Название<input id="dName" required autocomplete="off"></label>
   <div class="two"><label class="f">Раздел меню<select id="dCat"></select></label><label class="f">Цена, ₺<input id="dPrice" inputmode="decimal" autocomplete="off" placeholder="0"></label></div>
   <div class="two"><label class="f">Название EN<input id="dNameEn" autocomplete="off"></label><label class="f">Название TR<input id="dNameTr" autocomplete="off"></label></div>
@@ -538,6 +557,9 @@ details.finun{margin-top:10px}
   <label class="f">Блюдо — это готовая заготовка со склада?<select id="dFromPrep"></select></label>
   <div class="f" style="gap:6px"><span>Техкарта: что списывается за 1 порцию</span><div id="dItems" style="display:flex;flex-direction:column;gap:6px"></div></div>
   <button type="button" class="btn small" id="dAdd" style="align-self:flex-start">+ Добавить продукт</button>
+  <div class="box" id="dNewBox" hidden style="gap:6px"><span class="hint" style="margin:0">Нужного продукта нет на складе? Добавьте новый — он появится в списке продуктов техкарты и уйдёт админу вместе с блюдом.</span>
+    <div id="dNewList" class="prev"></div>
+    <div class="controls" style="margin:0"><button type="button" class="btn small" id="dNewProd">+ Новый продукт</button><button type="button" class="btn small" id="dNewPrep">+ Новая заготовка</button></div></div>
   <label class="f" id="dMethodBox">Способ приготовления<textarea id="dMethod" rows="2" maxlength="1000" autocomplete="off" placeholder="Коротко: что и в каком порядке делать"></textarea></label>
   <div class="costbox" id="dCost" hidden></div>
   <p class="hint" id="dSets"></p>
@@ -545,10 +567,12 @@ details.finun{margin-top:10px}
     <div id="dPackBox" hidden style="display:flex;flex-direction:column;gap:6px"><div id="dPack" class="plist" style="display:flex;flex-direction:column;gap:6px"></div>
     <button type="button" class="btn small" data-padd="#dPack" style="align-self:flex-start">+ Добавить упаковку</button>
     <p class="hint" style="margin:0">Оставьте пустой список, если упаковка для этого блюда не нужна.</p></div></div>
+  <label class="f" id="dPropMsgBox" hidden>Комментарий для админа<input id="dPropMsg" autocomplete="off" placeholder="Например: зачем это блюдо, где взять продукт"></label>
   <div class="dlg-actions">
     <button type="button" class="btn danger" id="dDel">Удалить</button><span class="spacer"></span>
+    <button type="button" class="btn" id="dPropose" hidden>Предложить изменения</button>
     <button type="button" class="btn" data-close>Отмена</button>
-    <button type="submit" class="btn primary">Сохранить</button>
+    <button type="submit" class="btn primary" id="dSave">Сохранить</button>
   </div>
 </form></dialog>
 
@@ -765,6 +789,9 @@ const HINTS = {in:"Товар пришёл от поставщика или с �
 
 const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
 
+S.proposals = []; S.propLoaded = false;
+// worker proposals (new dish / product / prep) being edited; pending products of it resolve through byId while open
+let PROP = null, propMode = false;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num = v => { if (v == null) return NaN; v = String(v).trim().replace(/\s/g,"").replace(",","."); return v === "" ? NaN : Number(v); };
@@ -828,7 +855,7 @@ async function delDoc(col, id){ if (S.db) await S.db.doc(col + "/" + id).delete(
 
 /* ---------- undo / redo ---------- */
 const UNDO = [], REDO = [];
-const colArr = col => (["products","recipes","moves","menu","sets","sales","orders","settings","expenses","staff","invdrafts","shifts"].includes(col) ? col : "moves");
+const colArr = col => (["products","recipes","moves","menu","sets","sales","orders","settings","expenses","staff","invdrafts","shifts","proposals"].includes(col) ? col : "moves");
 const clone = o => o ? JSON.parse(JSON.stringify(o)) : null;
 async function applyOp(col, id, val){
   const key = colArr(col);
@@ -885,8 +912,9 @@ function sortedProducts(){
     return (a.order??9999)-(b.order??9999) || String(a.name).localeCompare(b.name,"ru");
   });
 }
-function allCats(){ const s = new Set(CATS); S.products.forEach(p=>p.category && s.add(p.category)); return [...s]; }
-const byId = id => S.products.find(p=>p.id===id);
+function allCats(){ const s = new Set(CATS); S.products.forEach(p=>p.category && s.add(p.category)); if (PROP) [...(PROP.products||[]), PROP.prod].forEach(p=>p && p.category && s.add(p.category)); return [...s]; }
+const byId = id => S.products.find(p=>p.id===id) || propProd(id);
+function propProd(id){ if (!PROP || !id) return undefined; return (PROP.products||[]).find(p=>p.id===id) || (PROP.prod && PROP.prod.id===id ? PROP.prod : undefined); }
 
 /* ---------- render ---------- */
 function renderChips(){
@@ -899,7 +927,7 @@ function renderChips(){
     (empty ? `<button class="chip alert" data-go="low"><b>${empty}</b>нет в наличии</button>` : "");
 }
 function renderNotice(){
-  $("#notice").innerHTML = S.noDb ? `<div class="notice">Не удалось подключиться к базе. Проверьте интернет и откройте программу ещё раз.</div>` : "";
+  $("#notice").innerHTML = S.noDb ? `<div class="notice">Не удалось подключиться к базе. Проверьте интернет и откройте программу ещё раз.</div>` : propNotice();
 }
 function renderControls(){
   const c = $("#controls");
@@ -908,7 +936,7 @@ function renderControls(){
         <button class="btn act-in" data-new="in">Движение запасов</button>
         <button class="btn act-cook" data-cook="">Приготовить</button>
         <button class="btn act-cut" id="openCut">Разделка лосося</button></div>` + (can("move") ? "" : "-->") + `
-      ${isAdmin() ? `<div class="controls"><button class="btn primary" id="addProd">Добавить продукт</button></div>` : ""}
+      ${isAdmin() ? `<div class="controls"><button class="btn primary" id="addProd">Добавить продукт</button></div>` : can("propose") ? `<div class="controls"><button class="btn" data-propnew="prod">+ Предложить продукт или заготовку</button></div>` : ""}
       <div class="controls"><input class="search" id="q" type="search" placeholder="Найти продукт" value="${esc(S.q)}" aria-label="Поиск продукта">
       <label class="toggle"><input type="checkbox" id="lowOnly" ${S.lowOnly?"checked":""}> Только заканчивающиеся</label>
       ${isAdmin() ? `<label class="toggle"><input type="checkbox" id="showHidden" ${S.showHidden?"checked":""}> Показать скрытые и без учёта</label>` : ""}</div>
@@ -919,7 +947,7 @@ function renderControls(){
       <p class="hint" style="margin:0 0 10px">Нажимайте на блюда и сеты — они добавятся в чек. Потом нажмите «Провести», и продукты спишутся по техкартам.</p>`;
   } else if (S.view==="menu"){
     const nn = S.menu.filter(d=>d.needsWork).length + S.sets.filter(x=>x.needsWork).length;
-    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button></div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
+    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button></div>` : (can("propose") ? `<div class="controls"><button class="btn primary" data-propnew="dish">+ Предложить новое блюдо</button></div><p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Новое блюдо или изменения в техкарте можно предложить — их проверит админ.</p>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`)) + `
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
@@ -942,10 +970,10 @@ function renderList(){
   const L = $("#list");
   if (waiting()){ L.innerHTML = `<div class="empty-state">Загружаю данные склада…</div>`; return; }
   const st = stockMap();
-  if (S.view==="stock") return renderStock(L, st);
+  if (S.view==="stock"){ renderStock(L, st); return L.insertAdjacentHTML("afterbegin", propCards("stock")); }
   if (S.view==="hist") return renderHist(L);
   if (S.view==="orders") return renderOrders(L);
-  if (S.view==="menu") return renderMenu(L);
+  if (S.view==="menu"){ renderMenu(L); return L.insertAdjacentHTML("afterbegin", propCards("menu")); }
   if (S.view==="inv") return renderInv(L, st);
   if (S.view==="cash") return renderCash(L);
   if (S.view==="fin") return renderFin(L);
@@ -1172,17 +1200,11 @@ $("#bulkForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async
 
 /* ---------- product dialog ---------- */
 let editingId = null;
-const recipeOf = id => S.recipes.find(r=>r.id===id || r.productId===id);
+const recipeOf = id => S.recipes.find(r=>r.id===id || r.productId===id) || propRecipe(id);
+function propRecipe(id){ if (!PROP || S.products.some(p=>p.id===id)) return undefined; const p = propProd(id); return p && p.recipe ? Object.assign({id, productId:id}, p.recipe) : undefined; }
 function usedIn(id){ return S.recipes.filter(r=>(r.items||[]).some(i=>i.productId===id)).map(r=>byId(r.productId||r.id)).filter(Boolean); }
 function ritemHtml(item){
-  const self = editingId;
-  let opts = `<option value="">Продукт…</option>`, cur=null;
-  for (const p of sortedProducts()){
-    if (p.id===self) continue;
-    if (p.category!==cur){ if (cur!==null) opts+="</optgroup>"; opts += `<optgroup label="${esc(p.category)}">`; cur=p.category; }
-    opts += `<option value="${esc(p.id)}" ${item&&item.productId===p.id?"selected":""}>${esc(dn(p))}</option>`;
-  }
-  if (cur!==null) opts+="</optgroup>";
+  const opts = prodOptions(item ? item.productId : "", editingId);
   const u = item && byId(item.productId) ? byId(item.productId).unit : "";
   return `<div class="ritem"><select class="rProd" aria-label="Продукт">${opts}</select><input class="rQty" inputmode="decimal" autocomplete="off" aria-label="Количество" value="${item?esc(String(item.qty).replace(".",",")):""}"><span class="rUnit">${esc(u)}</span><button type="button" class="rDel" aria-label="Убрать продукт">×</button></div>`;
 }
@@ -1190,7 +1212,7 @@ function syncRecipeVisibility(){ $("#recipeFields").hidden = !$("#pHasRecipe").c
 function syncUnitConv(){
   const old = editingId ? byId(editingId) : null, box = $("#unitConv"), nu = $("#pUnit").value;
   $("#rYieldUnit").textContent = nu;
-  if (!old || old.unit===nu){ box.hidden = true; return; }
+  if (!old || old.unit===nu || !S.products.some(x=>x.id===old.id)){ box.hidden = true; return; }
   const st = stockMap()[old.id]||0, users = usedIn(old.id);
   box.hidden = false;
   $("#ucOld").textContent = `${fmt(st)} ${old.unit}`;
@@ -1199,8 +1221,8 @@ function syncUnitConv(){
   box.firstElementChild.style.display = st===0 ? "none" : "";
   $("#ucRec").innerHTML = users.length ? `Продукт входит в рецепты: ${users.map(u=>N(dn(u))).join(", ")}. После сохранения проверьте в них количество — оно было в «${esc(old.unit)}».` : (st===0 ? "Остаток нулевой, пересчитывать нечего." : "");
 }
-function openProd(id){
-  editingId = id; const p = id ? byId(id) : null, r = id ? recipeOf(id) : null;
+function openProd(id, pOver, rOver){
+  editingId = id; const p = pOver || (id ? byId(id) : null), r = rOver !== undefined ? rOver : (id ? recipeOf(id) : null);
   $("#prodTitle").textContent = p ? "Изменить продукт" : "Новый продукт";
   $("#pName").value = p ? p.name : "";
   $("#pNameEn").value = p ? p.name_en||"" : ""; $("#pNameTr").value = p ? p.name_tr||"" : ""; $("#pDesc").value = p ? p.desc||"" : "";
@@ -1209,7 +1231,7 @@ function openProd(id){
   $("#pMin").value = p ? String(p.min??"").replace(".",",") : "";
   $("#pCost").value = p && p.cost ? String(p.cost).replace(".",",") : "";
   $("#pCostUnit").textContent = p ? p.unit : "кг";
-  { const r = p && recipeOf(p.id); const info = $("#pCostInfo");
+  { const info = $("#pCostInfo");
     if (r){ const u = unitCost(p.id); const sold = S.menu.filter(d=>(d.items||[]).length===1 && d.items[0].productId===p.id);
       $("#pCostWrap").hidden = true; info.hidden = false;
       info.innerHTML = `Себестоимость по рецепту: <b>${money(u.cost)}</b> за 1 ${esc(p.unit)}${u.missing.length?` <span class="neg">(нет цены закупки: ${esc(u.missing.join(", "))})</span>`:""}`
@@ -1270,6 +1292,7 @@ $("#prodForm").addEventListener("submit", async e => {
     if (!items.length){ toast("Добавьте в рецепт хотя бы один продукт"); return; }
     recipe = {id:p.id, productId:p.id, yield:y, items};
   }
+  if (PROP) return propProdSaved(p, recipe);
   try {
     const ops = [{col:"products", id:p.id, after:p}];
     if (conv) ops.push({col:"moves", id:conv.id, after:conv});
@@ -1304,7 +1327,7 @@ function openCard(id){
     if (p.category==="Заготовки" || r) acts.push(`<button type="button" class="btn act-cook" data-pcm="cook">Приготовить</button>`);
   }
   $("#pcActs").innerHTML = acts.join(""); $("#pcActs").hidden = !acts.length;
-  $("#pcEdit").hidden = !isAdmin();
+  $("#pcEdit").hidden = !isAdmin(); $("#pcPropose").hidden = isAdmin() || !can("propose");
   $("#pcardDlg").showModal();
 }
 $("#pcActs").addEventListener("click", e => {
@@ -1469,7 +1492,7 @@ function sortedDishes(){
   });
 }
 const sortedSets = () => [...S.sets].sort((a,b)=>(a.order??9999)-(b.order??9999) || String(a.name).localeCompare(b.name,"ru"));
-function dishCats(){ const s = new Set(DISH_CATS); S.menu.forEach(d=>d.category && s.add(d.category)); return [...s]; }
+function dishCats(){ const s = new Set(DISH_CATS); S.menu.forEach(d=>d.category && s.add(d.category)); if (PROP && PROP.dish && PROP.dish.category) s.add(PROP.dish.category); return [...s]; }
 const setsWithDish = id => S.sets.filter(st=>(st.items||[]).some(i=>i.dishId===id));
 const lineName = l => l.kind==="set" ? ((setById(l.id)||{}).name || "Удалённый сет") : ((dishById(l.id)||{}).name || "Удалённое блюдо");
 const dn = x => (x && (x["name_"+LANG] || x.name)) || "";
@@ -1580,21 +1603,26 @@ function renderMenu(L){
 
 /* dish dialog */
 let editingDish = null;
-function prodOptions(selected){
+function prodOptions(selected, skip){
   let o = `<option value="">Продукт…</option>`, cur=null;
+  const opt = p => `<option value="${esc(p.id)}" ${p.id===selected?"selected":""}>${esc(dn(p))}</option>`;
   for (const p of sortedProducts()){
+    if (p.id===skip) continue;
     if (p.category!==cur){ if (cur!==null) o+="</optgroup>"; o += `<optgroup label="${esc(p.category)}">`; cur=p.category; }
-    o += `<option value="${esc(p.id)}" ${p.id===selected?"selected":""}>${esc(dn(p))}</option>`;
+    o += opt(p);
   }
-  return o + (cur!==null?"</optgroup>":"");
+  if (cur!==null) o += "</optgroup>";
+  const fresh = PROP ? (PROP.products||[]).filter(p=>p.id!==skip) : [];
+  if (fresh.length) o += `<optgroup label="Новые — на согласовании">${fresh.map(opt).join("")}</optgroup>`;
+  return o;
 }
 function ditemHtml(it){
   const p = it ? byId(it.productId) : null;
   const v = it && p ? String(Math.round(it.qty*dispK(p.unit)*1000)/1000).replace(".",",") : "";
   return `<div class="ritem"><select class="dProd" aria-label="Продукт">${prodOptions(it?it.productId:"")}</select><input class="dQty" inputmode="decimal" autocomplete="off" aria-label="Количество" value="${esc(v)}"><span class="dUnit">${p?esc(dispUnit(p.unit)):""}</span><button type="button" class="dDel" aria-label="Убрать продукт">×</button></div>`;
 }
-function openDish(id){
-  editingDish = id; const d = id ? dishById(id) : null;
+function openDish(id, over){
+  editingDish = id; const d = over || (id ? dishById(id) : null);
   $("#dishTitle").textContent = d ? "Изменить блюдо" : "Новое блюдо";
   $("#dName").value = d ? d.name : "";
   $("#dNameEn").value = d ? d.name_en||"" : ""; $("#dNameTr").value = d ? d.name_tr||"" : "";
@@ -1644,11 +1672,12 @@ $("#dishForm").addEventListener("submit", async e=>{
   }
   const old = editingDish ? dishById(editingDish) : null;
   const price = num($("#dPrice").value); if (!isNaN(price) && price<0){ toast("Цена не может быть отрицательной"); return; }
-  if (old && old.needsWork && $("#dNeeds").checked && tConfirm("Доработка закончена? Снять красную пометку «доработать»?")) $("#dNeeds").checked = false;
+  if (!PROP && old && old.needsWork && $("#dNeeds").checked && tConfirm("Доработка закончена? Снять красную пометку «доработать»?")) $("#dNeeds").checked = false;
   const custom = $("#dPackCustom").checked, pack = custom ? readPList($("#dPack")) : (old && old.pack) || [];
   if (pack===null) return;
   const d = {...(old||{}), id: old ? old.id : uid("d"), method:$("#dMethod").value.trim(), name, name_en:$("#dNameEn").value.trim(), name_tr:$("#dNameTr").value.trim(), needsWork:$("#dNeeds").checked, todo:$("#dNote").value.trim(), category:$("#dCat").value, active:$("#dActive").checked, items, price: isNaN(price)?0:price, packMode: custom?"custom":"default", pack,
     order: old ? (old.order ?? 9999) : Math.max(0, ...S.menu.map(x=>x.order||0)) + 1};
+  if (PROP) return propDishSaved(d);
   try { await commit((old?"Изменение блюда: ":"Новое блюдо: ") + name, [{col:"menu", id:d.id, after:d}]); $("#dishDlg").close(); render(); toast(old?"Блюдо сохранено":"Блюдо добавлено"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
@@ -2673,7 +2702,7 @@ setInterval(()=>{ if (S.view==="orders" && S.ordView==="open" && !document.query
 const ROLES = {admin:"Админ", worker:"Работник ресторана"};
 const roleOf = st => st && st.role==="admin" ? "admin" : "worker";
 const PERM = {
-  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, prices:1, menuView:1}
+  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, prices:1, menuView:1, propose:1}
 };
 const ALL_VIEWS = ["orders","cash","hist","menu","stock","inv","staff","fin"];
 function can(k){ if (!S.me) return false; if (S.me.role==="admin") return true; const p = PERM[S.me.role]; return !!(p && p[k]); }
@@ -3214,7 +3243,318 @@ document.addEventListener("click", e=>{
   printOrder(orderById(b.dataset.oprint), false);
 });
 
-{ const _od = openDish; openDish = function(id){ lockForm($("#dishForm"), false); _od(id); if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr"); $("#dMethodBox").hidden = true; $("#dMethodBox").dataset.roHid = "1"; } }; }
+{ const _od = openDish; openDish = function(id, over){
+  const pm = propMode; propMode = false; if (!pm) PROP = null;
+  lockForm($("#dishForm"), false); propUiDish(); _od(id, over);
+  if (pm) return propSetupDish();
+  if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr"); $("#dMethodBox").hidden = true; $("#dMethodBox").dataset.roHid = "1"; $("#dPropose").hidden = !(id && can("propose")); } }; }
+{ const _op = openProd; openProd = function(id, pOver, rOver){
+  const pm = propMode; propMode = false; if (!pm) PROP = null;
+  propUiProd(); _op(id, pOver, rOver);
+  if (pm) propSetupProd(); }; }
+/* ---------- proposals: staff suggest a new dish, product or prep (or changes to one); it reaches the menu / stock only after the admin approves ---------- */
+const DISH_KEYS = ["name","name_en","name_tr","category","price","items","method"];
+const PROD_KEYS = ["name","name_en","name_tr","desc","category","min","cost","yieldPct","track","recipe"];
+const pick = (o, keys) => { const r = {}; keys.forEach(k=>{ if (o && o[k]!==undefined) r[k] = o[k]; }); return r; };
+const recipeDoc = (id, r) => r ? {id, productId:id, yield:r.yield, items:r.items} : null;
+function propTitle(pr){
+  if (pr.kind==="dish") return pr.baseId ? "Изменение блюда" : "Новое блюдо";
+  return pr.baseId ? "Изменение продукта" : (pr.prod && pr.prod.recipe ? "Новая заготовка" : "Новый продукт");
+}
+const propMain = pr => (pr.kind==="dish" ? pr.dish : pr.prod) || {};
+const propWhere = pr => pr.kind==="dish" ? "menu" : "stock";
+// what the item will look like after approval: for changes, the current dish / product with the proposed fields on top
+function propDishView(pr){
+  if (pr.full || !pr.baseId) return pr.dish;
+  const cur = dishById(pr.baseId); return cur ? Object.assign({}, cur, pick(pr.dish, DISH_KEYS)) : null;
+}
+function propProdView(pr){
+  if (pr.full || !pr.baseId) return pr.prod;
+  const cur = S.products.find(x=>x.id===pr.baseId); if (!cur) return null;
+  const r = S.recipes.find(x=>x.id===cur.id || x.productId===cur.id);
+  return Object.assign({}, cur, {recipe: r ? {yield:r.yield, items:r.items} : null}, pick(pr.prod, PROD_KEYS), {unit:cur.unit});
+}
+function propHide(el){ if (el && !el.hidden){ el.hidden = true; el.dataset.pHid = "1"; } }
+function propUnhide(root){ root.querySelectorAll("[data-p-hid]").forEach(el=>{ el.hidden = false; delete el.dataset.pHid; }); }
+function propUiDish(){
+  propUnhide($("#dishForm"));
+  ["#dNewBox","#dPropNote","#dPropMsgBox","#dPropose"].forEach(s=>$(s).hidden = true);
+  $("#dSave").textContent = "Сохранить";
+}
+function propUiProd(){
+  propUnhide($("#prodForm"));
+  ["#pPropNote","#pPropMsgBox","#rNewProd"].forEach(s=>$(s).hidden = true);
+  $("#pSave").textContent = "Сохранить"; $("#pUnit").disabled = false;
+}
+function propNote(el){
+  const h = isAdmin() ? (PROP.by ? `Предложение от ${N(PROP.by)}${PROP.msg ? ": " + N(PROP.msg) : ""}` : "")
+    : (PROP.comment && PROP.status!=="pending" ? `Комментарий админа: ${N(PROP.comment)}` : "");
+  el.innerHTML = h; el.hidden = !h;
+}
+function propSetupDish(){
+  const w = !isAdmin();
+  $("#dishTitle").textContent = w ? (PROP.baseId ? "Предложить изменения в блюде" : "Предложить новое блюдо") : "Проверка предложения";
+  propHide($("#dDel"));
+  if (w){ propHide($("#dActive").closest("label")); propHide($("#dishForm .needbox")); propHide($("#dPackCustom").closest(".box")); }
+  // a worker writes the cooking method of a new dish; the method of an existing dish stays admin-only
+  if (!w || !PROP.baseId){ $("#dMethodBox").hidden = false; delete $("#dMethodBox").dataset.roHid; } else propHide($("#dMethodBox"));
+  $("#dNewBox").hidden = false; propNewList();
+  $("#dPropMsgBox").hidden = !w; $("#dPropMsg").value = PROP.msg || "";
+  propNote($("#dPropNote"));
+  $("#dSave").textContent = w ? "Отправить админу" : "Одобрить и сохранить";
+  fitArea($("#dMethod"));
+}
+function propSetupProd(){
+  const w = !isAdmin(), main = PROP.kind==="prod";
+  $("#prodTitle").textContent = !main ? "Новый продукт или заготовка" : !w ? "Проверка предложения" : PROP.baseId ? "Предложить изменения в продукте" : "Предложить продукт или заготовку";
+  if (w) propHide($("#pActive").closest("label"));
+  $("#pUnit").disabled = !!(main && PROP.baseId);
+  $("#rNewProd").hidden = false;
+  $("#pPropMsgBox").hidden = !(w && main); $("#pPropMsg").value = PROP.msg || "";
+  if (main) propNote($("#pPropNote"));
+  $("#pSave").textContent = !main ? "Готово" : w ? "Отправить админу" : "Одобрить и сохранить";
+}
+function propNewList(){
+  const list = (PROP && PROP.products) || [];
+  $("#dNewList").innerHTML = list.map(p=>`<div><span>${N(dn(p))} <small class="hint">${esc(p.category||"")} · ${esc(p.unit)}${p.recipe?" · заготовка":""}</small></span><button type="button" class="btn small" data-npedit="${esc(p.id)}">Изменить</button></div>`).join("");
+}
+// a product was added or changed inside a proposal: refresh the product lists of the open dialogs
+function propRefresh(){
+  document.querySelectorAll("#dItems .ritem").forEach(row=>{ const s = row.querySelector(".dProd"), v = s.value; s.innerHTML = prodOptions(v); s.value = byId(v) ? v : ""; const p = byId(s.value); row.querySelector(".dUnit").textContent = p ? dispUnit(p.unit) : ""; });
+  document.querySelectorAll("#rItems .ritem").forEach(row=>{ const s = row.querySelector(".rProd"), v = s.value; s.innerHTML = prodOptions(v, editingId); s.value = byId(v) ? v : ""; const p = byId(s.value); row.querySelector(".rUnit").textContent = p ? p.unit : ""; });
+  if ($("#dishDlg").open){ propNewList(); updateDishCost(); }
+}
+function propAddRow(pid){
+  const inProd = $("#prodDlg").open, box = inProd ? $("#rItems") : $("#dItems"), cls = inProd ? ".rProd" : ".dProd";
+  let sel = [...box.querySelectorAll(cls)].find(s=>!s.value);
+  if (!sel){ box.insertAdjacentHTML("beforeend", inProd ? ritemHtml(null) : ditemHtml(null)); sel = box.lastElementChild.querySelector(cls); }
+  sel.value = pid; sel.dispatchEvent(new Event("change", {bubbles:true}));
+  sel.closest(".ritem").querySelector("input").focus();
+}
+function propOpen(pr){
+  PROP = clone(pr); PROP.products = PROP.products || [];
+  if (PROP.kind==="dish"){ const v = PROP.dish ? propDishView(PROP) : null; propMode = true; return openDish(PROP.baseId || null, v); }
+  const v = PROP.prod ? propProdView(PROP) : null;
+  if (v) PROP.prod = v;
+  propMode = true; openProd(PROP.baseId || (v ? v.id : null), v || null, v ? recipeDoc(v.id, v.recipe) : undefined);
+}
+function propOpenProd(id, prep){   // new / pending product with a recipe, on top of the dish dialog
+  const p = id ? propProd(id) : null;
+  propMode = true; openProd(id, p, p ? recipeDoc(p.id, p.recipe) : undefined);
+  if (!p && prep){ $("#pHasRecipe").checked = true; syncRecipeVisibility(); const o = [...$("#pCat").options].find(x=>x.value==="Заготовки"); if (o) o.selected = true; }
+}
+function propProdSaved(p, recipe){
+  const item = Object.assign({}, p, {recipe: recipe ? {yield:recipe.yield, items:recipe.items} : null});
+  if (PROP.kind==="prod"){ PROP.prod = item; PROP.full = isAdmin(); PROP.msg = $("#pPropMsg").value.trim(); return propSend("#prodDlg"); }
+  const list = PROP.products, i = list.findIndex(x=>x.id===item.id);
+  if (i<0) list.push(item); else list[i] = item;
+  $("#prodDlg").close(); propRefresh(); if (i<0) propAddRow(item.id);
+}
+function propDishSaved(d){
+  if (!(d.items||[]).length){ need($("#dItems .dProd"), "Добавьте в техкарту хотя бы один продукт"); return; }
+  if (!PROP.baseId && PROP.dish && PROP.dish.id) d.id = PROP.dish.id;
+  PROP.dish = d; PROP.full = isAdmin(); PROP.msg = $("#dPropMsg").value.trim();
+  return propSend("#dishDlg");
+}
+// keep only the new products that the dish / prep really uses
+function propPrune(pr){
+  const list = pr.products||[], used = new Set();
+  const walk = items => (items||[]).forEach(i=>{ if (used.has(i.productId)) return; used.add(i.productId); const x = list.find(p=>p.id===i.productId); if (x && x.recipe) walk(x.recipe.items); });
+  walk(pr.kind==="dish" ? (pr.dish||{}).items : ((pr.prod||{}).recipe||{}).items);
+  pr.products = list.filter(p=>used.has(p.id));
+}
+async function propSend(dlg){
+  const pr = PROP; propPrune(pr);
+  if (isAdmin()) return propApprove(pr, dlg);
+  if (pr.id && !S.proposals.some(x=>x.id===pr.id)){ toast("Это предложение админ уже рассмотрел"); return; }
+  const doc = {id: pr.id || uid("pr"), kind: pr.kind, baseId: pr.baseId||"", dish: pr.kind==="dish" ? pr.dish : null, prod: pr.kind==="prod" ? pr.prod : null, products: pr.products,
+    msg: pr.msg||"", by: S.me.name, byId: S.me.id, ts: Date.now(), status: "pending", comment: ""};
+  return guarded(async()=>{
+    try { await commit(`${propTitle(doc)}: ${propMain(doc).name} — отправлено админу`, [{col:"proposals", id:doc.id, after:doc}]); $(dlg).close(); PROP = null; render(); toast("Отправлено админу на согласование"); }
+    catch(er){ console.error(er); toast("Не удалось отправить. Попробуйте ещё раз."); }
+  });
+}
+async function propApprove(pr, dlg){
+  const isNewP = p => !S.products.some(x=>x.id===p.id);
+  const fresh = (pr.products||[]).filter(isNewP);
+  const main = pr.kind==="dish" ? propDishView(pr) : propProdView(pr);
+  if (!main){ toast(pr.kind==="dish" ? "Этого блюда уже нет в меню" : "Этого продукта уже нет на складе"); return; }
+  if (pr.kind==="prod" && !pr.baseId && isNewP(main)) fresh.push(main);
+  const known = id => S.products.some(x=>x.id===id) || fresh.some(x=>x.id===id) || (pr.kind==="prod" && main.id===id);
+  const allItems = [...(pr.kind==="dish" ? main.items||[] : (main.recipe||{}).items||[]), ...fresh.flatMap(p=>(p.recipe||{}).items||[])];
+  if (allItems.some(i=>!known(i.productId))){ toast("В составе есть продукт, которого уже нет на складе. Откройте предложение и исправьте."); return; }
+  const low = x => String(x||"").trim().toLowerCase();
+  const dup = fresh.filter(p=>S.products.some(x=>low(x.name)===low(p.name))).map(p=>p.name);
+  if (pr.kind==="dish" && !pr.baseId && S.menu.some(x=>low(x.name)===low(main.name))) dup.push(main.name);
+  if (dup.length && !tConfirm(`Уже есть с таким названием: ${dup.join(", ")}.\n\nВсё равно добавить как новое?`)) return;
+  if (!dlg && !tConfirm(`Одобрить: ${propTitle(pr)} «${main.name}»?\nПосле одобрения ${pr.kind==="dish" ? "блюдо появится в меню" : "продукт появится на складе"}.`)) return;
+  const ops = []; let order = Math.max(0, ...S.products.map(x=>x.order||0));
+  for (const p of fresh){
+    const {recipe, ...doc} = p; doc.order = ++order; if (doc.active===undefined) doc.active = true;
+    ops.push({col:"products", id:doc.id, after:doc});
+    if (recipe && (recipe.items||[]).length) ops.push({col:"recipes", id:doc.id, after:recipeDoc(doc.id, recipe)});
+  }
+  if (pr.kind==="prod" && pr.baseId){
+    const {recipe, ...doc} = main, cur = S.products.find(x=>x.id===pr.baseId);
+    Object.assign(doc, {id:cur.id, unit:cur.unit, order:cur.order});
+    ops.push({col:"products", id:doc.id, after:doc});
+    const had = S.recipes.find(r=>r.id===doc.id || r.productId===doc.id);
+    if (recipe && (recipe.items||[]).length) ops.push({col:"recipes", id:had ? had.id : doc.id, after:Object.assign(recipeDoc(doc.id, recipe), {id: had ? had.id : doc.id})});
+    else if (had) ops.push({col:"recipes", id:had.id, after:null});
+  }
+  if (pr.kind==="dish"){
+    const d = Object.assign({}, main);
+    if (!pr.baseId){ d.order = Math.max(0, ...S.menu.map(x=>x.order||0)) + 1; if (d.active===undefined) d.active = true; }
+    ops.push({col:"menu", id:d.id, after:d});
+  }
+  if (pr.id && S.proposals.some(x=>x.id===pr.id)) ops.push({col:"proposals", id:pr.id, after:null});
+  return guarded(async()=>{
+    try { await commit(`Одобрено: ${propTitle(pr)} «${main.name}»${pr.by?" ("+pr.by+")":""}`, ops); if (dlg) $(dlg).close(); PROP = null; render(); toast(pr.kind==="dish" ? "Одобрено — блюдо в меню" : "Одобрено — продукт на складе"); }
+    catch(er){ console.error(er); toast("Не удалось сохранить. Проверьте права на изменение."); }
+  });
+}
+async function propDecide(id, status){
+  const pr = S.proposals.find(x=>x.id===id); if (!pr || !isAdmin()) return;
+  const c = tPrompt(status==="returned" ? "Что нужно исправить? Работник увидит этот комментарий." : "Причина отказа (можно оставить пустым)", "");
+  if (c===null) return;
+  if (status==="returned" && !c.trim()){ toast("Напишите, что исправить"); return; }
+  const doc = Object.assign({}, pr, {status, comment:c.trim(), decidedBy:S.me.name, decidedTs:Date.now()});
+  return guarded(async()=>{
+    try { await commit(`${status==="returned"?"Возвращено на доработку":"Отклонено"}: ${propMain(pr).name}`, [{col:"proposals", id:pr.id, after:doc}]); render(); toast(status==="returned" ? "Возвращено работнику" : "Предложение отклонено"); }
+    catch(er){ console.error(er); toast("Не удалось сохранить."); }
+  });
+}
+async function propDelete(id){
+  const pr = S.proposals.find(x=>x.id===id); if (!pr || (pr.byId!==S.me?.id && !isAdmin())) return;
+  if (!tConfirm(pr.status==="pending" ? `Отозвать предложение «${propMain(pr).name}»?` : `Убрать «${propMain(pr).name}» из списка?`)) return;
+  return guarded(async()=>{ try { await commit(`Предложение убрано: ${propMain(pr).name}`, [{col:"proposals", id:pr.id, after:null}]); render(); } catch(er){ console.error(er); toast("Не удалось."); } });
+}
+/* proposal cards: admin sees everything waiting, a worker sees their own */
+function propItemsHtml(pr, items, baseItems, dishQty){
+  const P = id => S.products.find(x=>x.id===id) || (pr.products||[]).find(x=>x.id===id) || (pr.prod && pr.prod.id===id ? pr.prod : null);
+  const q = (id, v) => { const p = P(id); return p ? (dishQty ? `${fmt(v*dispK(p.unit))} ${esc(dispUnit(p.unit))}` : `${fmt(v)} ${esc(p.unit)}`) : fmt(v); };
+  const nm = id => { const p = P(id); return p ? N(dn(p)) + ((pr.products||[]).some(x=>x.id===id) && !S.products.some(x=>x.id===id) ? ' <span class="tag prod">новый</span>' : "") : "Удалённый продукт"; };
+  const rows = (items||[]).map(i=>{
+    const b = baseItems && baseItems.find(x=>x.productId===i.productId);
+    const ch = !baseItems ? "" : !b ? ' <span class="tag in">добавлено</span>' : Math.abs((Number(b.qty)||0)-(Number(i.qty)||0))>1e-9 ? ` <small class="hint">было ${q(i.productId, b.qty)}</small>` : "";
+    return `<div><span>${nm(i.productId)}${ch}</span><span>${q(i.productId, i.qty)}</span></div>`; });
+  if (baseItems) baseItems.filter(b=>!(items||[]).some(i=>i.productId===b.productId)).forEach(b=>rows.push(`<div><span><s>${nm(b.productId)}</s> <span class="tag off">убрано</span></span><span><s>${q(b.productId, b.qty)}</s></span></div>`));
+  return rows.join("");
+}
+function propBody(pr){
+  const line = (k, v, was) => `<div><span>${k}</span><span>${v}${was!==undefined ? ` <small class="hint">было ${was}</small>` : ""}</span></div>`;
+  const empty = x => x==null || x==="" || x===0;
+  const diff = (k, a, b, f) => { f = f || (x=>esc(x)); return pr.baseId ? (String(a??"")!==String(b??"") ? line(k, empty(b) ? "—" : f(b), empty(a) ? undefined : f(a)) : "") : (empty(b) ? "" : line(k, f(b))); };
+  let h = "";
+  if (pr.kind==="dish"){
+    const v = propDishView(pr) || pr.dish || {}, cur = pr.baseId ? dishById(pr.baseId) || {} : {};
+    h += diff("Раздел меню", cur.category, v.category);
+    if (showMoney()) h += diff("Цена", cur.price, v.price, x=>Number(x)>0 ? money(x) : "без цены");
+    if (isAdmin()){ const keep = PROP; PROP = pr; try { h += line("Себестоимость", esc(costLine(Number(v.price)||0, dishCost(v)))); } finally { PROP = keep; } }
+    h += `<p class="hint" style="margin:6px 0 0">Техкарта на 1 порцию:</p>` + propItemsHtml(pr, v.items, pr.baseId ? cur.items||[] : null, true);
+    if (v.method && (!pr.baseId || v.method!==cur.method)) h += `<p class="hint" style="margin:6px 0 0">Способ приготовления${pr.baseId?" (изменён)":""}:</p><p style="margin:0;white-space:pre-wrap">${N(v.method)}</p>`;
+  } else {
+    const v = propProdView(pr) || pr.prod || {}, cur = pr.baseId ? propProdView(Object.assign({}, pr, {prod:{}})) || {} : {};
+    h += diff("Раздел", cur.category, v.category) + (pr.baseId ? "" : line("Единица", esc(v.unit)));
+    h += diff("Мин. остаток", cur.min, v.min, x=>Number(x) ? fmt(x) : "—");
+    if (showMoney() && !v.recipe) h += diff("Цена закупки", cur.cost, v.cost, x=>Number(x)>0 ? money(x) + " / " + esc(v.unit) : "—");
+    h += diff("Описание", cur.desc, v.desc, x=>N(x));
+    if (v.recipe || cur.recipe) h += `<p class="hint" style="margin:6px 0 0">${v.recipe ? `Рецепт на ${fmt(v.recipe.yield)} ${esc(v.unit)}${cur.recipe && cur.recipe.yield!==v.recipe.yield ? ` (было на ${fmt(cur.recipe.yield)})` : ""}:` : "Рецепт убран"}</p>` + propItemsHtml(pr, v.recipe ? v.recipe.items : [], pr.baseId ? (cur.recipe||{}).items||[] : null, false);
+  }
+  const fresh = (pr.products||[]).filter(p=>!S.products.some(x=>x.id===p.id));
+  if (fresh.length) h += `<p class="hint" style="margin:6px 0 0">Новые продукты для склада:</p>` + fresh.map(p=>`<div><span>${N(dn(p))} <small class="hint">${esc(p.category||"")} · ${esc(p.unit)}${p.recipe ? ` · заготовка: ${(p.recipe.items||[]).map(i=>{ const x = S.products.find(y=>y.id===i.productId) || fresh.find(y=>y.id===i.productId); return x ? N(dn(x)) + " " + fmt(i.qty) + " " + esc(x.unit) : ""; }).filter(Boolean).join(", ")} → ${fmt(p.recipe.yield)} ${esc(p.unit)}` : ""}</small></span><span>${showMoney() && Number(p.cost)>0 ? money(p.cost) + " / " + esc(p.unit) : ""}</span></div>`).join("");
+  return `<div class="prev">${h}</div>`;
+}
+function propCard(pr){
+  const adm = isAdmin(), dt = new Date(pr.ts||0).toLocaleString(LOC(), {day:"numeric", month:"long", hour:"2-digit", minute:"2-digit"});
+  const st = adm ? "" : pr.status==="returned" ? ' <span class="tag low">вернули на доработку</span>' : pr.status==="rejected" ? ' <span class="tag empty">отклонено</span>' : ' <span class="tag prod">ждёт админа</span>';
+  const notes = (pr.msg ? `<div class="oreq">Комментарий ${adm ? "работника" : "для админа"}: ${N(pr.msg)}</div>` : "") + (pr.comment && pr.status!=="pending" ? `<div class="oreq ${pr.status==="rejected"?"rej":""}">Админ: ${N(pr.comment)}</div>` : "");
+  const id = esc(pr.id);
+  const btns = adm ? `<button class="btn small danger" data-prej="${id}">Отклонить</button><button class="btn small" data-pret="${id}">Вернуть на доработку</button><button class="btn small" data-pedit="${id}">Открыть и изменить</button><button class="btn small primary" data-pok="${id}">Одобрить</button>`
+    : pr.status==="rejected" ? `<button class="btn small" data-pdel="${id}">Убрать</button>`
+    : `<button class="btn small" data-pdel="${id}">${pr.status==="pending" ? "Отозвать" : "Удалить"}</button><button class="btn small ${pr.status==="returned"?"primary":""}" data-pedit="${id}">${pr.status==="returned" ? "Исправить и отправить" : "Изменить"}</button>`;
+  return `<div class="box draft"><h4>${propTitle(pr)}: ${N(propMain(pr).name||"")}${st}</h4><small class="hint">${adm ? `Предложил(а): ${N(pr.by||"")} · ` : ""}${dt}</small>
+    ${propBody(pr)}${notes}<div class="dlg-actions" style="flex-wrap:wrap">${btns}</div></div>`;
+}
+function propCards(where){
+  if (!S.me) return "";
+  const list = S.proposals.filter(x=>propWhere(x)===where && (isAdmin() ? x.status==="pending" : x.byId===S.me.id)).sort((a,b)=>(b.ts||0)-(a.ts||0));
+  let h = S.propErr && isAdmin() ? `<div class="notice">Предложения работников не загрузились: нет доступа к базе (${esc(S.propErr)}). Напишите Claude — нужно проверить правила доступа в Firebase.</div>` : "";
+  if (!list.length) return h;
+  return h + `<h2 class="cat"><span>${isAdmin() ? "Предложения на согласование" : "Мои предложения"}</span><span>${list.length}</span></h2>` + list.map(propCard).join("") + `<div style="height:8px"></div>`;
+}
+function propNotice(){
+  if (!S.me || S.view==="menu" || S.view==="stock") return "";
+  const ps = S.proposals.filter(x=>isAdmin() ? x.status==="pending" : (x.byId===S.me.id && x.status!=="pending"));
+  if (!ps.length || (!canView("menu") && !canView("stock"))) return "";
+  const n = w => ps.filter(x=>propWhere(x)===w).length;
+  const go = w => n(w) ? ` <button class="btn small" data-propgo="${w}">${w==="menu" ? "Меню" : "Склад"} (${n(w)})</button>` : "";
+  return `<div class="notice">${isAdmin() ? "Предложения работников ждут вашего решения:" : "Админ ответил на ваши предложения:"}${go("menu")}${go("stock")}</div>`;
+}
+const propSeen = {};
+function propToast(){
+  for (const x of S.proposals){
+    const key = x.status + ":" + (x.ts||0) + ":" + (x.decidedTs||0), was = propSeen[x.id]; propSeen[x.id] = key;
+    if (!propToast.ready || was===key || !S.me) continue;
+    if (isAdmin() && x.status==="pending") toast(`Новое предложение от ${x.by||"работника"}: «${propMain(x).name||""}»`);
+    else if (!isAdmin() && x.byId===S.me.id && x.status!=="pending") toast(x.status==="returned" ? `Админ вернул на доработку: «${propMain(x).name||""}»` : `Админ отклонил: «${propMain(x).name||""}»`);
+  }
+  propToast.ready = true;
+}
+document.addEventListener("click", e=>{
+  const t = e.target.closest("[data-propnew],[data-propgo],[data-pok],[data-pret],[data-prej],[data-pedit],[data-pdel],[data-npedit],#dPropose,#pcPropose,#dNewProd,#dNewPrep,#rNewProd,#npDel");
+  if (!t || !S.me) return;
+  const d = t.dataset;
+  if (d.propgo){ S.view = d.propgo; render(true); window.scrollTo({top:0}); return; }
+  if (d.propnew){ if (!can("propose")) return; return propOpen({kind:d.propnew, products:[]}); }
+  if (t.id==="dPropose"){ if (!can("propose") || !editingDish) return; const id = editingDish; $("#dishDlg").close(); return propOpen({kind:"dish", baseId:id, products:[]}); }
+  if (t.id==="pcPropose"){ if (!can("propose") || !cardId) return; const id = cardId; $("#pcardDlg").close(); return propOpen({kind:"prod", baseId:id, products:[]}); }
+  if (d.pok || d.pret || d.prej){ if (!isAdmin()) return;
+    if (d.pok){ const pr = S.proposals.find(x=>x.id===d.pok); return pr && propApprove(clone(pr), null); }
+    return propDecide(d.pret || d.prej, d.pret ? "returned" : "rejected"); }
+  if (d.pedit){ const pr = S.proposals.find(x=>x.id===d.pedit); if (!pr || (!isAdmin() && pr.byId!==S.me.id)) return; return propOpen(pr); }
+  if (d.pdel) return propDelete(d.pdel);
+  if (!PROP) return;
+  if (t.id==="dNewProd" || t.id==="rNewProd") return openNp(null);
+  if (t.id==="dNewPrep") return propOpenProd(null, true);
+  if (d.npedit){ const p = propProd(d.npedit); if (!p) return; return p.recipe ? propOpenProd(p.id) : openNp(p.id); }
+  if (t.id==="npDel"){ const p = propProd(npId); if (!p) return;
+    if (!tConfirm(`Убрать «${p.name}» из предложения? Его строки в составе очистятся.`)) return;
+    PROP.products = PROP.products.filter(x=>x.id!==p.id); $("#npDlg").close(); propRefresh(); }
+});
+/* small dialog: a new raw product inside a proposal */
+let npId = null;
+function openNp(id){
+  npId = id; const p = id ? propProd(id) : null;
+  $("#npTitle").textContent = p ? "Новый продукт — изменить" : "Новый продукт для склада";
+  $("#npName").value = p ? p.name : "";
+  const cats = allCats(), cat = p ? p.category : "";
+  $("#npCat").innerHTML = cats.map(c=>`<option value="${esc(c)}" ${c===cat?"selected":""}>${esc(c)}</option>`).join("") + `<option value="__new">Новый раздел…</option>`;
+  $("#npUnit").innerHTML = UNITS.map(u=>`<option value="${esc(u)}" ${p&&p.unit===u?"selected":""}>${esc(u)}</option>`).join("");
+  $("#npCostUnit").textContent = $("#npUnit").value;
+  $("#npCost").value = p && p.cost ? String(p.cost).replace(".",",") : "";
+  $("#npDesc").value = p ? p.desc||"" : "";
+  $("#npDel").hidden = !p;
+  $("#npDlg").showModal(); $("#npName").focus();
+}
+$("#npUnit").addEventListener("change", ()=>{ $("#npCostUnit").textContent = $("#npUnit").value; });
+$("#npCat").addEventListener("change", e => {
+  if (e.target.value!=="__new") return;
+  const name = (tPrompt("Название нового раздела") || "").trim();
+  if (!name){ e.target.selectedIndex = 0; return; }
+  const o = document.createElement("option"); o.textContent = name; o.value = name; e.target.insertBefore(o, e.target.lastElementChild); o.selected = true;
+});
+$("#npForm").addEventListener("submit", e => {
+  e.preventDefault(); if (!PROP) return $("#npDlg").close();
+  const name = $("#npName").value.trim(); if (!name){ need($("#npName"), "Введите название"); return; }
+  const c = num($("#npCost").value); if (!isNaN(c) && c<0){ need($("#npCost"), "Цена не может быть отрицательной"); return; }
+  const old = npId ? propProd(npId) : null;
+  const p = Object.assign({min:0, yieldPct:100, name_en:"", name_tr:""}, old||{}, {id: old ? old.id : uid("p"), name, category:$("#npCat").value, unit:$("#npUnit").value, desc:$("#npDesc").value.trim(), cost: c>0 ? c : 0, active:true, track:true, recipe:null});
+  const i = PROP.products.findIndex(x=>x.id===p.id);
+  if (i<0) PROP.products.push(p); else PROP.products[i] = p;
+  $("#npDlg").close(); propRefresh(); if (!old) propAddRow(p.id);
+});
+
 { const _os = openSet; openSet = function(id){ lockForm($("#setForm"), false); _os(id); updateSetCost(); if (!isAdmin()){ $("#setTitle").textContent = "Состав сета"; lockForm($("#setForm"), true, "#stPrice,#stCost,#stPackCustom,#stNeeds,#stNameEn,#stNameTr"); } }; }
 
 /* ---------- events ---------- */
@@ -3352,6 +3692,7 @@ Object.assign(I18N, {"Кассовые расходы": ["Cash expenses", "Kasa 
 Object.assign(I18N, {"Телефон Android": ["Android phone", "Android telefon"], "Планшет Android": ["Android tablet", "Android tablet"], "Компьютер Windows": ["Windows computer", "Windows bilgisayar"], "Компьютер Linux": ["Linux computer", "Linux bilgisayar"], "Устройство": ["Device", "Cihaz"], "Устройства": ["Devices", "Cihazlar"], "главное": ["main", "ana"], "это устройство": ["this device", "bu cihaz"], "ждёт разрешения": ["waiting for approval", "onay bekliyor"], "отключено": ["disconnected", "bağlantısı kesildi"], "Переименовать": ["Rename", "Yeniden adlandır"], "Разрешить": ["Allow", "İzin ver"], "Сделать главным": ["Make main", "Ana cihaz yap"], "Снять «главное»": ["Remove «main»", "«Ana» işaretini kaldır"], "Отключить": ["Disconnect", "Bağlantıyı kes"], "Убрать из списка": ["Remove from list", "Listeden kaldır"], "Сделать это устройство главным": ["Make this device main", "Bu cihazı ana cihaz yap"], "(приложение)": ["(app)", "(uygulama)"], "код": ["code", "kod"], "В сети:": ["Online:", "Çevrimiçi:"], "вход:": ["login:", "giriş:"], "ждут:": ["waiting:", "bekleyen:"], "Новые устройства — только с разрешения": ["New devices only with approval", "Yeni cihazlar yalnızca onayla"], "Управлять устройствами можно только с главного устройства.": ["Devices can be managed only from a main device.", "Cihazlar yalnızca ana cihazdan yönetilebilir."], "Главного устройства пока нет — откройте программу на своём устройстве и нажмите «Сделать это устройство главным».": ["There is no main device yet: open the app on your device and press «Make this device main».", "Henüz ana cihaz yok: programı kendi cihazınızda açın ve «Bu cihazı ana cihaz yap» düğmesine basın."], "Главное устройство отключить нельзя. Отключённое устройство выходит из программы, как только появится интернет.": ["A main device cannot be disconnected. A disconnected device leaves the app as soon as it is online.", "Ana cihazın bağlantısı kesilemez. Bağlantısı kesilen cihaz internete bağlanır bağlanmaz programdan çıkar."], "Подтвердите PIN админа": ["Confirm the admin PIN", "Yönetici PIN'ini onaylayın"], "Подтвердить": ["Confirm", "Onayla"], "Неверный PIN": ["Wrong PIN", "Yanlış PIN"], "Это устройство теперь главное": ["This device is now main", "Bu cihaz artık ana cihaz"], "Устройство разрешено": ["Device allowed", "Cihaza izin verildi"], "Устройство отключено": ["Device disconnected", "Cihazın bağlantısı kesildi"], "Новые устройства будут ждать вашего разрешения": ["New devices will wait for your approval", "Yeni cihazlar onayınızı bekleyecek"], "Новые устройства подключаются без разрешения": ["New devices connect without approval", "Yeni cihazlar onaysız bağlanır"], "Новое устройство ждёт разрешения: Сотрудники → Устройства": ["A new device is waiting for approval: Staff → Devices", "Yeni bir cihaz onay bekliyor: Personel → Cihazlar"], "Новое устройство ждёт разрешения администратора.": ["This new device is waiting for the administrator's approval.", "Bu yeni cihaz yöneticinin onayını bekliyor."], "Попросите администратора: на главном устройстве откройте «Сотрудники» → «Устройства» и нажмите «Разрешить» у этого устройства. Программа откроется сама.": ["Ask the administrator to open «Staff» → «Devices» on a main device and press «Allow» for this device. The app will open by itself.", "Yöneticiden ana cihazda «Personel» → «Cihazlar» bölümünü açıp bu cihaz için «İzin ver» düğmesine basmasını isteyin. Program kendiliğinden açılacak."], "Код устройства:": ["Device code:", "Cihaz kodu:"], "Это устройство отключено администратором.": ["This device was disconnected by the administrator.", "Bu cihazın bağlantısı yönetici tarafından kesildi."], "Подключить его снова можно только после того, как администратор нажмёт «Разрешить» на главном устройстве.": ["It can be connected again only after the administrator presses «Allow» on a main device.", "Yönetici ana cihazda «İzin ver» düğmesine bastıktan sonra tekrar bağlanabilir."], "Название устройства (например: Планшет кухня):": ["Device name (for example: Kitchen tablet):", "Cihaz adı (örneğin: Mutfak tableti):"]});
 Object.assign(I18N, {"Отмена или списание заказа": ["Cancel or write off order", "Siparişi iptal et veya fireye yaz"], "Что сделать с заказом": ["What to do with the order", "Siparişle ne yapılacak"], "Отменить / Списать": ["Cancel / Write off", "İptal / Fire"], "Списать заказ": ["Write off order", "Siparişi fireye yaz"], "Списан": ["Written off", "Fireye yazıldı"], "Комментарий: причина": ["Comment: reason", "Açıklama: neden"], "Например: тестовый заказ; клиент отказался платить": ["E.g.: test order; customer refused to pay", "Örn.: deneme siparişi; müşteri ödemeyi reddetti"], "Отправить админу": ["Send to admin", "Yöneticiye gönder"], "Заказа не было (тест, ошибка). Выручка убирается, продукты возвращаются на склад.": ["The order never happened (test, mistake). Revenue is removed, products go back to stock.", "Sipariş hiç olmadı (deneme, hata). Ciro silinir, ürünler stoğa geri döner."], "Оплату не получили, продукты израсходованы. Выручка убирается, продукты записываются в списание.": ["Payment not received, products were used. Revenue is removed, products are recorded as write-off.", "Ödeme alınmadı, ürünler kullanıldı. Ciro silinir, ürünler fireye yazılır."], "Запись курьера в кассовых расходах удаляется.": ["The courier record in cash expenses is removed.", "Kasa giderlerindeki kurye kaydı silinir."], "Запись курьера в кассовых расходах остаётся.": ["The courier record in cash expenses stays.", "Kasa giderlerindeki kurye kaydı kalır."], "Запрос уйдёт админу. Пока он не одобрит, ничего не изменится.": ["The request goes to the admin. Nothing changes until it is approved.", "Talep yöneticiye gider. Onaylanana kadar hiçbir şey değişmez."], "Напишите комментарий: причину отмены или списания": ["Write a comment: the reason for cancelling or writing off", "Açıklama yazın: iptal veya fire nedeni"], "Запрос отправлен админу на согласование": ["Request sent to the admin for approval", "Talep onay için yöneticiye gönderildi"], "Ждёт решения админа": ["Waiting for the admin's decision", "Yönetici kararı bekleniyor"], "Админ отклонил запрос": ["The admin rejected the request", "Yönetici talebi reddetti"], "Одобрить": ["Approve", "Onayla"], "Запросы на отмену": ["Cancel requests", "İptal talepleri"], "Запросов на отмену и списание нет.": ["No cancel or write-off requests.", "İptal veya fire talebi yok."], "одобрил(а)": ["approved by", "onaylayan"], "Запрос отклонён": ["Request rejected", "Talep reddedildi"], "Списано (не оплачено)": ["Written off (unpaid)", "Fire (ödenmedi)"], "Отменённые и списанные заказы": ["Cancelled and written-off orders", "İptal edilen ve fireye yazılan siparişler"], "Заказа не будет (тест, ошибка, клиент передумал). Продукты со склада не списываются.": ["The order will not happen (test, mistake, customer changed their mind). No products are taken from stock.", "Sipariş olmayacak (deneme, hata, müşteri vazgeçti). Stoktan ürün düşülmez."], "Оплату не получили, продукты израсходованы. Продукты спишутся со склада по техкартам как списание, выручки не будет.": ["Payment not received, products were used. Products are taken from stock per recipe cards as a write-off, no revenue.", "Ödeme alınmadı, ürünler kullanıldı. Ürünler reçeteye göre stoktan fire olarak düşülür, ciro olmaz."], "отменён": ["cancelled", "iptal edildi"], "и неоплаченные заказы": ["and unpaid orders", "ve ödenmemiş siparişler"], "отменён, продукты вернулись на склад": ["cancelled, products returned to stock", "iptal edildi, ürünler stoğa döndü"], "списан": ["written off", "fireye yazıldı"], "одобрить?": ["approve?", "onaylansın mı?"], "Удалить списание": ["Delete write-off", "Fire kaydını sil"], "Отмена заказа": ["Order cancellation", "Sipariş iptali"], "Списание заказа": ["Order write-off", "Sipariş firesi"], "Одобрить:": ["Approve:", "Onayla:"], "Запрос": ["Request", "Talep"]});
 Object.assign(I18N, {"Печать": ["Print", "Yazdır"], "Распечатать на кухню": ["Print for the kitchen", "Mutfağa yazdır"], "Распечатать платёжный чек": ["Print payment receipt", "Ödeme fişini yazdır"], "Печать недоступна на этом устройстве": ["Printing is not available on this device", "Bu cihazda yazdırma kullanılamıyor"]});
+Object.assign(I18N, {"Нужного продукта нет на складе? Добавьте новый — он появится в списке продуктов техкарты и уйдёт админу вместе с блюдом.": ["Product not in stock? Add a new one — it will appear in the recipe product list and go to the admin together with the dish.", "Gerekli ürün depoda yok mu? Yenisini ekleyin — teknik karttaki ürün listesinde görünür ve yemekle birlikte yöneticiye gider."], "+ Новый продукт": ["+ New product", "+ Yeni ürün"], "+ Новая заготовка": ["+ New prep", "+ Yeni hazırlık"], "+ Новый продукт (нет на складе)": ["+ New product (not in stock)", "+ Yeni ürün (depoda yok)"], "Комментарий для админа": ["Comment for the admin", "Yönetici için not"], "Например: зачем это блюдо, где взять продукт": ["E.g.: why this dish, where to buy the product", "Örn.: bu yemek neden, ürün nereden alınır"], "Например: где покупать, для какого блюда": ["E.g.: where to buy, for which dish", "Örn.: nereden alınır, hangi yemek için"], "Например: где покупать, как хранить": ["E.g.: where to buy, how to store", "Örn.: nereden alınır, nasıl saklanır"], "Предложить изменения": ["Suggest changes", "Değişiklik öner"], "Новый продукт для склада": ["New product for stock", "Depo için yeni ürün"], "Продукт появится на складе только после одобрения админа.": ["The product will appear in stock only after the admin approves it.", "Ürün depoda ancak yönetici onayladıktan sonra görünür."], "(если знаете)": ["(if you know it)", "(biliyorsanız)"], "Убрать из предложения": ["Remove from the proposal", "Öneriden çıkar"], "Новые — на согласовании": ["New — awaiting approval", "Yeni — onay bekliyor"], "+ Предложить новое блюдо": ["+ Suggest a new dish", "+ Yeni yemek öner"], "Техкарты только для просмотра. Новое блюдо или изменения в техкарте можно предложить — их проверит админ.": ["Tech cards are view-only. You can suggest a new dish or changes to a tech card — the admin will check them.", "Teknik kartlar sadece görüntülenir. Yeni yemek veya teknik kartta değişiklik önerebilirsiniz — yönetici kontrol eder."], "+ Предложить продукт или заготовку": ["+ Suggest a product or prep", "+ Ürün veya hazırlık öner"], "Предложить изменения в блюде": ["Suggest changes to the dish", "Yemekte değişiklik öner"], "Предложить новое блюдо": ["Suggest a new dish", "Yeni yemek öner"], "Проверка предложения": ["Review proposal", "Öneriyi incele"], "Новый продукт или заготовка": ["New product or prep", "Yeni ürün veya hazırlık"], "Предложить изменения в продукте": ["Suggest changes to the product", "Üründe değişiklik öner"], "Предложить продукт или заготовку": ["Suggest a product or prep", "Ürün veya hazırlık öner"], "Одобрить и сохранить": ["Approve and save", "Onayla ve kaydet"], "Новый продукт — изменить": ["New product — edit", "Yeni ürün — düzenle"], "Предложение от": ["Proposal from", "Öneren:"], "Комментарий админа:": ["Admin's comment:", "Yönetici notu:"], "Изменение блюда": ["Dish change", "Yemek değişikliği"], "Изменение продукта": ["Product change", "Ürün değişikliği"], "Новая заготовка": ["New prep", "Yeni hazırlık"], "заготовка": ["prep", "hazırlık"], "Цена": ["Price", "Fiyat"], "Себестоимость": ["Cost", "Maliyet"], "Техкарта на 1 порцию:": ["Tech card per portion:", "1 porsiyon için teknik kart:"], "(изменён)": ["(changed)", "(değişti)"], "было на": ["was for", "önceden"], "Рецепт убран": ["Recipe removed", "Reçete kaldırıldı"], "новый": ["new", "yeni"], "добавлено": ["added", "eklendi"], "убрано": ["removed", "çıkarıldı"], "было": ["was", "önceki"], "Новые продукты для склада:": ["New products for stock:", "Depo için yeni ürünler:"], "вернули на доработку": ["sent back for changes", "düzeltmeye geri gönderildi"], "отклонено": ["rejected", "reddedildi"], "ждёт админа": ["waiting for admin", "yönetici bekleniyor"], "Комментарий работника:": ["Staff comment:", "Çalışan notu:"], "Комментарий для админа:": ["Comment for the admin:", "Yönetici için not:"], "Админ:": ["Admin:", "Yönetici:"], "Вернуть на доработку": ["Send back for changes", "Düzeltmeye geri gönder"], "Открыть и изменить": ["Open and edit", "Aç ve düzenle"], "Убрать": ["Remove", "Kaldır"], "Отозвать": ["Withdraw", "Geri çek"], "Исправить и отправить": ["Fix and send", "Düzelt ve gönder"], "Предложил(а):": ["Suggested by:", "Öneren:"], "Предложения на согласование": ["Proposals awaiting approval", "Onay bekleyen öneriler"], "Мои предложения": ["My proposals", "Önerilerim"], "Предложения работников не загрузились: нет доступа к базе": ["Staff proposals did not load: no database access", "Çalışan önerileri yüklenmedi: veritabanına erişim yok"], "Напишите Claude — нужно проверить правила доступа в Firebase.": ["Tell Claude — the Firebase access rules need checking.", "Claude'a yazın — Firebase erişim kuralları kontrol edilmeli."], "Предложения работников ждут вашего решения:": ["Staff proposals are waiting for your decision:", "Çalışan önerileri kararınızı bekliyor:"], "Админ ответил на ваши предложения:": ["The admin answered your proposals:", "Yönetici önerilerinizi yanıtladı:"], "Отправлено админу на согласование": ["Sent to the admin for approval", "Onay için yöneticiye gönderildi"], "Не удалось отправить. Попробуйте ещё раз.": ["Could not send. Try again.", "Gönderilemedi. Tekrar deneyin."], "Это предложение админ уже рассмотрел": ["The admin has already reviewed this proposal", "Yönetici bu öneriyi zaten inceledi"], "Одобрено — блюдо в меню": ["Approved — the dish is on the menu", "Onaylandı — yemek menüde"], "Одобрено — продукт на складе": ["Approved — the product is in stock", "Onaylandı — ürün depoda"], "Возвращено работнику": ["Sent back to the staff member", "Çalışana geri gönderildi"], "Предложение отклонено": ["Proposal rejected", "Öneri reddedildi"], "Напишите, что исправить": ["Write what to fix", "Neyin düzeltileceğini yazın"], "Новое предложение от": ["New proposal from", "Yeni öneri:"], "Админ вернул на доработку:": ["The admin sent back for changes:", "Yönetici düzeltmeye geri gönderdi:"], "Админ отклонил:": ["The admin rejected:", "Yönetici reddetti:"], "Этого блюда уже нет в меню": ["This dish is no longer on the menu", "Bu yemek artık menüde yok"], "Этого продукта уже нет на складе": ["This product is no longer in stock", "Bu ürün artık depoda yok"], "В составе есть продукт, которого уже нет на складе. Откройте предложение и исправьте.": ["The recipe has a product that is no longer in stock. Open the proposal and fix it.", "İçerikte artık depoda olmayan bir ürün var. Öneriyi açıp düzeltin."], "Добавьте в техкарту хотя бы один продукт": ["Add at least one product to the tech card", "Teknik karta en az bir ürün ekleyin"], "Уже есть с таким названием:": ["Already exists with this name:", "Bu adla zaten var:"], "Всё равно добавить как новое?": ["Add as new anyway?", "Yine de yeni olarak eklensin mi?"], "Одобрить:": ["Approve:", "Onayla:"], "После одобрения": ["After approval", "Onaydan sonra"], "блюдо появится в меню": ["the dish will appear on the menu", "yemek menüde görünecek"], "продукт появится на складе": ["the product will appear in stock", "ürün depoda görünecek"], "Что нужно исправить? Работник увидит этот комментарий.": ["What needs fixing? The staff member will see this comment.", "Ne düzeltilmeli? Çalışan bu notu görecek."], "Причина отказа (можно оставить пустым)": ["Reason for rejection (may be left empty)", "Ret nedeni (boş bırakılabilir)"], "Отозвать предложение": ["Withdraw the proposal", "Öneriyi geri çek"], "из списка?": ["from the list?", "listeden kaldırılsın mı?"], "из предложения? Его строки в составе очистятся.": ["from the proposal? Its lines in the recipe will be cleared.", "öneriden çıkarılsın mı? İçerikteki satırları temizlenecek."], "отправлено админу": ["sent to the admin", "yöneticiye gönderildi"], "Возвращено на доработку": ["Sent back for changes", "Düzeltmeye geri gönderildi"], "Отклонено": ["Rejected", "Reddedildi"], "Одобрено": ["Approved", "Onaylandı"], "Предложение убрано": ["Proposal removed", "Öneri kaldırıldı"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
@@ -3445,6 +3786,7 @@ function startSubs(){
   subscribe("settings", list => { S.settings = list; S.loaded.settings = true; render(); });
   subscribe("expenses", list => { S.expenses = list; S.loaded.expenses = true; render(); });
   subscribe("invdrafts", list => { S.invdrafts = list; S.loaded.invdrafts = true; render(); });
+  try { S.db.collection("proposals").onSnapshot(s => { S.proposals = norm(s); S.propLoaded = true; S.propErr = ""; propToast(); render(); }, e => { console.warn("proposals", e); S.propErr = (e && e.code) || "error"; render(); }); } catch(e){ console.warn(e); }
   subscribe("shifts", list => { S.shifts = list; S.loaded.shifts = true; autoCloseShifts(); applyRole(); render(); });
   subscribe("staff", list => { S.staff = list; S.loaded.staff = true; restoreMe(); applyRole(); render(); });
 }
