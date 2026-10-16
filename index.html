@@ -3468,8 +3468,13 @@ function devSet(id, data){ return devRef(id).set(data, {merge:true}).catch(write
 function devWhen(t){ return t ? new Date(t).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}) : "—"; }
 function devErr(e){ console.error(e); S.dbErr = (e && e.code) || "error"; applyRole(); }
 function startDevice(){
-  FS.doc("settings/devices").onSnapshot(s => { DEV.cfg = s.exists ? s.data() : {}; DEV.cfgCache = s.metadata.fromCache; devDecide(); }, devErr);
-  devRef(DEV_ID).onSnapshot(s => { DEV.me = s.exists ? s.data() : null; DEV.meCache = s.metadata.fromCache; devDecide(); }, devErr);
+  // with metadata changes: otherwise a cached "no such device" confirmed by the server raises no event and the device never registers
+  const watch = (ref, on) => { let last = null; ref.onSnapshot({includeMetadataChanges:true}, s => {
+    const key = (s.exists ? JSON.stringify(s.data()) : "-") + (s.metadata.fromCache ? "c" : "s");
+    if (key===last) return; last = key; on(s);
+  }, devErr); };
+  watch(FS.doc("settings/devices"), s => { DEV.cfg = s.exists ? s.data() : {}; DEV.cfgCache = s.metadata.fromCache; devDecide(); });
+  watch(devRef(DEV_ID), s => { DEV.me = s.exists ? s.data() : null; DEV.meCache = s.metadata.fromCache; devDecide(); });
 }
 function devDecide(){
   if (DEV.me===undefined || DEV.cfg===undefined || DEV.going) return;
