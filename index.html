@@ -625,6 +625,18 @@ details.finun{margin-top:10px}
   </div>
 </form></dialog>
 
+<dialog id="omDlg" class="wide"><form method="dialog" id="omForm">
+  <h3 id="omTitle">Заказ изменили на другом устройстве</h3>
+  <p class="hint" id="omWho"></p>
+  <div id="omBody" style="display:flex;flex-direction:column;gap:8px"></div>
+  <p class="hint">«Объединить» — сохранятся и изменения с другого устройства, и ваши.</p>
+  <div class="dlg-actions" style="flex-wrap:wrap">
+    <button type="button" class="btn" id="omMine">Сохранить только мою версию</button>
+    <button type="button" class="btn" id="omShow">Показать в заказе</button>
+    <button type="submit" class="btn primary">Объединить и сохранить</button>
+  </div>
+</form></dialog>
+
 <dialog id="payDlg"><form method="dialog" id="payForm">
   <h3 id="payTitle">Оплата</h3>
   <div id="payBody" style="display:flex;flex-direction:column;gap:10px"></div>
@@ -2434,15 +2446,19 @@ function openOrder(id, type){
   setTimeout(()=>{ $("#oPrint").checked = autoPrint(); });
   const o = id ? orderById(id) : null;
   OD = o ? Object.assign(newOD(o.type), JSON.parse(JSON.stringify(o)), {q:""}) : newOD(type||"hall");
-  $("#oTitle").textContent = o ? `Заказ №${o.num}` : "Новый заказ";
+  ODbase = o ? clone(o) : null;
+  fillOD();
+  $("#orderDlg").showModal();
+  const first = $("#oFields input"); if (first && !o) first.focus();
+}
+function fillOD(){
+  $("#oTitle").textContent = OD.id ? `Заказ №${OD.num}` : "Новый заказ";
   document.querySelector(`input[name="otype"][value="${OD.type}"]`).checked = true;
   $("#oq").value = ""; $("#oComment").value = OD.comment||"";
   if (!(orderPct(OD)>0)) OD.discPct = null;
   $("#oCourFee").value = Number(OD.courierFee)>0 ? String(OD.courierFee) : "";
   $("#oDiscOn").checked = OD.discPct!=null; $("#oDiscPct").value = OD.discPct!=null ? String(OD.discPct) : "";
   renderODFields(); renderODPick(); renderODLines();
-  $("#orderDlg").showModal();
-  const first = $("#oFields input"); if (first && !o) first.focus();
 }
 $("#orderDlg").addEventListener("change", e=>{
   if (e.target.name==="otype"){ readODFields(); OD.type = e.target.value; renderODFields(); renderODLines(); }
@@ -2501,6 +2517,7 @@ $("#orderForm").addEventListener("submit", async e=>{
   if ($("#oDiscOn").checked && OD.discPct==null){ need($("#oDiscPct"), "Укажите процент скидки: от 1 до 100"); return; }
   const seen = OD.id ? orderById(OD.id) : null, old = OD.id ? await freshOrder(OD.id) : null;
   if (OD.id && (!old || !isOpen(old))){ $("#orderDlg").close(); return orderStale(old, seen ? seen.num : ""); }
+  if (old && FS && !freshOrder.srv && !tConfirm("Нет связи с сервером: не получается проверить, меняли ли этот заказ на другом устройстве. Если меняли, те изменения пропадут. Сохранить всё равно?")) return;
   if (!isAdmin()){
     const R = promoRules(), was = l => old && (old.lines||[]).some(x=>x.promo && x.kind===l.kind && x.id===l.id && Number(x.price)===Number(l.price));
     for (const l of OD.lines){ if (!l.promo || was(l)) continue;
@@ -2511,25 +2528,99 @@ $("#orderForm").addEventListener("submit", async e=>{
       if (!R.ord){ toast(R.ordWhy && !R.off ? "Скидка на заказ сейчас недоступна: " + R.ordWhy : "Скидка на заказ сейчас запрещена администратором"); return; }
       if (OD.discPct < R.ordMin || OD.discPct > R.ordMax){ need($("#oDiscPct"), `Скидка на заказ: ${fmt(R.ordMin)}–${fmt(R.ordMax)}%`); return; } }
   }
-  const o = Object.assign({}, old||{}, {type:OD.type, table:OD.type==="hall"?OD.table:"", name:OD.type!=="hall"?OD.name:"", phone:OD.type!=="hall"?OD.phone:"",
-    address:OD.type==="delivery"?OD.address:"", courier:OD.type==="delivery"?OD.courier:"", due:OD.type==="delivery"?OD.due:"",
-    source:OD.type!=="hall"?OD.source:"", lines:OD.lines.map(l=>Object.assign({kind:l.kind, id:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0, comment:(l.comment||"").trim()}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})),
-    comment:OD.comment, updatedAt:Date.now()});
-  if ($("#oDiscOn").checked && OD.discPct>0){ o.discPct = OD.discPct; o.discBy = OD.discBy||""; } else { delete o.discPct; delete o.discBy; }
-  if (OD.type==="delivery" && Number(OD.courierFee)>0) o.courierFee = Math.round(Number(OD.courierFee)*100)/100; else delete o.courierFee;
+  let ed = oEdit(OD);
+  if (old && ODbase){ const b = oEdit(ODbase), t = oEdit(old);
+    if (same(ed, b)) ed = t; // nothing changed in this window: keep the latest version
+    else if (!same(t, b) && !same(ed, t)) return omAsk(b, ed, t);
+  }
+  await saveOrder(ed, old);
+});
+async function saveOrder(ed, old){
+  const o = Object.assign({}, old||{}, ed, {updatedAt:Date.now(), editedBy:S.me ? S.me.name : lsGet("sklad.who")});
+  if (!(ed.discPct>0)){ delete o.discPct; delete o.discBy; }
+  if (!(ed.courierFee>0)) delete o.courierFee;
   if (!old){ o.id = uid("o"); o.num = await nextOrderNum(); o.status = "new"; o.createdAt = Date.now(); o.who = lsGet("sklad.who"); }
   o.total = orderTotal(o);
   try { await commit((old?"Изменение заказа №":"Новый заказ №")+o.num, [{col:"orders", id:o.id, after:o}, ...courOps(o)]); $("#orderDlg").close();
     lsSet("sushi.autoprint", $("#oPrint").checked ? "1" : "0"); if ($("#oPrint").checked) setTimeout(()=>printOrder(o, !!old), 300); S.view="orders"; S.ordView="open"; render(true); toast(old?`Заказ №${o.num} сохранён`:`Заказ №${o.num} принят`); }
   catch(err){ console.error(err); toast("Не удалось сохранить заказ. Проверьте права на изменение."); }
+}
+
+/* ----- one order edited on two devices ----- */
+// the window remembers the order as it was opened (ODbase); on save, my changes go on top of the latest version,
+// so dishes and changes added meanwhile on another device are kept
+let ODbase = null;
+const same = (a, b) => JSON.stringify(a)===JSON.stringify(b);
+const oLine = l => Object.assign({kind:l.kind, id:l.id, name:l.name, qty:Number(l.qty)||0, price:Number(l.price)||0, comment:(l.comment||"").trim()}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {});
+// the part of an order that the order window changes
+function oEdit(x){
+  const t = x.type, h = t==="hall", d = t==="delivery", pct = Number(x.discPct)>0 ? Number(x.discPct) : null;
+  return {type:t, table:h ? x.table||"" : "", name:h ? "" : x.name||"", phone:h ? "" : x.phone||"", address:d ? x.address||"" : "", courier:d ? x.courier||"" : "", due:d ? x.due||"" : "",
+    source:h ? "" : x.source||"", comment:x.comment||"", discPct:pct, discBy:pct ? x.discBy||"" : "",
+    courierFee:d && Number(x.courierFee)>0 ? Math.round(Number(x.courierFee)*100)/100 : null, lines:(x.lines||[]).map(oLine)};
+}
+const OE_LBL = {type:"Тип заказа", table:"Стол", name:"Имя", phone:"Телефон", address:"Адрес", courier:"Имя курьера", due:"К какому времени", source:"Источник", comment:"Комментарий к заказу", discPct:"Скидка на весь заказ", courierFee:"Сумма курьеру"};
+const oVal = (k, v) => v==null || v==="" ? "—" : k==="type" ? OTYPES[v] : k==="discPct" ? fmt(v)+"%" : k==="courierFee" ? money(v) : String(v);
+const lKey = l => JSON.stringify([l.kind, l.id, l.comment, l.promo ? 1 : 0, l.price]);
+function lCount(ls){ const m = new Map(); for (const l of ls){ const k = lKey(l), e = m.get(k); if (e) e.qty += l.qty; else m.set(k, Object.assign({}, l)); } return m; }
+// base → theirs and base → mine both apply: a field takes the side that changed it (changed on both: mine), dish counts add up
+function oMerge(b, m, t){
+  const r = {}, clash = [];
+  for (const k of Object.keys(OE_LBL)){
+    const mc = !same(m[k], b[k]); r[k] = mc ? m[k] : t[k];
+    if (mc && !same(t[k], b[k]) && !same(m[k], t[k])) clash.push(k);
+    if (k==="discPct") r.discBy = mc ? m.discBy : t.discBy;
+  }
+  const B = lCount(b.lines), M = lCount(m.lines), T = lCount(t.lines);
+  r.lines = [];
+  for (const [k, l] of [...T, ...[...M].filter(([k])=>!T.has(k))]){
+    const q = (T.has(k) ? T.get(k).qty : 0) + (M.has(k) ? M.get(k).qty : 0) - (B.has(k) ? B.get(k).qty : 0);
+    if (q>0) r.lines.push(Object.assign({}, l, {qty:q}));
+  }
+  return {r:oEdit(r), clash};
+}
+function oDiff(b, x){
+  const out = [], B = lCount(b.lines), X = lCount(x.lines);
+  for (const k of new Set([...B.keys(), ...X.keys()])){
+    const d = (X.has(k) ? X.get(k).qty : 0) - (B.has(k) ? B.get(k).qty : 0); if (!d) continue;
+    const l = X.get(k) || B.get(k);
+    out.push(`<div><span class="${d>0?"":"neg"}">${d>0?"+":"−"}${fmt(Math.abs(d))} × ${NL(l)}${promoTag(l)}${l.comment?` <small class="hint">${esc(l.comment)}</small>`:""}</span></div>`);
+  }
+  for (const k of Object.keys(OE_LBL)) if (!same(b[k], x[k])) out.push(`<div><span>${OE_LBL[k]}: ${esc(oVal(k, b[k]))} → <b>${esc(oVal(k, x[k]))}</b></span></div>`);
+  return out.join("");
+}
+let OM = null;
+function omAsk(b, m, t){
+  const o = orderById(OD.id), mg = oMerge(b, m, t); OM = {b, m, t, mg};
+  $("#omTitle").textContent = `Заказ №${o.num} изменили на другом устройстве`;
+  $("#omWho").textContent = o.editedBy ? `Последнее изменение: ${o.editedBy}, ${hhmm(o.updatedAt||Date.now())}` : "";
+  $("#omBody").innerHTML = `<b>На другом устройстве:</b><div class="prev">${oDiff(b, t)}</div><b>У вас:</b><div class="prev">${oDiff(b, m)}</div>`
+    + (mg.clash.length ? `<p class="neg">Изменили и там, и у вас. При объединении останется ваш вариант: ${mg.clash.map(k=>`${OE_LBL[k]} — ${esc(oVal(k, m[k]))}`).join("; ")}.</p>` : "")
+    + `<div class="ototal">Итого после объединения: <b>${money(orderTotal(mg.r))}</b></div>`;
+  $("#omDlg").showModal();
+}
+// the order may have changed again while this window was open
+async function omFresh(){
+  const o = await freshOrder(OD.id);
+  if (!o || !isOpen(o)){ $("#omDlg").close(); $("#orderDlg").close(); orderStale(o, OD.num); return null; }
+  const t = oEdit(o); if (!same(t, OM.t)){ $("#omDlg").close(); omAsk(OM.b, OM.m, t); return null; }
+  return o;
+}
+$("#omForm").addEventListener("submit", async e=>{ e.preventDefault(); const o = await omFresh(); if (!o) return; $("#omDlg").close(); await saveOrder(OM.mg.r, o); });
+$("#omMine").addEventListener("click", async ()=>{ const o = await omFresh(); if (!o) return; $("#omDlg").close(); await saveOrder(OM.m, o); });
+$("#omShow").addEventListener("click", ()=>{
+  const o = orderById(OD.id); $("#omDlg").close(); if (!o) return;
+  OD = Object.assign(newOD(OM.mg.r.type), clone(o), OM.mg.r, {q:""}); ODbase = clone(o);
+  fillOD(); toast("Проверьте заказ и нажмите «Сохранить заказ»");
 });
 
 /* ----- one order, several devices: before changing an order, ask the server for its latest version ----- */
 // offline or no answer in 4 s: the device works with what it has (the sale id is per order, so a second close does not add a second sale)
 const srvGet = q => Promise.race([q.get({source:"server"}), new Promise((_,no)=>setTimeout(()=>no(new Error("timeout")), 4000))]);
 async function freshOrder(id){
+  freshOrder.srv = false; // true: the version below came from the server
   if (FS && navigator.onLine){
-    try { const d = await srvGet(FS.collection("orders").doc(id)); if (d.exists) upsertLocal(S.orders, Object.assign({}, d.data(), {id:d.id})); }
+    try { const d = await srvGet(FS.collection("orders").doc(id)); if (d.exists) upsertLocal(S.orders, Object.assign({}, d.data(), {id:d.id})); freshOrder.srv = true; }
     catch(e){ console.warn("order sync", e); }
   }
   return orderById(id);
@@ -3434,6 +3525,7 @@ Object.assign(I18N, {"Срок действия. Пустое поле — бе�
 Object.assign(I18N, {"автоматически": ["automatically", "otomatik"], "вписано вручную": ["entered manually", "elle girildi"], "автоматически, последняя сумма": ["automatically, last amount", "otomatik, son tutar"], "Подставлена последняя сумма аренды.": ["The last rent amount is filled in.", "Son kira tutarı girildi."]});
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
+Object.assign(I18N, {"Заказ изменили на другом устройстве": ["The order was changed on another device", "Sipariş başka bir cihazda değiştirildi"], "изменили на другом устройстве": ["was changed on another device", "başka bir cihazda değiştirildi"], "Последнее изменение:": ["Last change:", "Son değişiklik:"], "«Объединить» — сохранятся и изменения с другого устройства, и ваши.": ["«Merge» keeps both the changes from the other device and yours.", "«Birleştir»: diğer cihazdaki değişiklikler de sizinkiler de kaydedilir."], "Сохранить только мою версию": ["Save only my version", "Sadece benim halimi kaydet"], "Показать в заказе": ["Show in the order", "Siparişte göster"], "Объединить и сохранить": ["Merge and save", "Birleştir ve kaydet"], "На другом устройстве:": ["On the other device:", "Diğer cihazda:"], "У вас:": ["On yours:", "Sizde:"], "Изменили и там, и у вас. При объединении останется ваш вариант:": ["Changed on both devices. Merging keeps your version:", "İki cihazda da değiştirildi. Birleştirince sizinki kalır:"], "Итого после объединения:": ["Total after merging:", "Birleştirme sonrası toplam:"], "Стол": ["Table", "Masa"], "Сумма курьеру": ["Courier fee", "Kurye ücreti"], "Нет связи с сервером: не получается проверить, меняли ли этот заказ на другом устройстве. Если меняли, те изменения пропадут. Сохранить всё равно?": ["No connection to the server: cannot check whether this order was changed on another device. If it was, those changes will be lost. Save anyway?", "Sunucuya bağlantı yok: bu siparişin başka bir cihazda değiştirilip değiştirilmediği kontrol edilemiyor. Değiştirildiyse o değişiklikler kaybolur. Yine de kaydedilsin mi?"], "Проверьте заказ и нажмите «Сохранить заказ»": ["Check the order and tap «Save order»", "Siparişi kontrol edip «Siparişi kaydet»e dokunun"]});
 Object.assign(I18N, {"Продолжить смену и войти": ["Continue shift and log in", "Vardiyaya devam et ve gir"], "Сегодня уже была смена": ["Already had a shift today", "Bugün zaten vardiya vardı"], "Вы уже на смене с": ["You are already on shift since", "Zaten vardiyadasınız, başlangıç"], "Смена продолжена в": ["Shift continued at", "Vardiyaya devam edildi:"], "Смена начата в": ["Shift started at", "Vardiya başladı:"], "Здравствуйте": ["Hello", "Merhaba"], "перерыв": ["break", "mola"], "повтор, часы считаются один раз": ["duplicate, hours counted once", "tekrar, saatler bir kez sayılır"], "Открытой смены нет": ["No open shift", "Açık vardiya yok"], "Смена закрыта": ["Shift closed", "Vardiya kapandı"], "смена закрыта": ["shift closed", "vardiya kapandı"], "До свидания": ["Goodbye", "Hoşça kalın"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Курьер по заказу с доставкой записывается сам. Здесь — курьер вручную, например за покупками.": ["The courier for a delivery order is recorded automatically. Here you add a courier by hand, e.g. sent for purchases.", "Teslimat siparişinin kuryesi otomatik yazılır. Burada kurye elle eklenir, örneğin alışverişe gönderildiğinde."], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"]});
