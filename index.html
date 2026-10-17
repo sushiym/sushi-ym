@@ -2009,6 +2009,8 @@ function renderOrdersControls(c){
     <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}
       ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}</div>`;
   const dup = isAdmin() ? dupSales() : [];
+  const dn2 = isAdmin() ? dupNums() : [];
+  if (dn2.length) c.innerHTML += `<div class="oreq" style="margin-top:8px"><b>Одинаковые номера заказов в один день:</b> ${dn2.map(d=>`№${esc(d.num)} (${dmy(d.day)}), заказов: ${d.n}`).join("; ")}</div>`;
   if (dup.length) c.innerHTML += `<div class="oreq" style="margin-top:8px"><b>Двойные продажи по одному заказу:</b> ${dup.map(d=>`Заказ №${esc(d.o ? d.o.num : "?")} (${dmy(dayKey(d.ts))}): продаж ${d.a.length}, лишняя выручка ${money(d.extra)}`).join("; ")}</div>`;
 }
 function orderCard(o){
@@ -2038,7 +2040,7 @@ function orderCard(o){
   btns = `<button class="btn small" data-oprint="${esc(o.id)}" title="Распечатать на кухню">🖨 Печать</button>` + btns;
   const t = new Date(o.createdAt).toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
   return `<div class="ocard s-${o.status} ${late?"late":""}">
-    <div class="ohead"><b>№${esc(o.num)}</b><span class="tag t-${o.type}">${OTYPES[o.type]}</span><span class="owhere">${orderWhere(o)}</span>
+    <div class="ohead"><b>№${esc(o.num)}</b>${o.numWas ? `<small class="hint">(был №${esc(o.numWas)})</small>` : ""}<span class="tag t-${o.type}">${OTYPES[o.type]}</span><span class="owhere">${orderWhere(o)}</span>
       <span class="otime">${isOpen(o) ? `${m} мин${late?" · задержка":""}` : t}</span></div>
     <div class="ometa"><span class="tag os-${o.status}">${statLabel(o)}</span> ${meta.join(" · ")}</div>
     <div class="olines">${lines || '<span class="hint">Пустой заказ</span>'}</div>
@@ -2505,9 +2507,61 @@ $("#orderDlg").addEventListener("click", e=>{
   const b = e.target.closest("[data-oinc],[data-odec]");
   if (b){ const i = +(b.dataset.oinc ?? b.dataset.odec); const l = OD.lines[i]; if (!l) return; l.qty += b.dataset.oinc!==undefined ? 1 : -1; if (l.qty<=0) OD.lines.splice(i,1); renderODLines(); }
 });
+/* ----- order numbers: two devices never give the same number on one day ----- */
+// online: the number is reserved on the server (settings/ordnum keeps the numbers given out per day);
+// offline: the device takes the next number it knows and marks it numTmp; back online the number is checked on the server
+// and, if another order already has it, the order gets the next free one (numWas keeps the old one, it is on the kitchen ticket)
+const dayNums = (day, skip) => S.orders.filter(o=>o.id!==skip && dayKey(o.createdAt||0)===day).map(o=>Number(o.num)||0);
+async function onumTx(fn){
+  if (!FS || !navigator.onLine) throw new Error("offline");
+  const ref = FS.collection("settings").doc("ordnum");
+  const tx = FS.runTransaction(async t => {
+    const d = await t.get(ref), days = Object.assign({}, d.exists ? d.data().days : {});
+    const r = await fn(t, days); if (r == null) return r;
+    const keep = {}; Object.keys(days).sort().slice(-3).forEach(k=>keep[k] = days[k]);
+    t.set(ref, {days: keep}); return r;
+  });
+  return Promise.race([tx, new Promise((_,no)=>setTimeout(()=>no(new Error("timeout")), 6000))]);
+}
 async function nextOrderNum(){
-  const tk = todayKey();
-  return Math.max(0, ...S.orders.filter(o=>dayKey(o.createdAt||0)===tk).map(o=>Number(o.num)||0)) + 1;
+  const tk = todayKey(), known = dayNums(tk);
+  try { return {num: await onumTx((t, days) => { const used = days[tk]||[], n = Math.max(0, ...used, ...known) + 1; days[tk] = [...used, n]; return n; })}; }
+  catch(e){ if (e.message!=="offline") console.warn("order number", e); return {num: Math.max(0, ...known) + 1, tmp: !!FS}; }
+}
+async function fixNum(o){
+  const day = dayKey(o.createdAt||0), ref = FS.collection("orders").doc(o.id);
+  const r = await onumTx(async (t, days) => {
+    const d = await t.get(ref); if (!d.exists) return null; // not on the server yet
+    const x = d.data(); if (!x.numTmp) return null;
+    const num = Number(x.num)||0, used = days[day]||[], ts = x.createdAt||0;
+    const taken = used.includes(num) || S.orders.some(y=>y.id!==o.id && dayKey(y.createdAt||0)===day && Number(y.num)===num
+      && (!y.numTmp || (y.createdAt||0) < ts || ((y.createdAt||0)===ts && y.id < o.id)));
+    if (!taken){ days[day] = [...used, num]; t.update(ref, {numTmp:false}); return {num}; }
+    const n = Math.max(0, ...used, ...dayNums(day, o.id), num) + 1; days[day] = [...used, n];
+    t.update(ref, {num:n, numWas:num, numTmp:false}); return {num:n, was:num};
+  });
+  return r;
+}
+// an order got a new number: said on every device (the old number may be on the kitchen ticket)
+function numMoved(prev){
+  for (const o of S.orders){ if (!o.numWas) continue; const p = prev.find(x=>x.id===o.id);
+    if (p && Number(p.num)===Number(o.numWas) && Number(o.num)!==Number(p.num)) toast(`Заказ №${o.numWas}: новый номер №${o.num}. Номер №${o.numWas} уже был у другого заказа.`); }
+}
+let numBusy = false, numWait = 0;
+async function fixNums(){
+  if (!FS || numBusy || !navigator.onLine || Date.now() < numWait) return;
+  const tmp = S.orders.filter(o=>o.numTmp).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0) || (a.id < b.id ? -1 : 1));
+  if (!tmp.length) return;
+  numBusy = true;
+  try { for (const o of tmp) await fixNum(o); }
+  catch(e){ console.warn("order number check", e); const w = e && e.code==="permission-denied" ? 3600000 : 30000; numWait = Date.now() + w; setTimeout(fixNums, w + 100); }
+  finally { numBusy = false; }
+}
+// the same number on one day (made before this check existed): shown to the admin
+function dupNums(){
+  const by = {};
+  for (const o of S.orders) if (!o.numTmp && o.num) (by[dayKey(o.createdAt||0)+"|"+o.num] = by[dayKey(o.createdAt||0)+"|"+o.num]||[]).push(o);
+  return Object.entries(by).filter(([,a])=>a.length>1).map(([k,a])=>({day:k.split("|")[0], num:a[0].num, n:a.length})).sort((p,q)=>p.day<q.day ? 1 : -1);
 }
 $("#orderForm").addEventListener("submit", async e=>{
   e.preventDefault(); readODFields();
@@ -2541,7 +2595,7 @@ async function saveOrder(ed, old){
   const o = Object.assign({}, old||{}, ed, {updatedAt:Date.now(), editedBy:S.me ? S.me.name : lsGet("sklad.who")});
   if (!(ed.discPct>0)){ delete o.discPct; delete o.discBy; }
   if (!(ed.courierFee>0)) delete o.courierFee;
-  if (!old){ o.id = uid("o"); o.num = await nextOrderNum(); o.status = "new"; o.createdAt = Date.now(); o.who = lsGet("sklad.who"); }
+  if (!old){ const nn = await nextOrderNum(); o.id = uid("o"); o.num = nn.num; if (nn.tmp) o.numTmp = true; o.status = "new"; o.createdAt = Date.now(); o.who = lsGet("sklad.who"); }
   o.total = orderTotal(o);
   ODsaving = true; // my own save comes back through the live list: not a change from another device
   try { await commit((old?"Изменение заказа №":"Новый заказ №")+o.num, [{col:"orders", id:o.id, after:o}, ...courOps(o)]); ODsaving = false; $("#orderDlg").close();
@@ -2617,6 +2671,7 @@ function liveOrder(){
   if (!OD || !OD.id || !ODbase || ODsaving || !$("#orderDlg").open || $("#omDlg").open) return;
   const o = orderById(OD.id);
   if (!o || !isOpen(o)){ $("#orderDlg").close(); return orderStale(o, OD.num); }
+  if (o.num!==OD.num){ OD.num = o.num; ODbase.num = o.num; $("#oTitle").textContent = `Заказ №${o.num}`; }
   const b = oEdit(ODbase), t = oEdit(o); if (same(t, b)) return;
   readODFields();
   const m = oEdit(OD), mg = same(m, b) ? {r:t, clash:[]} : oMerge(b, m, t);
@@ -3562,6 +3617,7 @@ Object.assign(I18N, {"Кассовые расходы": ["Cash expenses", "Kasa 
 Object.assign(I18N, {"Телефон Android": ["Android phone", "Android telefon"], "Планшет Android": ["Android tablet", "Android tablet"], "Компьютер Windows": ["Windows computer", "Windows bilgisayar"], "Компьютер Linux": ["Linux computer", "Linux bilgisayar"], "Устройство": ["Device", "Cihaz"], "Устройства": ["Devices", "Cihazlar"], "главное": ["main", "ana"], "это устройство": ["this device", "bu cihaz"], "ждёт разрешения": ["waiting for approval", "onay bekliyor"], "отключено": ["disconnected", "bağlantısı kesildi"], "Переименовать": ["Rename", "Yeniden adlandır"], "Разрешить": ["Allow", "İzin ver"], "Сделать главным": ["Make main", "Ana cihaz yap"], "Снять «главное»": ["Remove «main»", "«Ana» işaretini kaldır"], "Отключить": ["Disconnect", "Bağlantıyı kes"], "Убрать из списка": ["Remove from list", "Listeden kaldır"], "Сделать это устройство главным": ["Make this device main", "Bu cihazı ana cihaz yap"], "(приложение)": ["(app)", "(uygulama)"], "код": ["code", "kod"], "В сети:": ["Online:", "Çevrimiçi:"], "вход:": ["login:", "giriş:"], "ждут:": ["waiting:", "bekleyen:"], "Новые устройства — только с разрешения": ["New devices only with approval", "Yeni cihazlar yalnızca onayla"], "Управлять устройствами можно только с главного устройства.": ["Devices can be managed only from a main device.", "Cihazlar yalnızca ana cihazdan yönetilebilir."], "Главного устройства пока нет — откройте программу на своём устройстве и нажмите «Сделать это устройство главным».": ["There is no main device yet: open the app on your device and press «Make this device main».", "Henüz ana cihaz yok: programı kendi cihazınızda açın ve «Bu cihazı ana cihaz yap» düğmesine basın."], "Главное устройство отключить нельзя. Отключённое устройство выходит из программы, как только появится интернет.": ["A main device cannot be disconnected. A disconnected device leaves the app as soon as it is online.", "Ana cihazın bağlantısı kesilemez. Bağlantısı kesilen cihaz internete bağlanır bağlanmaz programdan çıkar."], "Подтвердите PIN админа": ["Confirm the admin PIN", "Yönetici PIN'ini onaylayın"], "Подтвердить": ["Confirm", "Onayla"], "Неверный PIN": ["Wrong PIN", "Yanlış PIN"], "Это устройство теперь главное": ["This device is now main", "Bu cihaz artık ana cihaz"], "Устройство разрешено": ["Device allowed", "Cihaza izin verildi"], "Устройство отключено": ["Device disconnected", "Cihazın bağlantısı kesildi"], "Новые устройства будут ждать вашего разрешения": ["New devices will wait for your approval", "Yeni cihazlar onayınızı bekleyecek"], "Новые устройства подключаются без разрешения": ["New devices connect without approval", "Yeni cihazlar onaysız bağlanır"], "Новое устройство ждёт разрешения: Сотрудники → Устройства": ["A new device is waiting for approval: Staff → Devices", "Yeni bir cihaz onay bekliyor: Personel → Cihazlar"], "Новое устройство ждёт разрешения администратора.": ["This new device is waiting for the administrator's approval.", "Bu yeni cihaz yöneticinin onayını bekliyor."], "Попросите администратора: на главном устройстве откройте «Сотрудники» → «Устройства» и нажмите «Разрешить» у этого устройства. Программа откроется сама.": ["Ask the administrator to open «Staff» → «Devices» on a main device and press «Allow» for this device. The app will open by itself.", "Yöneticiden ana cihazda «Personel» → «Cihazlar» bölümünü açıp bu cihaz için «İzin ver» düğmesine basmasını isteyin. Program kendiliğinden açılacak."], "Код устройства:": ["Device code:", "Cihaz kodu:"], "Это устройство отключено администратором.": ["This device was disconnected by the administrator.", "Bu cihazın bağlantısı yönetici tarafından kesildi."], "Подключить его снова можно только после того, как администратор нажмёт «Разрешить» на главном устройстве.": ["It can be connected again only after the administrator presses «Allow» on a main device.", "Yönetici ana cihazda «İzin ver» düğmesine bastıktan sonra tekrar bağlanabilir."], "Название устройства (например: Планшет кухня):": ["Device name (for example: Kitchen tablet):", "Cihaz adı (örneğin: Mutfak tableti):"]});
 Object.assign(I18N, {"Отмена или списание заказа": ["Cancel or write off order", "Siparişi iptal et veya fireye yaz"], "Что сделать с заказом": ["What to do with the order", "Siparişle ne yapılacak"], "Отменить / Списать": ["Cancel / Write off", "İptal / Fire"], "Списать заказ": ["Write off order", "Siparişi fireye yaz"], "Списан": ["Written off", "Fireye yazıldı"], "Комментарий: причина": ["Comment: reason", "Açıklama: neden"], "Например: тестовый заказ; клиент отказался платить": ["E.g.: test order; customer refused to pay", "Örn.: deneme siparişi; müşteri ödemeyi reddetti"], "Отправить админу": ["Send to admin", "Yöneticiye gönder"], "Заказа не было (тест, ошибка). Выручка убирается, продукты возвращаются на склад.": ["The order never happened (test, mistake). Revenue is removed, products go back to stock.", "Sipariş hiç olmadı (deneme, hata). Ciro silinir, ürünler stoğa geri döner."], "Оплату не получили, продукты израсходованы. Выручка убирается, продукты записываются в списание.": ["Payment not received, products were used. Revenue is removed, products are recorded as write-off.", "Ödeme alınmadı, ürünler kullanıldı. Ciro silinir, ürünler fireye yazılır."], "Запись курьера в кассовых расходах удаляется.": ["The courier record in cash expenses is removed.", "Kasa giderlerindeki kurye kaydı silinir."], "Запись курьера в кассовых расходах остаётся.": ["The courier record in cash expenses stays.", "Kasa giderlerindeki kurye kaydı kalır."], "Запрос уйдёт админу. Пока он не одобрит, ничего не изменится.": ["The request goes to the admin. Nothing changes until it is approved.", "Talep yöneticiye gider. Onaylanana kadar hiçbir şey değişmez."], "Напишите комментарий: причину отмены или списания": ["Write a comment: the reason for cancelling or writing off", "Açıklama yazın: iptal veya fire nedeni"], "Запрос отправлен админу на согласование": ["Request sent to the admin for approval", "Talep onay için yöneticiye gönderildi"], "Ждёт решения админа": ["Waiting for the admin's decision", "Yönetici kararı bekleniyor"], "Админ отклонил запрос": ["The admin rejected the request", "Yönetici talebi reddetti"], "Одобрить": ["Approve", "Onayla"], "Запросы на отмену": ["Cancel requests", "İptal talepleri"], "Запросов на отмену и списание нет.": ["No cancel or write-off requests.", "İptal veya fire talebi yok."], "одобрил(а)": ["approved by", "onaylayan"], "Запрос отклонён": ["Request rejected", "Talep reddedildi"], "Списано (не оплачено)": ["Written off (unpaid)", "Fire (ödenmedi)"], "Отменённые и списанные заказы": ["Cancelled and written-off orders", "İptal edilen ve fireye yazılan siparişler"], "Заказа не будет (тест, ошибка, клиент передумал). Продукты со склада не списываются.": ["The order will not happen (test, mistake, customer changed their mind). No products are taken from stock.", "Sipariş olmayacak (deneme, hata, müşteri vazgeçti). Stoktan ürün düşülmez."], "Оплату не получили, продукты израсходованы. Продукты спишутся со склада по техкартам как списание, выручки не будет.": ["Payment not received, products were used. Products are taken from stock per recipe cards as a write-off, no revenue.", "Ödeme alınmadı, ürünler kullanıldı. Ürünler reçeteye göre stoktan fire olarak düşülür, ciro olmaz."], "отменён": ["cancelled", "iptal edildi"], "и неоплаченные заказы": ["and unpaid orders", "ve ödenmemiş siparişler"], "отменён, продукты вернулись на склад": ["cancelled, products returned to stock", "iptal edildi, ürünler stoğa döndü"], "списан": ["written off", "fireye yazıldı"], "одобрить?": ["approve?", "onaylansın mı?"], "Удалить списание": ["Delete write-off", "Fire kaydını sil"], "Отмена заказа": ["Order cancellation", "Sipariş iptali"], "Списание заказа": ["Order write-off", "Sipariş firesi"], "Одобрить:": ["Approve:", "Onayla:"], "Запрос": ["Request", "Talep"]});
 Object.assign(I18N, {"Печать": ["Print", "Yazdır"], "Распечатать на кухню": ["Print for the kitchen", "Mutfağa yazdır"], "Распечатать платёжный чек": ["Print payment receipt", "Ödeme fişini yazdır"], "Печать недоступна на этом устройстве": ["Printing is not available on this device", "Bu cihazda yazdırma kullanılamıyor"]});
+Object.assign(I18N, {"новый номер №": ["new number #", "yeni numara #"], "Номер №": ["Number #", "Numara #"], "уже был у другого заказа": ["was already used by another order", "başka bir siparişte zaten vardı"], "был №": ["was #", "eski #"], "Одинаковые номера заказов в один день:": ["Same order number twice on one day:", "Aynı gün aynı sipariş numarası:"], "заказов:": ["orders:", "sipariş:"]});
 Object.assign(I18N, {"удалён на другом устройстве": ["was deleted on another device", "başka bir cihazda silindi"], "уже закрыт на другом устройстве": ["was already closed on another device", "başka bir cihazda zaten kapatıldı"], "уже списан на другом устройстве": ["was already written off on another device", "başka bir cihazda zaten fireye yazıldı"], "уже отменён на другом устройстве": ["was already cancelled on another device", "başka bir cihazda zaten iptal edildi"], "уже снова в работе: его вернули на другом устройстве": ["is open again: it was reopened on another device", "yeniden açık: başka bir cihazda tekrar işleme alındı"], "Ничего не изменено.": ["Nothing was changed.", "Hiçbir şey değiştirilmedi."], "изменён на другом устройстве. Проверьте сумму и нажмите ещё раз.": ["was changed on another device. Check the amount and press again.", "başka bir cihazda değiştirildi. Tutarı kontrol edip tekrar basın."], "запрос уже отправлен админу.": ["a request has already been sent to the admin.", "yöneticiye zaten talep gönderildi."], "Двойные продажи по одному заказу:": ["Duplicate sales for one order:", "Bir sipariş için çift satış:"], "продаж": ["sales", "satış"], "лишняя выручка": ["extra revenue", "fazla ciro"], "запрос уже решён на другом устройстве.": ["the request was already decided on another device.", "talep başka bir cihazda zaten karara bağlandı."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
@@ -3652,7 +3708,7 @@ function startSubs(){
   subscribe("menu", list => { S.menu = list; S.loaded.menu = true; render(); });
   subscribe("sets", list => { S.sets = list; S.loaded.sets = true; render(); });
   subscribe("sales", list => { S.sales = list; S.loaded.sales = true; render(); });
-  subscribe("orders", list => { S.orders = list; S.loaded.orders = true; liveOrder(); render(); });
+  subscribe("orders", list => { const prev = S.orders; S.orders = list; S.loaded.orders = true; liveOrder(); render(); numMoved(prev); fixNums(); });
   subscribe("settings", list => { S.settings = list; S.loaded.settings = true; render(); });
   subscribe("expenses", list => { S.expenses = list; S.loaded.expenses = true; render(); });
   subscribe("invdrafts", list => { S.invdrafts = list; S.loaded.invdrafts = true; render(); });
@@ -3857,7 +3913,7 @@ async function importOld(){
 }
 /* online / offline indicator */
 function netChip(){ const c = $("#netChip"); if (c) c.hidden = navigator.onLine; }
-window.addEventListener("online", ()=>{ netChip(); toast("Интернет есть — данные синхронизируются"); });
+window.addEventListener("online", ()=>{ netChip(); toast("Интернет есть — данные синхронизируются"); setTimeout(fixNums, 3000); });
 window.addEventListener("offline", ()=>{ netChip(); toast("Нет интернета — работаем офлайн, всё сохранится"); });
 
 applyRole(); render(true); trTree(document.body); netChip();
