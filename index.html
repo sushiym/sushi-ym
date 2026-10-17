@@ -302,6 +302,7 @@ details.wbox details.wbox{padding:5px 6px}
 details.wbox details.wbox .srow{gap:6px;padding:6px 6px}
 details.det .slist .srow,.srow{display:grid;grid-template-columns:1fr auto auto;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-s);padding:6px 10px;text-align:left;font-size:.9rem;font-variant-numeric:tabular-nums;width:100%}
 .srow .auto{color:var(--low)}
+.srow small{display:block;font-size:.75rem;opacity:.85}
 .srow.long{border-color:var(--empty);color:var(--empty)}
 .chip.me{background:var(--on-nori);color:var(--nori);border-color:var(--on-nori)}
 .chip.me b{margin:0 4px}
@@ -2777,12 +2778,12 @@ document.addEventListener("submit", async e=>{
     const st = activeStaff().find(x=>x.id===gatePerson);
     if (!st){ err.textContent = "Сначала выберите своё имя"; return; }
     if (await pinHash(st.id, pin) === st.pinHash){
-      pinFails = 0; lastAct = Date.now(); const act = (e.submitter && e.submitter.value) || "login";
+      pinFails = 0; lastAct = Date.now(); const act = (e.submitter && e.submitter.value) || "login"; let started = null;
       try {
-        if (act==="end"){ const sh = await endShift(st); $("#gPin").value = ""; renderGate(); toast(sh ? `${st.name}: смена закрыта, ${fmtH(hoursOf(sh))}` : "Открытой смены нет"); return; }
-        if (act==="startlogin") await startShift(st);
+        if (act==="end"){ const r = await endShift(st); $("#gPin").value = ""; renderGate(); toast(r ? `${st.name}: смена закрыта, ${fmtH(r.hours)}` : "Открытой смены нет"); return; }
+        if (act==="startlogin") started = await startShift(st);
       } catch(er){ console.error(er); toast("Не удалось сохранить смену."); return; }
-      gatePerson = null; setMe(st); toast(act==="startlogin" ? `Смена начата в ${hhmm(Date.now())}. Здравствуйте, ${st.name}!` : `Здравствуйте, ${st.name}!`); return;
+      gatePerson = null; setMe(st); toast(started ? `${startedMsg(started, openShiftOf(st.id)||{start:Date.now()})}. Здравствуйте, ${st.name}!` : `Здравствуйте, ${st.name}!`); return;
     }
     pinFails++; if (pinFails>=5){ pinLockUntil = Date.now()+30000; pinFails = 0; }
     err.textContent = "Неверный PIN"; $("#gPin").value = ""; $("#gPin").focus();
@@ -2888,8 +2889,21 @@ document.addEventListener("click", e=>{
 });
 
 /* ---------- shifts / working time ---------- */
-const openShiftOf = sid => S.shifts.find(x=>x.staffId===sid && !x.end);
-const hoursOf = sh => Math.max(0, ((sh.end||Date.now()) - (sh.start||0))/3600000);
+const openShiftOf = sid => S.shifts.filter(x=>x.staffId===sid && !x.end && x.start).sort((a,b)=>a.start-b.start)[0];
+// a shift's worked pieces: start – end without its breaks (the time away when a closed shift was continued the same day)
+function segsOf(sh){
+  let segs = [[sh.start||0, Math.max(sh.start||0, sh.end||Date.now())]];
+  for (const b of sh.breaks||[]) segs = segs.flatMap(([a,z]) => !(b.to>a && b.from<z) ? [[a,z]] : [[a,Math.max(a,b.from)],[Math.min(z,b.to),z]].filter(([x,y])=>y>x));
+  return segs;
+}
+const hoursOf = sh => segsOf(sh).reduce((a,[x,y])=>a+(y-x),0)/3600000;
+// hours of ONE worker: overlapping shifts (opened twice from two devices) are counted once
+function workedH(arr){
+  const segs = arr.flatMap(segsOf).sort((a,b)=>a[0]-b[0]); let t = 0, cs = 0, ce = null;
+  for (const [a,z] of segs){ if (ce===null || a>ce){ if (ce!==null) t += ce-cs; cs = a; ce = z; } else ce = Math.max(ce, z); }
+  if (ce!==null) t += ce-cs; return t/3600000;
+}
+const overlapsOther = sh => S.shifts.some(x=>x.id!==sh.id && x.staffId===sh.staffId && x.start && (x.start||0) < (sh.end||Date.now()) && (x.end||Date.now()) > (sh.start||0));
 const fmtH = h => { const m = Math.round(h*60); return `${Math.floor(m/60)} ч ${String(m%60).padStart(2,"0")} мин`; };
 const hhmm = ts => new Date(ts).toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
 const toLocalInput = ts => ts ? new Date(ts - new Date(ts).getTimezoneOffset()*60000).toISOString().slice(0,16) : "";
@@ -2912,7 +2926,8 @@ function weekLabel(w, from, to){ const a = Math.max(w, from||w), e = Math.min(ad
 function shRowHtml(sh){
   const long = !sh.end ? hoursOf(sh)>LONG_SHIFT_H : false;
   const d = new Date(sh.start).toLocaleDateString(LOC(),{day:"numeric",month:"short",weekday:"short"});
-  return `<button type="button" class="srow ${long?"long":""}" data-editshift="${esc(sh.id)}"><span>${d}</span><span>${hhmm(sh.start)} – ${sh.end?hhmm(sh.end)+(sh.autoClosed?" авто":""):(long?"не закрыта!":"сейчас")}</span><b>${fmtH(hoursOf(sh))}</b></button>`;
+  const br = (sh.breaks||[]).filter(b=>b.to>b.from), dup = overlapsOther(sh);
+  return `<button type="button" class="srow ${long||dup?"long":""}" data-editshift="${esc(sh.id)}"><span>${d}</span><span>${hhmm(sh.start)} – ${sh.end?hhmm(sh.end)+(sh.autoClosed?" авто":""):(long?"не закрыта!":"сейчас")}${br.length?`<small>${br.map(b=>`перерыв ${hhmm(b.from)} – ${hhmm(b.to)}`).join(", ")}</small>`:""}${dup?"<small>повтор, часы считаются один раз</small>":""}</span><b>${fmtH(hoursOf(sh))}</b></button>`;
 }
 // finished time of one worker folds up: weeks of this month → months of this quarter → earlier quarters; each opens down to the days
 function staffWeeksHtml(x){
@@ -2920,7 +2935,7 @@ function staffWeeksHtml(x){
   const past = S.shifts.filter(sh=>sh.staffId===x.id && sh.start && sh.start < cur).sort((a,b)=>a.start-b.start);
   if (!past.length) return "";
   const groups = (arr, key) => { const m = new Map(); for (const sh of arr){ const k = key(sh.start); if (!m.has(k)) m.set(k, []); m.get(k).push(sh); } return [...m.entries()].sort((a,b)=>a[0]<b[0]?1:-1); };
-  const box = (label, arr, inner) => { const h = arr.reduce((a,sh)=>a+hoursOf(sh),0);
+  const box = (label, arr, inner) => { const h = workedH(arr);
     return `<details class="det wbox" data-k="${esc(x.id+"|"+label)}"><summary><span>${label}</span><b>${fmtH(h)}${rate?` · ${money(h*rate)}`:""}</b></summary><div class="slist">${inner}</div></details>`; };
   // weeks inside one month are cut at the month's edges, so a month adds up to the same hours as in Finance
   const weeks = arr => groups(arr, weekStart).map(([w,a])=>{ const ym = ymOf(a[0].start); return box(weekLabel(w, ymStart(ym), addDays(ymStart(ymShift(ym,1)),-1)), a, a.map(shRowHtml).join("")); }).join("");
@@ -2943,16 +2958,39 @@ async function autoCloseShifts(){
   } finally { autoClosing = false; }
 }
 setInterval(()=>{ autoCloseShifts().then(()=>{ if (S.view==="staff") renderList(); applyRole(); }); }, 60000);
+// one shift per worker per day on all devices: before starting, ask the server what the other devices already wrote
+async function syncStaffShifts(sid){
+  if (!FS || !navigator.onLine) return;
+  try {
+    const s = await Promise.race([FS.collection("shifts").where("staffId","==",sid).get({source:"server"}), new Promise((_,no)=>setTimeout(()=>no(new Error("timeout")), 4000))]);
+    for (const d of norm(s)) upsertLocal(S.shifts, d);
+  } catch(e){ console.warn("shifts sync", e); }
+}
+const day0 = ts => { const d = new Date(ts); d.setHours(0,0,0,0); return d.getTime(); };
+// today's last closed shift that can still be continued (not past the 23:00 auto close)
+const resumableOf = sid => { const now = Date.now(), d0 = day0(now);
+  return S.shifts.filter(x=>x.staffId===sid && x.end && (x.start||0)>=d0 && now < autoCloseAt(x.start)).sort((a,b)=>b.end-a.end)[0]; };
+// "joined": already on shift (from another device) · "resumed": today's shift continues, the time away is a break · "started": new shift
 async function startShift(st){
-  if (openShiftOf(st.id)) return;
-  const sh = {id:uid("sh"), staffId:st.id, name:st.name, start:Date.now(), end:null};
-  await putDoc("shifts", sh.id, sh); upsertLocal(S.shifts, sh);
+  await syncStaffShifts(st.id);
+  if (openShiftOf(st.id)) return "joined";
+  const now = Date.now(), last = resumableOf(st.id);
+  if (last){
+    const n = Object.assign({}, last, {end:null, autoClosed:false, breaks:[...(last.breaks||[]), {from:Math.min(last.end, now), to:now}]});
+    await putDoc("shifts", n.id, n); upsertLocal(S.shifts, n); return "resumed";
+  }
+  const sh = {id:uid("sh"), staffId:st.id, name:st.name, start:now, end:null};
+  await putDoc("shifts", sh.id, sh); upsertLocal(S.shifts, sh); return "started";
 }
+// closes every open shift of the worker (two could be open if two devices started one offline)
 async function endShift(st){
-  const sh = openShiftOf(st.id); if (!sh) return null;
-  const n = Object.assign({}, sh, {end:Date.now()});
-  await putDoc("shifts", n.id, n); upsertLocal(S.shifts, n); return n;
+  await syncStaffShifts(st.id);
+  const open = S.shifts.filter(x=>x.staffId===st.id && !x.end && x.start); if (!open.length) return null;
+  const now = Date.now();
+  for (const sh of open){ const n = Object.assign({}, sh, {end:now}); await putDoc("shifts", n.id, n); upsertLocal(S.shifts, n); }
+  return {start:Math.min(...open.map(x=>x.start)), end:now, hours:workedH(open.map(x=>Object.assign({}, x, {end:now})))};
 }
+const startedMsg = (r, sh) => r==="joined" ? `Вы уже на смене с ${hhmm(sh.start)}` : r==="resumed" ? `Смена продолжена в ${hhmm(Date.now())}` : `Смена начата в ${hhmm(Date.now())}`;
 function gateShiftHtml(){
   const st = activeStaff().find(x=>x.id===gatePerson);
   if (!st) return `<button class="btn primary" type="submit" value="login" disabled>Войти</button>`;
@@ -2962,6 +3000,9 @@ function gateShiftHtml(){
     ? `<p class="hint" style="margin:0">На смене с ${hhmm(sh.start)} · ${fmtH(hoursOf(sh))}</p>
        <button class="btn primary" type="submit" value="login">Войти</button>
        <button class="btn" type="submit" value="end">Закончить смену</button>`
+    : resumableOf(st.id) ? (r => `<p class="hint" style="margin:0">Сегодня уже была смена: ${hhmm(r.start)} – ${hhmm(r.end)}</p>
+       <button class="btn primary" type="submit" value="startlogin">Продолжить смену и войти</button>
+       <button class="btn" type="submit" value="login">Только войти</button>`)(resumableOf(st.id))
     : `<p class="hint" style="margin:0">Смена не начата</p>
        <button class="btn primary" type="submit" value="startlogin">Начать смену и войти</button>
        <button class="btn" type="submit" value="login">Только войти</button>`;
@@ -2974,10 +3015,10 @@ function whoShiftHtml(){
 }
 document.addEventListener("click", async e=>{
   if (e.target.closest("#startShiftBtn") && S.me){ const st = S.staff.find(x=>x.id===S.me.id); if (!st) return;
-    try { await startShift(st); applyRole(); toast(`Смена начата в ${hhmm(Date.now())}`); } catch(er){ console.error(er); toast("Не удалось начать смену."); } return; }
+    try { const r = await startShift(st); applyRole(); toast(startedMsg(r, openShiftOf(st.id)||{start:Date.now()})); } catch(er){ console.error(er); toast("Не удалось начать смену."); } return; }
   if (e.target.closest("#endShiftBtn") && S.me){ const st = S.staff.find(x=>x.id===S.me.id); if (!st) return;
     if (!tConfirm("Закончить смену и выйти из программы?")) return;
-    try { const sh = await endShift(st); setMe(null); toast(`Смена закрыта: ${fmtH(hoursOf(sh))}. До свидания!`); } catch(er){ console.error(er); toast("Не удалось закрыть смену."); } return; }
+    try { const r = await endShift(st); setMe(null); toast(r ? `Смена закрыта: ${fmtH(r.hours)}. До свидания!` : "Открытой смены нет"); } catch(er){ console.error(er); toast("Не удалось закрыть смену."); } return; }
   const sp = e.target.closest("[data-shp]"); if (sp){ S.shPeriod = sp.dataset.shp; return render(true); }
   if (e.target.closest("#addShift") && isAdmin()) return openShiftDlg(null);
   const es = e.target.closest("[data-editshift]"); if (es && isAdmin()) return openShiftDlg(es.dataset.editshift);
@@ -2999,12 +3040,12 @@ function renderStaff(L){
   let totH = 0, totPay = 0;
   html += list.map(x=>{
     const shs = S.shifts.filter(sh=>sh.staffId===x.id && inR(sh)).sort((a,b)=>(b.start||0)-(a.start||0));
-    const h = shs.reduce((a,sh)=>a+hoursOf(sh),0), rate = Number(x.rate)||0, pay = h*rate;
+    const h = workedH(shs), rate = Number(x.rate)||0, pay = h*rate;
     totH += h; totPay += pay;
     const wk = S.shPeriod==="week", rows = (wk ? [...shs].reverse() : shs).map(shRowHtml).join("");
     // one line per worker: today's shift; tap to open the details
     const open = openShiftOf(x.id), tds = S.shifts.filter(sh=>sh.staffId===x.id && (sh.start||0)>=today0).sort((a,b)=>a.start-b.start);
-    const th = tds.reduce((a,sh)=>a+hoursOf(sh),0), last = tds[tds.length-1];
+    const th = workedH(tds), last = tds.reduce((a,sh)=>(sh.end||0)>(a?.end||0)?sh:a, null);
     const st = open ? `<span class="son">На смене с ${hhmm(open.start)}</span>` : last ? `Не на смене · сегодня ${hhmm(tds[0].start)} – ${hhmm(last.end)}` : "Не на смене";
     return `<details class="box sbox ${x.active===false?"off":""}" data-k="st-${esc(x.id)}"><summary class="shead">
         <span class="sname">${N(x.name)}${x.id===S.me?.id?" (вы)":""}${x.active===false?" · отключён":""}<small>${st}</small></span>
@@ -3059,7 +3100,7 @@ const monthlyDoc = (cat, ym) => S.expenses.find(x=>x.monthly && x.category===cat
 function salaryByShifts(ym){
   const t0 = ymStart(ym), t1 = ymStart(ymShift(ym,1)); let sum = 0, hrs = 0, noRate = 0;
   for (const st of S.staff.filter(x=>roleOf(x)!=="admin" && !isDemoStaff(x))){
-    const h = S.shifts.filter(sh=>sh.staffId===st.id && (sh.start||0)>=t0 && (sh.start||0)<t1).reduce((a,sh)=>a+hoursOf(sh),0);
+    const h = workedH(S.shifts.filter(sh=>sh.staffId===st.id && (sh.start||0)>=t0 && (sh.start||0)<t1));
     if (!h) continue; hrs += h; if (Number(st.rate)>0) sum += h*Number(st.rate); else noRate++;
   }
   return {sum: Math.round(sum), hrs, noRate};
@@ -3342,6 +3383,7 @@ Object.assign(I18N, {"Срок действия. Пустое поле — бе�
 Object.assign(I18N, {"автоматически": ["automatically", "otomatik"], "вписано вручную": ["entered manually", "elle girildi"], "автоматически, последняя сумма": ["automatically, last amount", "otomatik, son tutar"], "Подставлена последняя сумма аренды.": ["The last rent amount is filled in.", "Son kira tutarı girildi."]});
 Object.assign(I18N, {"Способ приготовления": ["Cooking method", "Hazırlanışı"], "Способы приготовления": ["Cooking methods", "Hazırlanış yöntemleri"], "Коротко: что и в каком порядке делать": ["Briefly: what to do and in what order", "Kısaca: ne, hangi sırayla yapılır"], "Черновики для блюд, у которых способ ещё не указан. Проверьте и поправьте текст, снимите галочку, если блюдо не нужно. Перед сохранением программа сделает копию меню.": ["Drafts for dishes without a cooking method. Check and edit the text, untick dishes you don't need. The app saves a copy of the menu first.", "Hazırlanışı yazılmamış yemekler için taslaklar. Metni kontrol edip düzeltin, gerekmeyen yemeğin işaretini kaldırın. Kaydetmeden önce menünün yedeği alınır."], "Сохранить отмеченные": ["Save selected", "Seçilenleri kaydet"], "У всех блюд способ приготовления уже заполнен. Изменить его можно в техкарте блюда.": ["All dishes already have a cooking method. You can change it in the dish recipe card.", "Tüm yemeklerin hazırlanışı zaten yazılı. Yemeğin reçete kartından değiştirebilirsiniz."], "Ничего не отмечено": ["Nothing selected", "Hiçbir şey seçilmedi"], "Не удалось сохранить копию меню — ничего не изменено.": ["Could not save a menu backup — nothing was changed.", "Menü yedeği kaydedilemedi — hiçbir şey değişmedi."]});
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
+Object.assign(I18N, {"Продолжить смену и войти": ["Continue shift and log in", "Vardiyaya devam et ve gir"], "Сегодня уже была смена": ["Already had a shift today", "Bugün zaten vardiya vardı"], "Вы уже на смене с": ["You are already on shift since", "Zaten vardiyadasınız, başlangıç"], "Смена продолжена в": ["Shift continued at", "Vardiyaya devam edildi:"], "Смена начата в": ["Shift started at", "Vardiya başladı:"], "Здравствуйте": ["Hello", "Merhaba"], "перерыв": ["break", "mola"], "повтор, часы считаются один раз": ["duplicate, hours counted once", "tekrar, saatler bir kez sayılır"], "Открытой смены нет": ["No open shift", "Açık vardiya yok"], "Смена закрыта": ["Shift closed", "Vardiya kapandı"], "смена закрыта": ["shift closed", "vardiya kapandı"], "До свидания": ["Goodbye", "Hoşça kalın"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Курьер по заказу с доставкой записывается сам. Здесь — курьер вручную, например за покупками.": ["The courier for a delivery order is recorded automatically. Here you add a courier by hand, e.g. sent for purchases.", "Teslimat siparişinin kuryesi otomatik yazılır. Burada kurye elle eklenir, örneğin alışverişe gönderildiğinde."], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"]});
 Object.assign(I18N, {"Укажите имя клиента": ["Enter the customer's name", "Müşterinin adını girin"], "Укажите телефон клиента": ["Enter the customer's phone", "Müşterinin telefonunu girin"], "Обязательно": ["Required", "Zorunlu"], "Не заполнено:": ["Not filled in:", "Doldurulmadı:"], "Вы админ — сохранить без этого?": ["You are the admin — save without it?", "Yöneticisiniz — bunsuz kaydedilsin mi?"], "Причина не указана. Вы админ — отменить заказ без причины?": ["No reason given. You are the admin — cancel the order without a reason?", "Sebep yazılmadı. Yöneticisiniz — sipariş sebepsiz iptal edilsin mi?"]});
