@@ -823,9 +823,11 @@ function norm(s){
   const arr = Array.isArray(s) ? s : (s && (s.docs || s.items || s.results || s.documents)) || [];
   return arr.map(d => {
     let data = typeof d.data === "function" ? d.data() : (d.data && typeof d.data === "object" ? d.data : d);
-    return Object.assign({}, data, {id: d.id ?? data.id});
+    const x = Object.assign({}, data, {id: d.id ?? data.id}); delete x.upd; return x;
   });
 }
+// one Firestore document as the app keeps it: without the server stamp `upd` (it is only for reading changes, see «reading» below)
+function docObj(d){ const x = Object.assign({}, d.data(), {id:d.id}); delete x.upd; return x; }
 function subscribe(name, cb){
   const col = S.db.collection(name);
   if (typeof col.onSnapshot === "function"){
@@ -846,7 +848,8 @@ const clone = o => o ? JSON.parse(JSON.stringify(o)) : null;
 async function applyOp(col, id, val){
   const key = colArr(col);
   if (val == null){ await delDoc(col, id); S[key] = S[key].filter(x=>x.id!==id); }
-  else { await putDoc(col, id, val); upsertLocal(S[key], clone(val)); }
+  else { await putDoc(col, id, val); upsertLocal(S[key], clone(val)); if (SYNC.upd[key]) SYNC.upd[key].set(id, Date.now()); }
+  syncCount(key);
 }
 // ops: [{col, id, after}]; after = null deletes. On error err.done lists the ops already written.
 // (Кнопок «Отменить / Вернуть» больше нет: они возвращали запись целиком и стирали правки с других устройств.)
@@ -2520,7 +2523,7 @@ async function onumTx(fn){
     const d = await t.get(ref), days = Object.assign({}, d.exists ? d.data().days : {});
     const r = await fn(t, days); if (r == null) return r;
     const keep = {}; Object.keys(days).sort().slice(-3).forEach(k=>keep[k] = days[k]);
-    t.set(ref, {days: keep}); return r;
+    t.set(ref, {days: keep, upd: srvTs()}); return r;
   });
   return Promise.race([tx, new Promise((_,no)=>setTimeout(()=>no(new Error("timeout")), 6000))]);
 }
@@ -2537,9 +2540,9 @@ async function fixNum(o){
     const num = Number(x.num)||0, used = days[day]||[], ts = x.createdAt||0;
     const taken = used.includes(num) || S.orders.some(y=>y.id!==o.id && dayKey(y.createdAt||0)===day && Number(y.num)===num
       && (!y.numTmp || (y.createdAt||0) < ts || ((y.createdAt||0)===ts && y.id < o.id)));
-    if (!taken){ days[day] = [...used, num]; t.update(ref, {numTmp:false}); return {num}; }
+    if (!taken){ days[day] = [...used, num]; t.update(ref, {numTmp:false, upd: srvTs()}); return {num}; }
     const n = Math.max(0, ...used, ...dayNums(day, o.id), num) + 1; days[day] = [...used, n];
-    t.update(ref, {num:n, numWas:num, numTmp:false}); return {num:n, was:num};
+    t.update(ref, {num:n, numWas:num, numTmp:false, upd: srvTs()}); return {num:n, was:num};
   });
   return r;
 }
@@ -2701,7 +2704,7 @@ const srvGet = q => Promise.race([q.get({source:"server"}), new Promise((_,no)=>
 async function freshOrder(id){
   freshOrder.srv = false; // true: the version below came from the server
   if (FS && navigator.onLine){
-    try { const d = await srvGet(FS.collection("orders").doc(id)); if (d.exists) upsertLocal(S.orders, Object.assign({}, d.data(), {id:d.id})); freshOrder.srv = true; }
+    try { const d = await srvGet(FS.collection("orders").doc(id)); if (d.exists) upsertLocal(S.orders, docObj(d)); freshOrder.srv = true; }
     catch(e){ console.warn("order sync", e); }
   }
   return orderById(id);
@@ -2712,7 +2715,7 @@ async function syncSale(o){
   try {
     const [ms, sd] = await Promise.all([srvGet(FS.collection("moves").where("batchId","==",b)), srvGet(FS.collection("sales").doc(b))]);
     for (const d of norm(ms)) upsertLocal(S.moves, d);
-    if (sd.exists) upsertLocal(S.sales, Object.assign({}, sd.data(), {id:sd.id}));
+    if (sd.exists) upsertLocal(S.sales, docObj(sd));
   } catch(e){ console.warn("sale sync", e); }
 }
 function orderStale(o, num){
@@ -3647,6 +3650,7 @@ Object.assign(I18N, {"удалён на другом устройстве": ["wa
 Object.assign(I18N, {"Отменить приход: История → × у этой записи.": ["To cancel the receipt: History → × on this entry.", "Girişi iptal etmek için: Geçmiş → bu kayıttaki ×."], "Цены закупки останутся как есть.": ["Purchase prices stay as they are.", "Alış fiyatları olduğu gibi kalır."], "целиком? Остатки пересчитаются.": ["entirely? Stock will be recalculated.", "tamamen silinsin mi? Stoklar yeniden hesaplanacak."], "Продуктов:": ["Products:", "Ürün:"], "строка": ["line", "satır"], "строки": ["lines", "satır"], "строк": ["lines", "satır"]});
 Object.assign(I18N, {"Только то, чего нет в техкартах: еда персонала, проба, отдали соседям. Продукты для блюд списываются сами при закрытии заказа, для заготовок есть «Приготовить».": ["Only what is not in the recipe cards: staff meals, tasting, given to neighbours. Products for dishes are deducted automatically when an order is closed; for preps use «Cook».", "Yalnızca reçetelerde olmayanlar: personel yemeği, tadım, komşulara verilen. Yemeklerin ürünleri sipariş kapanınca kendiliğinden düşülür, hazırlıklar için «Hazırla» var."], "Расход (не по техкарте)": ["Usage (not by recipe)", "Çıkış (reçete dışı)"], "Отменить через заказ": ["Cancel via the order", "Sipariş üzerinden iptal"], "Удалить разделку": ["Delete the butchering", "Kesim kaydı"], "Цена филе останется как есть.": ["The fillet price stays as it is.", "Fileto fiyatı olduğu gibi kalır."], "Продукты вернутся на склад, а заказ №": ["Products return to stock, and order #", "Ürünler depoya döner, sipariş #"], "будет считаться отменённым, а не списанным.": ["will count as cancelled, not written off.", "fire değil, iptal sayılır."], "Закрыть без сохранения? Всё, что вы ввели, пропадёт.": ["Close without saving? Everything you entered will be lost.", "Kaydetmeden kapatılsın mı? Girdiğiniz her şey silinir."], "Лосось:": ["Salmon:", "Somon:"], "продукт(ов) в техкарте": ["products in the recipe", "ürün reçetede"], "Вставьте список — каждая строка:": ["Paste a list, one item per line:", "Listeyi yapıştırın, her satırda:"], "продукт | количество | цена за 1 ед.": ["product | quantity | price per unit", "ürün | miktar | birim fiyatı"], "Например:": ["For example:", "Örneğin:"], "Соевый соус | 4 | 187,48": ["Soy sauce | 4 | 187,48", "Soya sosu | 4 | 187,48"], "Кадаиф | 0,5 | 439,80 | Бакалея | кг": ["Kataifi | 0,5 | 439,80 | Бакалея | кг", "Kadayıf | 0,5 | 439,80 | Бакалея | кг"], "Количество — в единице продукта на складе. Для нового продукта (только админ) добавьте раздел и единицу:": ["Quantity is in the product's stock unit. For a new product (admin only) add the section and unit:", "Miktar, ürünün depodaki biriminde. Yeni ürün için (yalnızca yönetici) bölüm ve birim ekleyin:"]});
 Object.assign(I18N, {"Отключить это устройство": ["Disconnect this device", "Bu cihazın bağlantısını kes"], "Отключить это устройство от базы ресторана? Для повторного подключения понадобятся почта и пароль.": ["Disconnect this device from the restaurant database? To connect again you will need the email and password.", "Bu cihaz restoran veritabanından ayrılsın mı? Yeniden bağlanmak için e-posta ve şifre gerekir."], "Перенести данные из старой программы": ["Import data from the old program", "Eski programdan verileri aktar"], "В базе уже есть продукты. Всё равно перенести данные из старой программы? Совпадающие записи будут перезаписаны.": ["The database already has products. Import data from the old program anyway? Matching records will be overwritten.", "Veritabanında zaten ürünler var. Yine de eski programdan veriler aktarılsın mı? Aynı kayıtların üzerine yazılır."], "Переношу…": ["Importing…", "Aktarılıyor…"], "Подключаю…": ["Connecting…", "Bağlanıyor…"], "Это не тот файл. Выберите файл sushi-ym-data.json": ["Wrong file. Choose the file sushi-ym-data.json", "Yanlış dosya. sushi-ym-data.json dosyasını seçin"], "Неверная почта или пароль": ["Wrong email or password", "E-posta veya şifre yanlış"], "Нет интернета. Первый вход возможен только онлайн.": ["No internet. The first sign-in is only possible online.", "İnternet yok. İlk giriş yalnızca çevrimiçi yapılabilir."], "Смена начинается и заканчивается на экране входа. Незакрытые смены программа закрывает сама в 23:00 — такие помечены «авто». Нажмите на смену, чтобы исправить время.": ["A shift starts and ends on the sign-in screen. Shifts left open are closed automatically at 23:00 and marked «auto». Tap a shift to correct its time.", "Vardiya giriş ekranında başlar ve biter. Kapatılmayan vardiyaları program 23:00'te kendisi kapatır, bunlar «oto» olarak işaretlenir. Saati düzeltmek için vardiyaya dokunun."], "(вы)": ["(you)", "(siz)"], "Без учёта смен": ["No shift tracking", "Vardiya takibi yok"], "смена": ["shift", "vardiya"], "смены": ["shifts", "vardiya"], "смен": ["shifts", "vardiya"], "ч": ["h", "sa"], "авто": ["auto", "oto"]});
+Object.assign(I18N, {"Устройства берут из базы только новые изменения, остальное хранят у себя. Если на этом устройстве что-то не совпадает с другими, загрузите всё заново.": ["Devices take only new changes from the database and keep the rest. If something on this device does not match the other devices, load everything again.", "Cihazlar veritabanından yalnızca yeni değişiklikleri alır, gerisini kendisinde tutar. Bu cihazda bir şey diğerleriyle uyuşmuyorsa her şeyi yeniden yükleyin."], "Загрузить все данные заново": ["Load all data again", "Tüm verileri yeniden yükle"], "старая версия программы: закройте её и откройте заново": ["old version of the app: close it and open it again", "programın eski sürümü: kapatıp yeniden açın"], "Загрузить все данные заново на этом устройстве? Это один раз прочитает всю базу. Нужно, только если на этом устройстве что-то не совпадает с другими.": ["Load all data again on this device? This reads the whole database once. Only needed if something on this device does not match the other devices.", "Bu cihazda tüm veriler yeniden yüklensin mi? Bu, tüm veritabanını bir kez okur. Yalnızca bu cihazda bir şey diğerleriyle uyuşmuyorsa gerekir."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
@@ -3727,24 +3731,138 @@ function makeDb(fs){
   const clean = d => JSON.parse(JSON.stringify(d));
   return {
     collection: name => fs.collection(name),
-    doc: path => { const r = fs.doc(path); return {
-      set: d => { r.set(clean(d)).catch(writeErr); return Promise.resolve(); },
-      delete: () => { r.delete().catch(writeErr); return Promise.resolve(); } }; }
+    doc: path => { const r = fs.doc(path), [col, id] = path.split("/"); return {
+      set: d => { r.set(Object.assign(clean(d), {upd: srvTs()})).catch(writeErr); return Promise.resolve(); },
+      delete: () => { r.delete().catch(writeErr); syncTomb(col, id); return Promise.resolve(); } }; }
   };
 }
+/* ---------- reading: only what changed (В1) ---------- */
+// Firestore bills a listened collection in full again after every break in the connection longer than 30 minutes,
+// so listening to whole collections made every device re-read the whole history many times a day.
+// Now every save stamps `upd` (server time) and every delete leaves a mark in "tombs".
+// On start the data comes from the device's own copy, and the server is asked only for documents with a newer `upd`.
+// The first start, or a lost copy, loads everything once (as before); stock is still the sum of all moves.
+const SYNC_COLS = ["products","recipes","moves","menu","sets","sales","orders","settings","expenses","invdrafts","shifts","staff"];
+const SYNC_GAP = 10*60*1000;   // ask the server a bit further back than the newest change seen
+const SYNC_VER = 2;            // devices that read only changes write it in devices/<id>: older versions show in Устройства
+const SYNC = {meta:{}, upd:{}, tomb:new Map(), cb:{}, unsub:{}, mode:{}, since:0, hiddenAt:0, off:false};
+const updMs = v => v && typeof v.toMillis === "function" ? v.toMillis() : 0;
+const srvTs = () => firebase.firestore.FieldValue.serverTimestamp();
+function syncSave(){ clearTimeout(syncSave.t); syncSave.t = setTimeout(()=>lsSet("sushi.sync", JSON.stringify(SYNC.meta)), 800); }
+function syncCount(c){ const m = SYNC.meta[c]; if (m && S[c]){ m.n = S[c].length; syncSave(); } }
+function syncTomb(col, id){
+  if (SYNC.off || !SYNC_COLS.includes(col) || !id) return;
+  FS.collection("tombs").doc(col+"~"+id).set({col, id, upd: srvTs()}).catch(writeErr);
+}
+const tombed = (c, id) => { const t = SYNC.tomb.get(c+"~"+id); return t != null && (SYNC.upd[c].get(id)||0) <= t; };
+function syncErr(e){ console.error(e); S.dbErr = (e && e.code) || "error"; applyRole(); toast("Нет доступа к базе: " + S.dbErr); }
+// docs from the server or the device's copy → S[c]; replace: the list is the whole collection
+function syncTake(c, docs, replace){
+  const um = SYNC.upd[c], objs = [];
+  for (const d of docs){ const u = updMs(d.get("upd", {serverTimestamps:"estimate"})); if (u || !um.has(d.id)) um.set(d.id, u); if (c!=="tombs") objs.push(docObj(d)); }
+  if (c==="tombs"){   // tomb id = "<collection>~<doc id>"
+    const hit = new Set();
+    for (const d of docs){ const col = d.get("col"), u = um.get(d.id) || 0;
+      if (SYNC_COLS.includes(col) && u > (SYNC.tomb.get(d.id)||0)){ SYNC.tomb.set(d.id, u); hit.add(col); } }
+    for (const col of hit) if (SYNC.cb[col] && S.loaded[col]){ const keep = S[col].filter(x=>!tombed(col, x.id)); if (keep.length!==S[col].length) SYNC.cb[col](keep); }
+    if (SYNC.meta.tombs) SYNC.meta.tombs.n = SYNC.tomb.size;
+    return;
+  }
+  let list;
+  if (replace) list = objs;
+  else { list = S[c].slice(); const at = new Map(list.map((x,i)=>[x.id,i]));
+    for (const o of objs){ const i = at.get(o.id); if (i==null){ at.set(o.id, list.length); list.push(o); } else list[i] = o; } }
+  SYNC.cb[c](list.filter(x=>!tombed(c, x.id)));
+  syncCount(c);
+}
+// the newest server stamp seen in a snapshot that came from the server
+function syncMark(c, s){
+  if (s.metadata.fromCache) return;
+  let t = (SYNC.meta[c] && SYNC.meta[c].t) || 0;
+  for (const d of s.docs){ if (d.metadata.hasPendingWrites) continue; const u = updMs(d.get("upd")); if (u > t) t = u; }
+  SYNC.meta[c] = {t, n: c==="tombs" ? SYNC.tomb.size : S[c].length}; syncSave();
+}
+// first start or lost copy: the whole collection once, then only changes
+function syncFull(c){
+  SYNC.mode[c] = "full";
+  SYNC.unsub[c] = FS.collection(c).onSnapshot({includeMetadataChanges:true}, s => {
+    syncTake(c, s.docs, true);
+    if (s.metadata.fromCache || SYNC.mode[c]!=="full") return;
+    SYNC.meta[c] = null; syncMark(c, s);
+    SYNC.unsub[c](); syncDelta(c);
+  }, e => syncFail(c, e));
+}
+function syncDelta(c){
+  SYNC.mode[c] = "delta";
+  const t = Math.max(0, ((SYNC.meta[c] && SYNC.meta[c].t) || 0) - SYNC_GAP);
+  SYNC.unsub[c] = FS.collection(c).where("upd", ">", firebase.firestore.Timestamp.fromMillis(t)).onSnapshot(s => {
+    // "removed" is skipped: a doc saved here leaves this query until the server stamps it; deletes come as tombs
+    const docs = s.docChanges().filter(ch=>ch.type!=="removed").map(ch=>ch.doc);
+    if (docs.length) syncTake(c, docs, false);
+    syncMark(c, s);
+  }, e => syncFail(c, e));
+}
+// one collection: the device's copy first (free), then the server for what changed
+async function syncCol(c){
+  const m = SYNC.meta[c];
+  if (m && m.t >= 0){
+    let docs = null;
+    try { docs = (await FS.collection(c).get({source:"cache"})).docs; } catch(e){ console.warn("sync cache", c, e); }
+    // fewer docs than last time: the copy was lost or cut (cleared by the browser) — load everything again
+    const n = m.n || 0;
+    if (docs && docs.length >= n - Math.floor(n*0.02) && (docs.length || !n)){ syncTake(c, docs, true); return syncDelta(c); }
+  }
+  syncFull(c);
+}
+// "tombs" not allowed (or another error): back to the old way of listening to whole collections
+function syncFail(c, e){
+  if (SYNC.off) return;
+  if (c!=="tombs" && SYNC.mode[c]==="full") return syncErr(e);
+  console.warn("sync off", c, e); SYNC.off = true;
+  for (const k of Object.keys(SYNC.unsub)) try { SYNC.unsub[k](); } catch(x){}
+  for (const k of SYNC_COLS) subscribe(k, SYNC.cb[k]);
+}
+async function syncStart(){
+  try { SYNC.meta = JSON.parse(lsGet("sushi.sync") || "{}") || {}; } catch(e){ SYNC.meta = {}; }
+  for (const c of [...SYNC_COLS, "tombs"]) SYNC.upd[c] = new Map();
+  SYNC.since = Date.now();
+  await syncCol("tombs");   // deletes first, so that deleted docs do not come back from the copy
+  if (SYNC.off) return;
+  SYNC_COLS.forEach(syncCol);
+}
+function syncSub(name, cb){ SYNC.cb[name] = cb; }
+// a long-open page: start the change queries again from the newest change seen, so that a break in the connection
+// re-reads only the last hour instead of everything since the page was opened
+function syncRestart(){
+  if (SYNC.off) return;
+  SYNC.since = Date.now();
+  for (const c of [...SYNC_COLS, "tombs"]) if (SYNC.mode[c]==="delta"){ try { SYNC.unsub[c](); } catch(e){} syncDelta(c); }
+}
+document.addEventListener("visibilitychange", ()=>{
+  if (document.hidden){ SYNC.hiddenAt = Date.now(); return; }
+  if (SYNC.hiddenAt && Date.now() - SYNC.hiddenAt > 20*60*1000) syncRestart();
+  SYNC.hiddenAt = 0;
+});
+setInterval(()=>{ if (SYNC.since && Date.now() - SYNC.since > 60*60*1000) syncRestart(); }, 5*60*1000);
+// admin, Сотрудники → Устройства: if something looks out of date on this device, load everything once
+function syncAll(){
+  if (!tConfirm("Загрузить все данные заново на этом устройстве? Это один раз прочитает всю базу. Нужно, только если на этом устройстве что-то не совпадает с другими.")) return;
+  lsSet("sushi.sync", ""); location.reload();
+}
 function startSubs(){
-  subscribe("products", list => { S.products = list; S.loaded.products = true; render(); });
-  subscribe("moves", list => { S.moves = list; S.loaded.moves = true; render(); });
-  subscribe("recipes", list => { S.recipes = list; S.loaded.recipes = true; render(); });
-  subscribe("menu", list => { S.menu = list; S.loaded.menu = true; render(); });
-  subscribe("sets", list => { S.sets = list; S.loaded.sets = true; render(); });
-  subscribe("sales", list => { S.sales = list; S.loaded.sales = true; render(); });
-  subscribe("orders", list => { const prev = S.orders; S.orders = list; S.loaded.orders = true; liveOrder(); render(); numMoved(prev); fixNums(); });
-  subscribe("settings", list => { S.settings = list; S.loaded.settings = true; render(); });
-  subscribe("expenses", list => { S.expenses = list; S.loaded.expenses = true; render(); });
-  subscribe("invdrafts", list => { S.invdrafts = list; S.loaded.invdrafts = true; render(); });
-  subscribe("shifts", list => { S.shifts = list; S.loaded.shifts = true; autoCloseShifts(); applyRole(); render(); });
-  subscribe("staff", list => { S.staff = list; S.loaded.staff = true; restoreMe(); applyRole(); render(); });
+  syncSub("products", list => { S.products = list; S.loaded.products = true; render(); });
+  syncSub("moves", list => { S.moves = list; S.loaded.moves = true; render(); });
+  syncSub("recipes", list => { S.recipes = list; S.loaded.recipes = true; render(); });
+  syncSub("menu", list => { S.menu = list; S.loaded.menu = true; render(); });
+  syncSub("sets", list => { S.sets = list; S.loaded.sets = true; render(); });
+  syncSub("sales", list => { S.sales = list; S.loaded.sales = true; render(); });
+  syncSub("orders", list => { const prev = S.orders; S.orders = list; S.loaded.orders = true; liveOrder(); render(); numMoved(prev); fixNums(); });
+  syncSub("settings", list => { S.settings = list; S.loaded.settings = true; render(); });
+  syncSub("expenses", list => { S.expenses = list; S.loaded.expenses = true; render(); });
+  syncSub("invdrafts", list => { S.invdrafts = list; S.loaded.invdrafts = true; render(); });
+  syncSub("shifts", list => { S.shifts = list; S.loaded.shifts = true; autoCloseShifts(); applyRole(); render(); });
+  syncSub("staff", list => { S.staff = list; S.loaded.staff = true; restoreMe(); applyRole(); render(); });
+  syncStart();
 }
 /* ---------- devices: list, main devices, approval, disconnect ---------- */
 const DEV_ID = (()=>{ let id = lsGet("sushi.dev"); if (!/^d[a-z0-9]{8,}$/.test(id)){ id = uid("d"); lsSet("sushi.dev", id); } return id; })();
@@ -3797,7 +3915,7 @@ function devStart(){
 }
 function devTouch(){
   if (!FS || !DEV.me || DEV.me.status!=="ok") return;
-  const k = devKind(), d = {kind:k.kind, br:k.br, app:k.app, lastSeen:Date.now()};
+  const k = devKind(), d = {kind:k.kind, br:k.br, app:k.app, lastSeen:Date.now(), sync:SYNC_VER};
   if (S.me) d.lastWho = S.me.name;
   devSet(DEV_ID, d);
 }
@@ -3819,7 +3937,7 @@ function devGate(){
 }
 async function devOff(){
   if (DEV.going) return; DEV.going = true;
-  lsSet("sushi.devoff", "1");
+  lsSet("sushi.devoff", "1"); lsSet("sushi.sync", "");
   try { setMe(null); } catch(e){}
   try { await firebase.auth().signOut(); } catch(e){ console.warn(e); }
   try { await FS.terminate(); await FS.clearPersistence(); } catch(e){ console.warn(e); }
@@ -3837,6 +3955,7 @@ function devListHtml(){
     if (me) tags.push(`<span class="tag inv">это устройство</span>`);
     if (d.status==="pending") tags.push(`<span class="tag low">ждёт разрешения</span>`);
     if (d.status==="off") tags.push(`<span class="tag off">отключено</span>`);
+    if (d.status==="ok" && (d.sync||0) < SYNC_VER) tags.push(`<span class="tag low">старая версия программы: закройте её и откройте заново</span>`);
     const btns = [];
     if (main){
       btns.push(`<button type="button" class="btn small" data-devname="${esc(d.id)}">Переименовать</button>`);
@@ -3856,7 +3975,9 @@ function devListHtml(){
     ? `<label class="toggle"><input type="checkbox" id="devApprove" ${approve?"checked":""}> Новые устройства — только с разрешения</label>`
     : `<p class="hint" style="margin:0 0 8px">Управлять устройствами можно только с главного устройства.${S.devices.some(d=>d.main)?"":" Главного устройства пока нет — откройте программу на своём устройстве и нажмите «Сделать это устройство главным»."}</p>`;
   return `<h2 class="cat"><span>Устройства</span><span>${list.length}${npend?` · ждут: ${npend}`:""}</span></h2>${head}
-    <p class="hint" style="margin:0 0 8px">Главное устройство отключить нельзя. Отключённое устройство выходит из программы, как только появится интернет.</p>${rows}`;
+    <p class="hint" style="margin:0 0 8px">Главное устройство отключить нельзя. Отключённое устройство выходит из программы, как только появится интернет.</p>${rows}
+    <p class="hint" style="margin:8px 0">Устройства берут из базы только новые изменения, остальное хранят у себя. Если на этом устройстве что-то не совпадает с другими, загрузите всё заново.</p>
+    <div class="controls" style="margin:0"><button type="button" class="btn small" id="syncAll">Загрузить все данные заново</button></div>`;
 }
 function devPinAsk(){
   return new Promise(res=>{
@@ -3871,9 +3992,10 @@ function devPinAsk(){
     d.showModal(); d.querySelector("input").focus();
   });
 }
+document.addEventListener("click", e=>{ if (e.target.id==="syncAll" && isAdmin()) syncAll(); });
 document.addEventListener("change", e=>{
   if (e.target.id!=="devApprove" || !devIsMain() || !isAdmin()) return;
-  FS.doc("settings/devices").set({id:"devices", approve:e.target.checked, by:S.me.name, ts:Date.now()}, {merge:true}).catch(writeErr);
+  FS.doc("settings/devices").set({id:"devices", approve:e.target.checked, by:S.me.name, ts:Date.now(), upd: srvTs()}, {merge:true}).catch(writeErr);
   toast(e.target.checked ? "Новые устройства будут ждать вашего разрешения" : "Новые устройства подключаются без разрешения");
 });
 document.addEventListener("click", async e=>{
@@ -3934,7 +4056,7 @@ async function importOld(){
     let batch = FS.batch(), n = 0, total = 0;
     for (const [col, docs] of Object.entries(data)){
       for (const [id, d] of Object.entries(docs)){
-        batch.set(FS.doc(col+"/"+id), JSON.parse(JSON.stringify(d))); n++; total++;
+        batch.set(FS.doc(col+"/"+id), Object.assign(JSON.parse(JSON.stringify(d)), {upd: srvTs()})); n++; total++;
         if (n>=400){ batch.commit().catch(writeErr); batch = FS.batch(); n = 0; }
       }
     }
