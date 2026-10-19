@@ -3715,6 +3715,35 @@ function startSubs(){
   subscribe("shifts", list => { S.shifts = list; S.loaded.shifts = true; autoCloseShifts(); applyRole(); render(); });
   subscribe("staff", list => { S.staff = list; S.loaded.staff = true; restoreMe(); applyRole(); render(); });
 }
+/* ---------- client menu: a copy for the online-order app (JaM), without recipes, packaging and notes ---------- */
+// pubmenu/{id} = the dish or set as the customer sees it. Any connected device keeps the copy in step with «Меню»,
+// but only from data confirmed by the server, so a device that was offline never puts back old prices.
+const PUB = {menu:null, sets:null, pub:null, warned:false};
+const canon = o => Array.isArray(o) ? "[" + o.map(canon).join(",") + "]" : o && typeof o==="object" ? "{" + Object.keys(o).sort().map(k=>JSON.stringify(k)+":"+canon(o[k])).join(",") + "}" : JSON.stringify(o);
+function pubOf(kind, x){
+  const cat = kind==="set" ? "Сеты" : (x.category || ""), ci = DISH_CATS.indexOf(cat), t = I18N[cat] || [];
+  const d = {kind, name:x.name||"", name_en:x.name_en||"", name_tr:x.name_tr||"", category:cat, cat_en:t[0]||cat, cat_tr:t[1]||cat,
+    catOrder: kind==="set" ? -1 : (ci<0 ? 99 : ci), order:x.order ?? 9999, price:Number(x.price)||0, active:x.active!==false};
+  if (kind==="set") d.items = (x.items||[]).map(i=>({dishId:i.dishId, qty:Number(i.qty)||0}));
+  return d;
+}
+function pubSync(){
+  if (!PUB.menu || !PUB.sets || !PUB.pub) return;
+  const want = {}, have = {};
+  PUB.menu.forEach(x=>{ want[x.id] = pubOf("dish", x); });
+  PUB.sets.forEach(x=>{ want[x.id] = pubOf("set", x); });
+  PUB.pub.forEach(x=>{ const {id, ...d} = x; have[id] = d; });
+  const fail = e => { console.warn("pubmenu", e && e.code); if (!PUB.warned && isAdmin()){ PUB.warned = true; toast("Меню для онлайн-заказов не обновилось: нет доступа к базе"); } };
+  for (const [id, d] of Object.entries(want)) if (!have[id] || canon(have[id])!==canon(d)) FS.doc("pubmenu/" + id).set(d).catch(fail);
+  for (const id of Object.keys(have)) if (!want[id]) FS.doc("pubmenu/" + id).delete().catch(fail);
+}
+function startPubMenu(){
+  const on = (col, key) => FS.collection(col).onSnapshot({includeMetadataChanges:true}, s => {
+    if (s.metadata.fromCache) return;   // wait for the server's copy
+    PUB[key] = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); pubSync();
+  }, e => console.warn("pubmenu", col, e && e.code));
+  on("menu", "menu"); on("sets", "sets"); on("pubmenu", "pub");
+}
 /* ---------- devices: list, main devices, approval, disconnect ---------- */
 const DEV_ID = (()=>{ let id = lsGet("sushi.dev"); if (!/^d[a-z0-9]{8,}$/.test(id)){ id = uid("d"); lsSet("sushi.dev", id); } return id; })();
 const DEV = {me:undefined, cfg:undefined, meCache:true, cfgCache:true, started:false, going:false, seenPending:null};
@@ -3760,7 +3789,7 @@ function devStart(){
   lsSet("sushi.devoff", "");
   if (DEV.started){ applyRole(); if (S.view==="staff") render(true); return; }
   DEV.started = true;
-  S.db = makeDb(FS); startSubs();
+  S.db = makeDb(FS); startSubs(); startPubMenu();
   subscribe("devices", list => { S.devices = list; devPendingToast(); if (S.view==="staff") render(true); });
   devTouch();
 }
