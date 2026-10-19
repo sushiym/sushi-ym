@@ -2895,7 +2895,7 @@ async function pinHash(staffId, pin){
   return "f1:" + h.toString(16);
 }
 const activeStaff = () => S.staff.filter(x=>x.active!==false);
-const ADMIN_IDLE = 10*60*1000, WORKER_IDLE = 12*60*60*1000;
+const ADMIN_IDLE = 5*60*1000, WORKER_IDLE = 12*60*60*1000;
 let lastAct = Date.now(), gateRole = "worker", gatePerson = null, pinFails = 0, pinLockUntil = 0;
 
 function setMe(st){
