@@ -776,7 +776,7 @@ const TYPES = {in:{label:"Приход",sign:1},out:{label:"Расход",sign:-
 const SUBUNIT = {"кг":["г",1000], "л":["мл",1000]};
 const HINTS = {in:"Товар пришёл от поставщика или с рынка.",out:"Только то, чего нет в техкартах: еда персонала, проба, отдали соседям. Продукты для блюд списываются сами при закрытии заказа, для заготовок есть «Приготовить».",off:"Испорчено, просрочено, брак — потери."};
 
-const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, invAt:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
+const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], mdocs:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, invAt:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -846,9 +846,10 @@ async function delDoc(col, id){ if (S.db) await S.db.doc(col + "/" + id).delete(
 const colArr = col => (["products","recipes","moves","menu","sets","sales","orders","settings","expenses","staff","invdrafts","shifts"].includes(col) ? col : "moves");
 const clone = o => o ? JSON.parse(JSON.stringify(o)) : null;
 async function applyOp(col, id, val){
-  const key = colArr(col);
-  if (val == null){ await delDoc(col, id); S[key] = S[key].filter(x=>x.id!==id); }
-  else { await putDoc(col, id, val); upsertLocal(S[key], clone(val)); if (SYNC.upd[key]) SYNC.upd[key].set(id, Date.now()); }
+  const key = colArr(col), rk = rawKey(key);
+  if (val == null){ await delDoc(col, id); S[rk] = S[rk].filter(x=>x.id!==id); }
+  else { await putDoc(col, id, val); upsertLocal(S[rk], clone(val)); if (SYNC.upd[key]) SYNC.upd[key].set(id, Date.now()); }
+  if (key==="moves") S.moves = unfoldMoves(S.mdocs);
   syncCount(key);
 }
 // ops: [{col, id, after}]; after = null deletes. On error err.done lists the ops already written.
@@ -862,6 +863,37 @@ let urBusy = false;
 async function guarded(fn){ if (urBusy) return; urBusy = true; try { await fn(); } finally { urBusy = false; } }
 
 function upsertLocal(arr, obj){ const i = arr.findIndex(x=>x.id===obj.id); if (i>=0) arr[i]=obj; else arr.push(obj); }
+
+/* ---------- moves: one document per operation ---------- */
+// A sale, «Приготовить», a salmon cut, «Приход списком» or an order write-off is saved as ONE document in "moves"
+// with all its products in `lines` (fewer documents for every device to read). On reading it is unfolded into one move
+// per product, so stock, История, Финансы and inventory see the same moves as before. Older documents (one product each) stay as they are.
+// S.mdocs: the documents as saved; S.moves: the unfolded moves (a move from a document with lines has id "<doc id>~<n>" and doc = the document id).
+const rawKey = c => c==="moves" ? "mdocs" : c;
+const LINE_KEYS = ["productId","unit","delta"];
+function unfoldMoves(docs){
+  const out = [];
+  for (const d of docs){
+    if (!Array.isArray(d.lines)){ out.push(d); continue; }
+    const base = Object.assign({}, d); delete base.lines;
+    d.lines.forEach((l,i)=>out.push(Object.assign({}, base, l, {id:d.id+"~"+i, doc:d.id})));
+  }
+  return out;
+}
+// moves (as they were saved one by one before) → one document: what all of them share goes up, the rest stays in each line.
+// ts is always on the document too (the server is asked for moves by it); batchId is shared by all lines of a batch.
+function foldMoves(id, moves){
+  const doc = {id}, keys = new Set();
+  moves.forEach(m=>Object.keys(m).forEach(k=>{ if (k!=="id" && k!=="doc" && m[k]!==undefined) keys.add(k); }));
+  for (const k of keys) if (!LINE_KEYS.includes(k) && moves.every(m=>m[k]===moves[0][k])) doc[k] = moves[0][k];
+  if (!("ts" in doc)) doc.ts = Math.min(...moves.map(m=>Number(m.ts)||0));
+  doc.lines = moves.map(m=>{ const l = {}; for (const k of keys) if (!(k in doc && doc[k]===m[k]) && m[k]!==undefined) l[k] = m[k]; return l; });
+  return doc;
+}
+// the saved documents behind some moves (each once)
+const mvDocIds = moves => [...new Set(moves.map(m=>m.doc || m.id))];
+// moves documents fetched from the server (an order closed on another device, inventory approval)
+function takeMoves(docs){ if (!docs.length) return; for (const d of docs) upsertLocal(S.mdocs, d); S.moves = unfoldMoves(S.mdocs); }
 
 function stockMap(){
   const m = {};
@@ -1163,14 +1195,14 @@ $("#bulkText").addEventListener("input", ()=>{ $("#bulkSave").disabled = true; }
 $("#bulkForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async ()=>{
   bulkRows = bulkParse($("#bulkText").value); bulkRender();
   const rows = bulkRows; if (!rows.length || rows.some(r=>r.err)) return;
-  const who = lsGet("sklad.who") || (S.me && S.me.name) || "", note = $("#bulkNote").value.trim(), ts = Date.now(), ops = [], seen = new Set();
+  const who = lsGet("sklad.who") || (S.me && S.me.name) || "", note = $("#bulkNote").value.trim(), ts = Date.now(), ops = [], mvs = [], seen = new Set();
   const batchId = uid("b"), label = "Приход списком: " + rows.length + " " + plural(rows.length,"строка","строки","строк");
   rows.forEach((r,i)=>{
     if (r.isNew && !seen.has(r.p.id)){ r.p.order = Math.max(0, ...S.products.map(x=>x.order||0)) + 1 + i; seen.add(r.p.id); }
     if (r.priceOnly) return;
-    const mv = {id:uid("m"), productId:r.p.id, unit:r.p.unit, type:"in", delta:r.qty, price:r.price, note:[note, "приход списком"].filter(Boolean).join(", "), who, ts:ts+i, batchId, batchLabel:label};
-    ops.push({col:"moves", id:mv.id, after:mv});
+    mvs.push({productId:r.p.id, unit:r.p.unit, type:"in", delta:r.qty, price:r.price, note:[note, "приход списком"].filter(Boolean).join(", "), who, ts:ts+i, batchId, batchLabel:label});
   });
+  if (mvs.length){ const d = foldMoves("m"+batchId, mvs); ops.push({col:"moves", id:d.id, after:d}); }
   // one product op per product: new card, or existing card with the last price from the list
   const last = new Map(); rows.forEach(r=>last.set(r.p.id, r));
   for (const r of last.values()) if (r.isNew || r.price>0) ops.unshift({col:"products", id:r.p.id, after:Object.assign({}, r.isNew ? r.p : byId(r.p.id), {cost:r.price})});
@@ -1361,9 +1393,10 @@ $("#cookForm").addEventListener("submit", async e => {
   if (!(q>0)){ need($("#cQty"), "Введите количество больше нуля"); return; }
   const who = $("#cWho").value.trim(); lsSet("sklad.who", who);
   const batchId = uid("b"), ts = Date.now(), plan = cookPlan(p.id, q);
-  const moves = [{id:uid("m"), productId:p.id, unit:p.unit, type:"prod", delta:q, note: plan.length?"По рецепту":"Без рецепта", who, ts, batchId}]
-    .concat(plan.filter(it=>tracked(byId(it.productId))).map(it=>({id:uid("m"), productId:it.productId, unit:(byId(it.productId)||{}).unit, type:"use", delta:-it.qty, note:`На: ${p.name}, ${fmt(q)} ${p.unit}`, who, ts, batchId})));
-  try { await commit(`Приготовлено: ${p.name}, ${fmt(q)} ${p.unit}`, moves.map(mv=>({col:"moves", id:mv.id, after:mv})));
+  const moves = [{productId:p.id, unit:p.unit, type:"prod", delta:q, note: plan.length?"По рецепту":"Без рецепта", who, ts, batchId}]
+    .concat(plan.filter(it=>tracked(byId(it.productId))).map(it=>({productId:it.productId, unit:(byId(it.productId)||{}).unit, type:"use", delta:-it.qty, note:`На: ${p.name}, ${fmt(q)} ${p.unit}`, who, ts, batchId})));
+  const doc = foldMoves("m"+batchId, moves);
+  try { await commit(`Приготовлено: ${p.name}, ${fmt(q)} ${p.unit}`, [{col:"moves", id:doc.id, after:doc}]);
     $("#cookDlg").close(); render(); toast(`Приготовлено: ${p.name}, ${fmt(q)} ${p.unit}${plan.length?`, списано продуктов: ${plan.length}`:""}`); }
   catch(err){ console.error(err); render(); toast(err.done && err.done.length ? "Сохранено частично. Удалите эту запись в Истории (или попросите админа) и повторите." : "Не удалось сохранить. Проверьте права на изменение."); }
 });
@@ -1563,8 +1596,9 @@ async function sell(){
   const {ing} = expandCart(S.cart), batchId = uid("b"), ts = Date.now();
   const lines = S.cart.map(l=>({kind:l.kind, refId:l.id, name:lineName(l), qty:l.qty, price:itemPrice(l)}));
   let label = lines.map(l=>`${l.name} ×${l.qty}`).join(", "); if (label.length>90) label = label.slice(0,88)+"…";
-  const ops = Object.entries(ing).map(([pid,q])=>{ const mv = {id:uid("m"), productId:pid, unit:byId(pid).unit, type:"sale", delta:-q, note:"Продажа", batchLabel:label, who, ts, batchId}; return {col:"moves", id:mv.id, after:mv}; });
-  if (!ops.length){ const mv = {id:uid("m"), productId:"", unit:"", type:"sale", delta:0, note:"Продажа", batchLabel:label, who, ts, batchId}; ops.push({col:"moves", id:mv.id, after:mv}); }
+  const mvs = Object.entries(ing).map(([pid,q])=>({productId:pid, unit:byId(pid).unit, type:"sale", delta:-q, note:"Продажа", batchLabel:label, who, ts, batchId}));
+  if (!mvs.length) mvs.push({productId:"", unit:"", type:"sale", delta:0, note:"Продажа", batchLabel:label, who, ts, batchId});
+  const md = foldMoves("m"+batchId, mvs), ops = [{col:"moves", id:md.id, after:md}];
   ops.push({col:"sales", id:batchId, after:{id:batchId, lines, who, ts, total: Math.round(lines.reduce((a,l)=>a+l.price*l.qty,0)*100)/100}});
   try { await commit("Продажа: " + label, ops); S.cart = []; if ($("#cartDlg").open) $("#cartDlg").close(); render(); toast("Продажа проведена: " + label); }
   catch(err){ console.error(err); render(); toast(err.done && err.done.length ? "Сохранено частично. Удалите эту запись в Истории (или попросите админа) и повторите." : "Не удалось провести продажу. Проверьте права на изменение."); }
@@ -1881,12 +1915,12 @@ $("#cutForm").addEventListener("submit", async e=>{
   const ts = Date.now(), note = `Разделка лосося: ${fmt(w)} кг, ${fmt(n)} шт, филе ${f>0?"":"≈ "}${fmt(fil)} кг`;
   // one batch: История shows the cut as one entry and × deletes all of it
   const batchId = uid("b"), batchLabel = `Разделка лосося: ${fmt(w)} кг, ${fmt(n)} шт`;
-  const mv = {id:uid("m"), productId:fp.id, unit:fp.unit, type:"cut", delta:n, note, who, ts, batchId, batchLabel};
-  const ops = [{col:"moves", id:mv.id, after:mv}];
+  const mvs = [{productId:fp.id, unit:fp.unit, type:"cut", delta:n, note, who, ts, batchId, batchLabel}], ops = [];
   const fl = byId(FILLET_ID);
-  { const m1 = {id:uid("m"), productId:sp.id, unit:sp.unit, type:"use", delta:-w, note, who, ts, batchId, batchLabel}; ops.push({col:"moves", id:m1.id, after:m1}); }
-  if (fl){ const m2 = {id:uid("m"), productId:fl.id, unit:fl.unit, type:"cut", delta:fil, note, who, ts, batchId, batchLabel}; ops.push({col:"moves", id:m2.id, after:m2});
+  mvs.push({productId:sp.id, unit:sp.unit, type:"use", delta:-w, note, who, ts, batchId, batchLabel});
+  if (fl){ mvs.push({productId:fl.id, unit:fl.unit, type:"cut", delta:fil, note, who, ts, batchId, batchLabel});
     if (Number(sp.cost)>0 && fil>0) ops.push({col:"products", id:fl.id, after:Object.assign({}, fl, {cost: Math.round(sp.cost*w/fil*100)/100})}); }
+  { const md = foldMoves("m"+batchId, mvs); ops.unshift({col:"moves", id:md.id, after:md}); }
   if ($("#cUpd").checked && f>0) ops.push({col:"products", id:sp.id, after:Object.assign({}, sp, {yieldPct:useY})});
   try { await commit(`Разделка лосося: ${fmt(w)} кг, ${fmt(n)} шт`, ops); $("#cutDlg").close(); render(); toast(`Разделка сохранена: филе ${f>0?"":"≈ "}${fmt(fil)} кг, наборов для ухи +${fmt(n)}`); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
@@ -2714,7 +2748,7 @@ async function syncSale(o){
   const b = o && o.saleBatchId; if (!b || !FS || !navigator.onLine) return;
   try {
     const [ms, sd] = await Promise.all([srvGet(FS.collection("moves").where("batchId","==",b)), srvGet(FS.collection("sales").doc(b))]);
-    for (const d of norm(ms)) upsertLocal(S.moves, d);
+    takeMoves(norm(ms));
     if (sd.exists) upsertLocal(S.sales, docObj(sd));
   } catch(e){ console.warn("sale sync", e); }
 }
@@ -2759,8 +2793,9 @@ async function payOrder(){
   const {ing} = orderIng(o), batchId = "b" + o.id, ts = Date.now(), who = lsGet("sklad.who");
   const where = o.type==="hall" ? (o.table?`, стол ${o.table}`:"") : (o.name?`, ${o.name}`:"");
   const label = `Заказ №${o.num} (${OTYPES[o.type]}${where})`;
-  const ops = Object.entries(ing).map(([pid,q])=>{ const mv = {id:"m"+batchId+"_"+pid, productId:pid, unit:byId(pid).unit, type:"sale", delta:-q, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id}; return {col:"moves", id:mv.id, after:mv}; });
-  if (!ops.length){ const mv = {id:"m"+batchId+"_0", productId:"", unit:"", type:"sale", delta:0, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id}; ops.push({col:"moves", id:mv.id, after:mv}); }
+  const mvs = Object.entries(ing).map(([pid,q])=>({productId:pid, unit:byId(pid).unit, type:"sale", delta:-q, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id}));
+  if (!mvs.length) mvs.push({productId:"", unit:"", type:"sale", delta:0, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id});
+  const md = foldMoves("m"+batchId, mvs), ops = [{col:"moves", id:md.id, after:md}];
   const total = orderTotal(o);
   ops.push({col:"sales", id:batchId, after:Object.assign({id:batchId, lines:(o.lines||[]).map(l=>Object.assign({kind:l.kind, refId:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})), who, ts, orderId:o.id, orderType:o.type, source:o.source||"", payment, total}, courFee(o) ? {courierFee:courFee(o)} : {}, orderPct(o) ? {discPct:orderPct(o), disc:orderDisc(o), subtotal:orderSubtotal(o), discBy:o.discBy||"", orderNum:o.num} : {})});
   ops.push({col:"orders", id:o.id, after:Object.assign({}, o, {status:"closed", payment, total, closedAt:ts, saleBatchId:batchId, updatedAt:ts})});
@@ -2780,7 +2815,7 @@ async function reopenOrder(id){
   if (!tConfirm(`Вернуть заказ №${seen.num} в работу? Продажа будет отменена, продукты вернутся на склад.`)) return;
   const o = await freshOrder(id); if (!o || o.status!=="closed") return orderStale(o, seen.num);
   await syncSale(o);
-  const ops = S.moves.filter(m=>m.batchId && m.batchId===o.saleBatchId).map(m=>({col:"moves", id:m.id, after:null}));
+  const ops = S.mdocs.filter(d=>d.batchId && d.batchId===o.saleBatchId).map(d=>({col:"moves", id:d.id, after:null}));
   if (S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
   const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.closedAt; delete n.saleBatchId; delete n.voidReq;
   ops.push({col:"orders", id, after:n});
@@ -2817,10 +2852,12 @@ async function applyVoid(o, kind, reason, req){
   if (!closed && kind==="writeoff"){ // open order: products were not taken yet, take them now as a write-off
     const {ing} = orderIng(o), batchId = uid("b");
     const label = `Заказ №${o.num} (${OTYPES[o.type]}${o.type==="hall" ? (o.table?`, стол ${o.table}`:"") : (o.name?`, ${o.name}`:"")})`;
-    for (const [pid,q] of Object.entries(ing)){ const mv = {id:uid("m"), productId:pid, unit:byId(pid).unit, type:"off", delta:-q, note:"Списание заказа: "+reason, batchLabel:label, who:me, ts, batchId, orderId:o.id}; ops.push({col:"moves", id:mv.id, after:mv}); }
+    const mvs = Object.entries(ing).map(([pid,q])=>({productId:pid, unit:byId(pid).unit, type:"off", delta:-q, note:"Списание заказа: "+reason, batchLabel:label, who:me, ts, batchId, orderId:o.id}));
+    if (mvs.length){ const md = foldMoves("m"+batchId, mvs); ops.push({col:"moves", id:md.id, after:md}); }
   }
-  if (closed) for (const m of S.moves.filter(m=>m.batchId && m.batchId===o.saleBatchId))
-    ops.push({col:"moves", id:m.id, after: kind==="cancel" ? null : Object.assign({}, m, {type:"off", note:"Списание заказа: "+reason, offAt:ts})});
+  // the saved documents of the sale (one per product in older ones, one with lines now): removed, or turned into a write-off
+  if (closed) for (const d of S.mdocs.filter(d=>d.batchId && d.batchId===o.saleBatchId))
+    ops.push({col:"moves", id:d.id, after: kind==="cancel" ? null : Object.assign({}, d, {type:"off", note:"Списание заказа: "+reason, offAt:ts}, d.lines ? {lines:d.lines.map(l=>{ const x = Object.assign({}, l); delete x.type; delete x.note; return x; })} : {})});
   if (closed && S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
   if (kind==="cancel") ops.push(...courOps(null, o.id));
   const n = Object.assign({}, o, {status:"cancelled", voidKind:kind, wasClosed:closed, cancelReason:reason, cancelledBy:req ? (req.by||"") : me, cancelledAt:ts, updatedAt:ts});
@@ -3104,7 +3141,7 @@ async function freshDraft(d){
     const s = await srvGet(FS.collection("invdrafts").doc(d.id));
     if (!s.exists){ S.invdrafts = S.invdrafts.filter(x=>x.id!==d.id); render(); toast("Этот пересчёт уже утверждён или отклонён на другом устройстве"); return false; }
     const t0 = Math.min(d.ts||Date.now(), ...Object.values(d.at||{}).map(Number).filter(x=>x>0));
-    for (const m of norm(await srvGet(FS.collection("moves").where("ts",">=", t0 - 3*864e5)))) upsertLocal(S.moves, m);
+    takeMoves(norm(await srvGet(FS.collection("moves").where("ts",">=", t0 - 3*864e5))));
   } catch(e){ console.warn("draft sync", e); }
   return true;
 }
@@ -3572,7 +3609,7 @@ document.addEventListener("click", async e => {
       : group.some(x=>x.type==="off" && x.orderId) ? `Удалить списание «${m.batchLabel||""}» целиком? Продукты вернутся на склад.` : group.some(x=>x.type==="sale") ? `Удалить продажу «${m.batchLabel||""}» целиком? Списанные продукты вернутся на склад.` : group.length>1 && group.every(x=>x.type==="in") ? `Удалить «${m.batchLabel||"Приход списком"}» целиком? Остатки пересчитаются. Цены закупки останутся как есть.` : group.length>1 ? `Это часть приготовления (${group.length} записей: заготовка и списанные продукты). Удалить всё приготовление целиком? Остатки пересчитаются.`
       : `Удалить операцию «${TYPES[m.type]?.label||""}: ${p?p.name:""}, ${fmt(m.delta)}»? Остаток пересчитается.`;
     if (!tConfirm(msg)) return;
-    const dops = group.map(g=>({col:"moves", id:g.id, after:null}));
+    const dops = mvDocIds(group).map(id=>({col:"moves", id, after:null}));
     if (m.batchId && S.sales.some(x=>x.id===m.batchId)) dops.push({col:"sales", id:m.batchId, after:null});
     if (offOrd && offOrd.status==="cancelled" && offOrd.voidKind==="writeoff") dops.push({col:"orders", id:offOrd.id, after:Object.assign({}, offOrd, {voidKind:"cancel", updatedAt:Date.now()})});
     try { await commit(`Удаление: ${m.batchLabel || ((TYPES[m.type]?.label||"") + " — " + (p?p.name:""))}`, dops); render(); toast("Операция удалена"); }
@@ -3744,19 +3781,19 @@ function makeDb(fs){
 // The first start, or a lost copy, loads everything once (as before); stock is still the sum of all moves.
 const SYNC_COLS = ["products","recipes","moves","menu","sets","sales","orders","settings","expenses","invdrafts","shifts","staff"];
 const SYNC_GAP = 10*60*1000;   // ask the server a bit further back than the newest change seen
-const SYNC_VER = 2;            // devices that read only changes write it in devices/<id>: older versions show in Устройства
+const SYNC_VER = 3;            // devices that read only changes write it in devices/<id>: older versions show in Устройства (3: moves saved one document per operation)
 const SYNC = {meta:{}, upd:{}, tomb:new Map(), cb:{}, unsub:{}, mode:{}, since:0, hiddenAt:0, off:false};
 const updMs = v => v && typeof v.toMillis === "function" ? v.toMillis() : 0;
 const srvTs = () => firebase.firestore.FieldValue.serverTimestamp();
 function syncSave(){ clearTimeout(syncSave.t); syncSave.t = setTimeout(()=>lsSet("sushi.sync", JSON.stringify(SYNC.meta)), 800); }
-function syncCount(c){ const m = SYNC.meta[c]; if (m && S[c]){ m.n = S[c].length; syncSave(); } }
+function syncCount(c){ const m = SYNC.meta[c], a = S[rawKey(c)]; if (m && a){ m.n = a.length; syncSave(); } }
 function syncTomb(col, id){
   if (SYNC.off || !SYNC_COLS.includes(col) || !id) return;
   FS.collection("tombs").doc(col+"~"+id).set({col, id, upd: srvTs()}).catch(writeErr);
 }
 const tombed = (c, id) => { const t = SYNC.tomb.get(c+"~"+id); return t != null && (SYNC.upd[c].get(id)||0) <= t; };
 function syncErr(e){ console.error(e); S.dbErr = (e && e.code) || "error"; applyRole(); toast("Нет доступа к базе: " + S.dbErr); }
-// docs from the server or the device's copy → S[c]; replace: the list is the whole collection
+// docs from the server or the device's copy → S[c] (moves: S.mdocs, as saved); replace: the list is the whole collection
 function syncTake(c, docs, replace){
   const um = SYNC.upd[c], objs = [];
   for (const d of docs){ const u = updMs(d.get("upd", {serverTimestamps:"estimate"})); if (u || !um.has(d.id)) um.set(d.id, u); if (c!=="tombs") objs.push(docObj(d)); }
@@ -3764,13 +3801,13 @@ function syncTake(c, docs, replace){
     const hit = new Set();
     for (const d of docs){ const col = d.get("col"), u = um.get(d.id) || 0;
       if (SYNC_COLS.includes(col) && u > (SYNC.tomb.get(d.id)||0)){ SYNC.tomb.set(d.id, u); hit.add(col); } }
-    for (const col of hit) if (SYNC.cb[col] && S.loaded[col]){ const keep = S[col].filter(x=>!tombed(col, x.id)); if (keep.length!==S[col].length) SYNC.cb[col](keep); }
+    for (const col of hit) if (SYNC.cb[col] && S.loaded[col]){ const all = S[rawKey(col)], keep = all.filter(x=>!tombed(col, x.id)); if (keep.length!==all.length) SYNC.cb[col](keep); }
     if (SYNC.meta.tombs) SYNC.meta.tombs.n = SYNC.tomb.size;
     return;
   }
   let list;
   if (replace) list = objs;
-  else { list = S[c].slice(); const at = new Map(list.map((x,i)=>[x.id,i]));
+  else { list = S[rawKey(c)].slice(); const at = new Map(list.map((x,i)=>[x.id,i]));
     for (const o of objs){ const i = at.get(o.id); if (i==null){ at.set(o.id, list.length); list.push(o); } else list[i] = o; } }
   SYNC.cb[c](list.filter(x=>!tombed(c, x.id)));
   syncCount(c);
@@ -3780,7 +3817,7 @@ function syncMark(c, s){
   if (s.metadata.fromCache) return;
   let t = (SYNC.meta[c] && SYNC.meta[c].t) || 0;
   for (const d of s.docs){ if (d.metadata.hasPendingWrites) continue; const u = updMs(d.get("upd")); if (u > t) t = u; }
-  SYNC.meta[c] = {t, n: c==="tombs" ? SYNC.tomb.size : S[c].length}; syncSave();
+  SYNC.meta[c] = {t, n: c==="tombs" ? SYNC.tomb.size : S[rawKey(c)].length}; syncSave();
 }
 // first start or lost copy: the whole collection once, then only changes
 function syncFull(c){
@@ -3851,7 +3888,7 @@ function syncAll(){
 }
 function startSubs(){
   syncSub("products", list => { S.products = list; S.loaded.products = true; render(); });
-  syncSub("moves", list => { S.moves = list; S.loaded.moves = true; render(); });
+  syncSub("moves", list => { S.mdocs = list; S.moves = unfoldMoves(list); S.loaded.moves = true; render(); });
   syncSub("recipes", list => { S.recipes = list; S.loaded.recipes = true; render(); });
   syncSub("menu", list => { S.menu = list; S.loaded.menu = true; render(); });
   syncSub("sets", list => { S.sets = list; S.loaded.sets = true; render(); });
