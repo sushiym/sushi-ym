@@ -249,6 +249,7 @@ dialog .search{flex:none}
 .tag.promo{background:#e9a400;color:#1a1300}
 .oreq{font-size:.88rem;background:var(--low-bg);border-left:3px solid #c98a00;border-radius:var(--radius-s);padding:5px 8px}
 .oreq.rej{border-left-color:var(--line);color:var(--muted)}
+.olog{font-size:.85rem}.olog summary{cursor:pointer;color:var(--muted)}.olog>div{padding:2px 0;border-top:1px dashed var(--line)}
 .odiscl{display:flex;justify-content:space-between;gap:8px;color:#9a6a00;font-weight:600}
 .odisc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:8px 10px;border:1px dashed var(--line);border-radius:var(--radius-s)}
 .odisc label{display:inline-flex;align-items:center;gap:6px}
@@ -607,6 +608,7 @@ details.finun{margin-top:10px}
 <dialog id="orderDlg" class="wide"><form method="dialog" id="orderForm">
   <h3 id="oTitle">Новый заказ</h3>
   <div id="oLive" class="olive" hidden></div>
+  <p id="oLock" class="oreq" hidden>Заказ уже готовится: добавить блюда можно, а убрать — только через запрос админу.</p>
   <div class="seg" role="radiogroup" aria-label="Тип заказа">
     <label><input type="radio" name="otype" value="hall" checked>Зал</label>
     <label><input type="radio" name="otype" value="takeaway">Самовывоз</label>
@@ -680,6 +682,17 @@ details.finun{margin-top:10px}
     <p class="hint" style="margin:0">Срок действия. Пустое поле — без ограничения.</p>
     <div class="two"><label class="f">С даты<input type="date" id="prOrdFrom"></label><label class="f">По дату (включительно)<input type="date" id="prOrdTo"></label></div>
     <div class="two"><label class="f">Часы с<input type="time" id="prOrdTFrom"></label><label class="f">Часы до<input type="time" id="prOrdTTo"></label></div></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
+<dialog id="offDlg"><form method="dialog" id="offForm">
+  <h3>Расход и списание со склада</h3>
+  <p class="hint">Правило для работников. Админ вносит расход и списание без ограничений.</p>
+  <label class="f">Без согласования админа — до, ₺ за одну запись<input id="offMax" inputmode="decimal" autocomplete="off" placeholder="1000"></label>
+  <p class="hint" style="margin:0">Сумма считается по цене закупки продукта. Дороже — запись уходит админу на согласование, остаток меняется только после одобрения. 0 — любой расход и списание только через админа. У продуктов без цены закупки сумма 0, они проходят без согласования.</p>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
@@ -938,7 +951,8 @@ function renderChips(){
     `<span class="chip"><b>${act.length}</b>позиций</span>` +
     (()=>{ if (!isAdmin()) return ""; const v = stockValue(); return v.sum>0 ? `<span class="chip">склад на <b>${money(v.sum)}</b>${v.noPrice?` · без цены ${v.noPrice}`:""}</span>` : ""; })() +
     (low ? `<button class="chip warn" data-go="low"><b>${low}</b>заканчивается</button>` : "") +
-    (empty ? `<button class="chip alert" data-go="low"><b>${empty}</b>нет в наличии</button>` : "");
+    (empty ? `<button class="chip alert" data-go="low"><b>${empty}</b>нет в наличии</button>` : "") +
+    (()=>{ const n = isAdmin() ? mvReqs().filter(x=>x.status!=="rejected").length : 0; return n ? `<button class="chip warn" data-go="mvreq"><b>${n}</b>${plural(n,"запрос","запроса","запросов")} на расход и списание</button>` : ""; })();
 }
 function renderNotice(){
   $("#notice").innerHTML = S.noDb ? `<div class="notice">Не удалось подключиться к базе. Проверьте интернет и откройте программу ещё раз.</div>` : "";
@@ -1009,7 +1023,7 @@ function renderStock(L, st){
   const list = sortedProducts().filter(p => (all || (p.active!==false && tracked(p))) && (!q || allNames(p).some(n=>n.toLowerCase().includes(q))) && (!S.lowOnly || (tracked(p) && status(p,st)!=="ok")));
   if (!S.products.length){ L.innerHTML = `<div class="empty-state">${isAdmin()?"Список продуктов пуст. Нажмите «Добавить продукт».":"Список продуктов пуст. Продукты добавляет админ."}</div>`; return; }
   if (!list.length){ L.innerHTML = `<div class="empty-state">${S.lowOnly?"Всё в норме — заканчивающихся продуктов нет.":"Ничего не найдено. Проверьте написание."}</div>`; return; }
-  L.innerHTML = grouped(list, p => {
+  L.innerHTML = mvReqHtml() + grouped(list, p => {
     const tr = tracked(p), s = tr ? status(p,st) : "ok";
     const tag = !tr ? '<span class="tag hid">без учёта</span>' : s==="empty" ? `<span class="tag empty">нет</span>` : s==="low" ? `<span class="tag low">мало</span>` : "";
     const val = (()=>{ if (!isAdmin()) return ""; const u = unitCost(p.id).cost, q = st[p.id]||0; return u>0 && q>0 ? ` · на ${money(q*u)}` : ""; })();
@@ -1152,10 +1166,72 @@ $("#moveForm").addEventListener("submit", async e => {
   const mc = numMoney($("#mCost").value);
   if (type==="in" && !isAdmin() && !(mc>0)){ need($("#mCost"), "Укажите цену закупки за единицу"); return; }
   if (type==="in" && priceJump(byId(pid).cost, mc) && !tConfirm(priceJumpMsg(byId(pid), mc))){ $("#mCost").focus(); return; }
+  if (type!=="in"){
+    const p = byId(pid), st = stockMap()[pid]||0;
+    if (q > st + 1e-9 && !tConfirm(`На складе только ${fmt(st)} ${p.unit}. Всё равно ${type==="off"?"списать":"записать расход"} ${fmt(q)} ${p.unit}? Остаток станет ${fmt(st-q)} ${p.unit}.`)) return;
+    const cost = mvCost(pid, q), lim = offMax();
+    if (!isAdmin() && cost > lim){
+      if (!$("#mNote").value.trim()){ need($("#mNote"), "Напишите причину — админ увидит её в запросе"); return; }
+      if (!tConfirm(`${TYPES[type].label}: сумма ${money(cost)} больше, чем можно без админа (${money(lim)}). Отправить админу на согласование? Остаток изменится только после одобрения.`)) return;
+      const d = {id:uid("q"), kind:"move", mv, cost, by:S.me ? S.me.name : who, byId:S.me ? S.me.id : "", ts:mv.ts, status:"pending"};
+      try { await commit(`Запрос админу: ${label}`, [{col:"invdrafts", id:d.id, after:d}]); $("#moveDlg").close(); render(); toast("Запрос отправлен админу на согласование"); }
+      catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте, что у вас есть права на изменение."); }
+      return;
+    }
+  }
   const mops = [{col:"moves", id:mv.id, after:mv}];
   if (type==="in" && mc>0){ mv.price = mc; mops.push({col:"products", id:pid, after:Object.assign({}, byId(pid), {cost:mc})}); }
   try { await commit(label, mops); $("#moveDlg").close(); render(); toast(label); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте, что у вас есть права на изменение."); }
+});
+
+/* ----- «Расход» and «Списание» by a worker: above the admin's limit (₺ at purchase price) it goes to the admin first (С4) ----- */
+// the request is kept in "invdrafts" with kind "move" (like a recount waiting for approval); approved = the move is written as it was asked
+const OFF_DEF = 1000;
+const offMax = () => { const c = S.settings.find(x=>x.id==="offlim"), v = c ? Number(c.max) : OFF_DEF; return isNaN(v) || v<0 ? OFF_DEF : v; };
+const mvCost = (pid, q) => Math.round((unitCost(pid).cost||0)*q*100)/100;
+const mvReqs = () => S.invdrafts.filter(x=>x.kind==="move" && x.mv);
+const mvReqText = d => { const p = byId(d.mv.productId), q = -(Number(d.mv.delta)||0);
+  return `${(TYPES[d.mv.type]||{}).label||""}: ${p ? N(dn(p)) : "Удалённый продукт"} ${fmt(q)} ${esc(d.mv.unit||"")} · ${money(d.cost)}${d.mv.note?` — ${esc(d.mv.note)}`:""}`; };
+function mvReqHtml(){
+  const all = mvReqs(); if (!all.length) return "";
+  const when = d => new Date(d.ts||0).toLocaleString(LOC(),{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
+  if (isAdmin()){
+    const ds = all.filter(x=>x.status!=="rejected").sort((a,b)=>(a.ts||0)-(b.ts||0)); if (!ds.length) return "";
+    const st = stockMap();
+    return `<div class="box draft"><h4>Запросы на расход и списание (${ds.length})</h4>${ds.map(d=>{ const p = byId(d.mv.productId);
+      return `<div class="oreq" style="margin-top:6px">${mvReqText(d)} <small class="hint">(${N(d.by||"")}, ${when(d)}${p?`, сейчас на складе ${fmt(st[p.id])} ${esc(p.unit)}`:""})</small>
+        <div class="obtns" style="margin-top:4px"><button class="btn small" data-mqno="${esc(d.id)}">Отклонить</button><button class="btn small primary" data-mqok="${esc(d.id)}">Одобрить</button></div></div>`; }).join("")}</div>`;
+  }
+  const mine = all.filter(x=>S.me && x.byId===S.me.id).sort((a,b)=>(b.ts||0)-(a.ts||0)); if (!mine.length) return "";
+  return mine.map(d=> d.status==="rejected"
+    ? `<div class="oreq rej" style="margin-bottom:8px">Админ отклонил запрос: ${mvReqText(d)}${d.decidedBy?` <small class="hint">(${N(d.decidedBy)})</small>`:""} <button class="btn small" data-mqseen="${esc(d.id)}">Понятно</button></div>`
+    : `<div class="oreq" style="margin-bottom:8px">Ваш запрос ждёт решения админа: ${mvReqText(d)}</div>`).join("");
+}
+async function decideMv(id, ok){
+  const d0 = mvReqs().find(x=>x.id===id); if (!d0 || d0.status==="rejected") return;
+  if (ok && !tConfirm(`Одобрить: ${(TYPES[d0.mv.type]||{}).label||""} ${byId(d0.mv.productId) ? dn(byId(d0.mv.productId)) : ""}, ${fmt(-(Number(d0.mv.delta)||0))} ${d0.mv.unit||""} на ${money(d0.cost)}?`)) return;
+  try {
+    if (FS && navigator.onLine){ try { const x = await srvGet(FS.collection("invdrafts").doc(id));
+      if (!x.exists || x.data().status==="rejected"){ S.invdrafts = S.invdrafts.filter(y=>y.id!==id || x.exists); render(); toast("Этот запрос уже решён на другом устройстве"); return; } } catch(e){ console.warn("request sync", e); } }
+    const me = S.me ? S.me.name : "";
+    if (ok){
+      // the move id comes from the request: two admin devices approving at once write the same move
+      const mv = Object.assign({}, d0.mv, {id:"m"+d0.id, note:[d0.mv.note, "одобрил(а) "+me].filter(Boolean).join(", "), approvedBy:me, approvedAt:Date.now()});
+      await commit(`${(TYPES[mv.type]||{}).label||""} одобрено: ${d0.by||""}`, [{col:"moves", id:mv.id, after:mv}, {col:"invdrafts", id, after:null}]);
+      toast("Одобрено, остаток изменён");
+    } else {
+      await commit(`Отклонён запрос: ${d0.by||""}`, [{col:"invdrafts", id, after:Object.assign({}, d0, {status:"rejected", decidedBy:me, decidedAt:Date.now()})}]);
+      toast("Запрос отклонён");
+    }
+    render();
+  } catch(err){ console.error(err); render(); toast("Не удалось сохранить. Проверьте права на изменение."); }
+}
+document.addEventListener("click", e=>{
+  const b = e.target.closest("[data-mqok],[data-mqno],[data-mqseen]"); if (!b || !S.me) return;
+  if (b.dataset.mqseen){ const d = mvReqs().find(x=>x.id===b.dataset.mqseen); if (d && d.byId===S.me.id) guarded(async()=>{ try { await commit("Запрос прочитан", [{col:"invdrafts", id:d.id, after:null}]); render(); } catch(err){ console.error(err); } }); return; }
+  if (!isAdmin()) return;
+  guarded(()=>decideMv(b.dataset.mqok || b.dataset.mqno, !!b.dataset.mqok));
 });
 
 /* ---------- bulk receipt: paste "product | qty | price [| section | unit]" lines ---------- */
@@ -2066,13 +2142,13 @@ function dupSales(){
     return {o, a, extra: a.filter(x=>x.id!==keep).reduce((t,x)=>t+(Number(x.total)||0), 0), ts: Math.min(...a.map(x=>x.ts||0))}; }).sort((p,q)=>q.ts-p.ts);
 }
 function renderOrdersControls(c){
-  const open = S.orders.filter(isOpen).length, nReq = S.orders.filter(voidReqOf).length;
+  const open = S.orders.filter(isOpen).length, nReq = S.orders.filter(o=>voidReqOf(o) || rmReqOf(o)).length;
   const seg = (v, t) => `<button class="btn small ${S.ordView===v?"primary":""}" data-ordview="${v}">${t}</button>`;
   const acts = (can("orderEdit") ? `
       <button class="btn act-in" data-onew="hall">+ Новый заказ</button>` : "")
     + (can("sell") ? `<button class="btn act-cut ${S.ordView==="quick"?"primary":""}" data-ordview="quick">+ Быстрый заказ</button>` : "");
   c.innerHTML = (acts ? `<div class="actions oacts">${acts}</div>` : "") + `
-    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}
+    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы${nReq?` (${nReq})`:""}`) : ""}
       ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}</div>`;
   const dup = isAdmin() ? dupSales() : [];
   const dn2 = isAdmin() ? dupNums() : [];
@@ -2091,6 +2167,11 @@ function orderCard(o){
   const rq = o.voidReq, pend = voidReqOf(o);
   if (pend) reqBox = `<div class="oreq">Запрос: <b>${VKIND[rq.kind]||""}</b> — ${esc(rq.reason)} <small class="hint">(${esc(rq.by||"")})</small>${isAdmin()?"":`<br><small class="hint">Ждёт решения админа</small>`}</div>`;
   else if (rq && rq.status==="rejected" && o.status!=="cancelled") reqBox = `<div class="oreq rej">Админ отклонил запрос: ${VKIND[rq.kind]||""} — ${esc(rq.reason)}${rq.decidedBy?` <small class="hint">(${esc(rq.decidedBy)})</small>`:""}</div>`;
+  const rr = o.rmReq, rpend = rmReqOf(o);
+  if (rpend) reqBox += `<div class="oreq">Запрос: <b>убрать ${logItems(rr.rm)}</b> — ${esc(rr.reason)} <small class="hint">(${esc(rr.by||"")})</small><div class="obtns" style="margin-top:4px">${isAdmin()
+      ? `<button class="btn small" data-rmno="${esc(o.id)}">Отклонить</button><button class="btn small primary" data-rmok="${esc(o.id)}">Одобрить: убрать</button>`
+      : `<small class="hint">Ждёт решения админа</small><button class="btn small" data-rmback="${esc(o.id)}">Отозвать запрос</button>`}</div></div>`;
+  else if (rr && rr.status==="rejected" && isOpen(o)) reqBox += `<div class="oreq rej">Админ отклонил запрос: убрать ${logItems(rr.rm)}${rr.decidedBy?` <small class="hint">(${esc(rr.decidedBy)})</small>`:""}</div>`;
   const voidBtns = pend ? (isAdmin() ? `<button class="btn small" data-vno="${esc(o.id)}">Отклонить</button><button class="btn small primary" data-vok="${esc(o.id)}">Одобрить: ${VKIND[rq.kind]||""}</button>` : "")
     : (can("orderCancel") ? `<button class="btn small danger" data-ovoid="${esc(o.id)}">Отменить / Списать</button>` : "");
   if (isOpen(o)){
@@ -2112,6 +2193,7 @@ function orderCard(o){
     <div class="olines">${lines || '<span class="hint">Пустой заказ</span>'}</div>
     ${o.comment ? `<div class="ocomment">${esc(o.comment)}</div>` : ""}
     ${reqBox}
+    ${logHtml(o)}
     ${showMoney()?discLine(o)+courLine(o):""}
     <div class="ofoot"><b>${showMoney()?money(orderTotal(o)):""}</b><span class="obtns">${btns}</span></div></div>`;
 }
@@ -2122,13 +2204,13 @@ function renderOrders(L){
   let list;
   if (S.ordView==="req" && !isAdmin()) S.ordView = "open";
   if (S.ordView==="open") list = S.orders.filter(isOpen).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
-  else if (S.ordView==="req") list = S.orders.filter(voidReqOf).sort((a,b)=>(a.voidReq.ts||0)-(b.voidReq.ts||0));
+  else if (S.ordView==="req") list = S.orders.filter(o=>voidReqOf(o) || rmReqOf(o)).sort((a,b)=>((voidReqOf(a)||rmReqOf(a)).ts||0)-((voidReqOf(b)||rmReqOf(b)).ts||0));
   else { const dk = S.repDate||todayKey(); list = S.orders.filter(o=>!isOpen(o) && dayKey(o.closedAt||o.cancelledAt||o.createdAt)===dk).sort((a,b)=>(b.closedAt||b.cancelledAt||0)-(a.closedAt||a.cancelledAt||0)); }
   let quick = "";
   if (S.ordView==="closed"){ const dk = S.repDate||todayKey(); const qs = S.sales.filter(x=>!x.orderId && dayKey(x.ts||0)===dk).sort((a,b)=>(b.ts||0)-(a.ts||0));
     if (qs.length) quick = `<h2 class="cat"><span>Быстрые продажи</span><span>${qs.length}</span></h2><div class="ogrid">${qs.map(quickCard).join("")}</div>`; }
   L.innerHTML = list.length || quick ? (list.length ? `<div class="ogrid">${list.map(orderCard).join("")}</div>` : "") + quick
-    : `<div class="empty-state">${S.ordView==="open" ? "Открытых заказов нет. Нажмите «+ Новый заказ»." : S.ordView==="req" ? "Запросов на отмену и списание нет." : "За этот день закрытых заказов нет."}</div>`;
+    : `<div class="empty-state">${S.ordView==="open" ? "Открытых заказов нет. Нажмите «+ Новый заказ»." : S.ordView==="req" ? "Запросов нет." : "За этот день закрытых заказов нет."}</div>`;
 }
 
 function quickCard(sl){
@@ -2157,7 +2239,11 @@ function renderReport(L){
   const top = Object.values(dishes).sort((a,b)=>b.qty-a.qty);
   const table = (title, rows) => rows.length ? `<h2 class="cat"><span>${title}</span></h2><div class="sum">${rows.map(([k,v])=>`<div><span>${esc(k)} <small class="hint">(${v.n})</small></span><b>${money(v.sum)}</b></div>`).join("")}</div>` : "";
   const cashList = cashOfDay(dk), cashOut = cashSums(cashList).total;
-  if (!sales.length && !voidedAll.length && !cashList.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>`; return; }
+  // «Расход» and «Списание» entered by hand that day (order write-offs are in their own block), by who entered them
+  const offs = S.moves.filter(m=>(m.type==="off" || m.type==="out") && !m.orderId && dayKey(m.ts||0)===dk).sort((a,b)=>(a.ts||0)-(b.ts||0));
+  const offSum = m => -(Number(m.delta)||0)*(unitCost(m.productId).cost||0), offBy = {};
+  for (const m of offs){ const k = m.who||"—"; offBy[k] = offBy[k] || {n:0, sum:0}; offBy[k].n++; offBy[k].sum += offSum(m); }
+  if (!sales.length && !voidedAll.length && !cashList.length && !offs.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>`; return; }
   const ps = promoSummary(sales);
   const cashIn = sales.filter(sl=>sl.payment==="Наличные").reduce((a,sl)=>a+saleTotal(sl),0);
   const noPay = sales.filter(sl=>!sl.payment), noPaySum = noPay.reduce((a,sl)=>a+saleTotal(sl),0);
@@ -2174,6 +2260,10 @@ function renderReport(L){
       <div class="subtot"><span>Должно остаться в кассе <small class="hint">без учёта размена на начало дня</small></span><b>${money(cashIn-cashOut)}</b></div></div>
     ${noPay.length ? `<p class="hint">Быстрые продажи (${noPay.length}, ${money(noPaySum)}) сюда не входят: у них не указан способ оплаты.</p>` : ""}
     ${cashList.length ? `<details class="det"><summary>Кассовые расходы за день</summary><div class="list" style="margin-top:8px">${cashList.map(x=>cashRow(x)).join("")}</div></details>` : ""}
+    ${offs.length ? `<h2 class="cat"><span>Расход и списание со склада</span><span>${money(offs.reduce((a,m)=>a+offSum(m),0))}</span></h2>
+      <div class="sum">${Object.entries(offBy).sort((a,b)=>b[1].sum-a[1].sum).map(([k,v])=>`<div><span>${N(k)} <small class="hint">(${v.n})</small></span><b>${money(v.sum)}</b></div>`).join("")}</div>
+      <details class="det"><summary>Все записи за день</summary><div class="sum" style="margin-top:6px">${offs.map(m=>{ const p = byId(m.productId);
+        return `<div><span><small class="hint">${hhmm(m.ts||0)}</small> ${(TYPES[m.type]||{}).label||""}: ${p?N(dn(p)):""} ${fmt(-(Number(m.delta)||0))} ${esc(m.unit||"")}${m.note?` <small class="hint">${esc(m.note)}</small>`:""} <small class="hint">${N(m.who||"")}</small></span><b>${money(offSum(m))}</b></div>`; }).join("")}</div></details>` : ""}
     ${voidedAll.length ? `<h2 class="cat"><span>Отменённые и списанные заказы</span></h2><div class="sum">${voidedAll.map(o=>`<div><span>№${esc(o.num)} <span class="tag os-cancelled">${statLabel(o)}</span> ${esc(o.cancelReason||"")} <small class="hint">${esc(o.cancelledBy||"")}${o.approvedBy?", одобрил(а) "+esc(o.approvedBy):""}</small></span><b>${money(Number(o.total)||orderTotal(o))}</b></div>`).join("")}</div>` : ""}
     ${table("По типу заказа", agg(typeName))}
     ${table("По способу оплаты", agg(sl=>sl.payment||"Не указан"))}
@@ -2226,8 +2316,9 @@ function renderFinControls(c){
   const range = finRange(), isC = S.finPeriod==="custom";
   c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${FIN_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-finp="${k}" aria-pressed="${S.finPeriod===k}">${l}</button>`).join("")}</div>
     ${isC ? `<div class="controls"><label class="f" style="flex:1 1 140px">С<input type="date" id="finFrom" class="search" value="${esc(S.finFrom||"")}"></label><label class="f" style="flex:1 1 140px">По<input type="date" id="finTo" class="search" value="${esc(S.finTo||todayKey())}"></label></div>` : ""}
-    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button></div>
-    <p class="hint" style="margin:0">${esc(promoCfgText())}</p>`;
+    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button><button class="btn" id="openOff">Расход и списание</button></div>
+    <p class="hint" style="margin:0">${esc(promoCfgText())}</p>
+    <p class="hint" style="margin:0">${esc(`Расход и списание работникам: без админа до ${money(offMax())} за запись.`)}</p>`;
 }
 function renderFin(L){
   const [t0,t1] = finRange(), inR = ts => (ts||0)>=t0 && (ts||0)<t1;
@@ -2338,6 +2429,15 @@ $("#promoForm").addEventListener("submit", async e=>{
   try { await commit("Правила акций и скидок", [{col:"settings", id:"promo", after:x}]); $("#promoDlg").close(); render(true); toast("Правила акций сохранены"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
+function openOff(){ if (!isAdmin()) return; $("#offMax").value = String(offMax()); $("#offDlg").showModal(); $("#offMax").focus(); }
+$("#offForm").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const v = num($("#offMax").value);
+  if (isNaN(v) || v<0){ need($("#offMax"), "Введите сумму: 0 или больше"); return; }
+  const x = {id:"offlim", max:Math.round(v*100)/100, updatedAt:Date.now(), by:S.me?S.me.name:""};
+  try { await commit("Предел расхода и списания", [{col:"settings", id:"offlim", after:x}]); $("#offDlg").close(); render(true); toast("Сохранено"); }
+  catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
+});
 function openExp(){
   $("#eCat").innerHTML = EXP_CATS.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
   $("#eAmt").value = ""; $("#eNote").value = ""; $("#eDate").value = todayKey(); $("#eWho").value = lsGet("sklad.who");
@@ -2355,11 +2455,12 @@ $("#expForm").addEventListener("submit", async e=>{
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
 document.addEventListener("click", async e=>{
-  const t = e.target.closest("[data-finp],[data-fins],#addExp,#openPromo,[data-delexp]"); if (!t) return;
+  const t = e.target.closest("[data-finp],[data-fins],#addExp,#openPromo,#openOff,[data-delexp]"); if (!t) return;
   if (t.dataset.finp){ S.finPeriod = t.dataset.finp; lsSet("sushi.finp", S.finPeriod); return render(true); }
   if (t.dataset.fins){ S.finSort = t.dataset.fins; return renderList(); }
   if (t.id==="addExp") return openExp();
   if (t.id==="openPromo") return openPromo();
+  if (t.id==="openOff") return openOff();
   if (t.dataset.delexp){
     const x = S.expenses.find(y=>y.id===t.dataset.delexp); if (!x) return;
     if (!tConfirm(`Удалить расход «${x.category}» на ${money(x.amount)}?`)) return;
@@ -2523,6 +2624,7 @@ function openOrder(id, type){
 }
 function fillOD(){
   $("#oTitle").textContent = OD.id ? `Заказ №${OD.num}` : "Новый заказ";
+  { const so = OD.id ? orderById(OD.id) : null; $("#oLock").hidden = !(so && !isAdmin() && ORD_LOCK.includes(so.status)); }
   document.querySelector(`input[name="otype"][value="${OD.type}"]`).checked = true;
   $("#oq").value = ""; $("#oComment").value = OD.comment||"";
   if (!(orderPct(OD)>0)) OD.discPct = null;
@@ -2658,14 +2760,33 @@ $("#orderForm").addEventListener("submit", async e=>{
   await saveOrder(ed, old);
 });
 async function saveOrder(ed, old){
-  const o = Object.assign({}, old||{}, ed, {updatedAt:Date.now(), editedBy:S.me ? S.me.name : lsGet("sklad.who")});
+  const me = S.me ? S.me.name : lsGet("sklad.who"), now = Date.now(), log = [];
+  let req = null;
+  if (old){
+    let ch = oChange(oEdit(old), ed);
+    if (ch.rm.length && !isAdmin() && ORD_LOCK.includes(old.status)){
+      if (rmReqOf(old)){ toast(`Заказ №${old.num}: запрос убрать блюда уже ждёт решения админа. Дождитесь ответа или отзовите запрос в карточке заказа.`); return; }
+      const what = ch.rm.map(l=>`${fmt(l.qty)} × ${lName(l)}`).join(", ");
+      const reason = (tPrompt(`Заказ №${old.num} уже готовится. Убрать блюда (${what}) можно только с согласия админа. Напишите причину — запрос уйдёт админу, остальные изменения сохранятся сразу:`, "") || "").trim();
+      if (!reason){ toast("Блюда не убраны: нужна причина для админа"); return; }
+      const back = rmLines(oEdit(old).lines, ch.rm);
+      ed = Object.assign({}, ed, {lines: addLines(ed.lines, back)});
+      req = {rm:ch.rm, lines:back, reason, by:me, byId:S.me ? S.me.id : "", ts:now, status:"pending"};
+      ch = oChange(oEdit(old), ed);
+    }
+    if (!chEmpty(ch)) log.push(Object.assign({ts:now, by:me}, ch));
+    if (req) log.push({t:"req", ts:now, by:me, rm:req.rm, reason:req.reason});
+  }
+  const o = Object.assign({}, old||{}, ed, {updatedAt:now, editedBy:me});
+  if (req) o.rmReq = req;
+  if (log.length) logAdd(o, ...log);
   if (!(ed.discPct>0)){ delete o.discPct; delete o.discBy; }
   if (!(ed.courierFee>0)) delete o.courierFee;
   if (!old){ const nn = await nextOrderNum(); o.id = uid("o"); o.num = nn.num; if (nn.tmp) o.numTmp = true; o.status = "new"; o.createdAt = Date.now(); o.who = lsGet("sklad.who"); }
   o.total = orderTotal(o);
   ODsaving = true; // my own save comes back through the live list: not a change from another device
   try { await commit((old?"Изменение заказа №":"Новый заказ №")+o.num, [{col:"orders", id:o.id, after:o}, ...courOps(o)]); ODsaving = false; $("#orderDlg").close();
-    lsSet("sushi.autoprint", $("#oPrint").checked ? "1" : "0"); if ($("#oPrint").checked) setTimeout(()=>printOrder(o, !!old), 300); S.view="orders"; S.ordView="open"; render(true); toast(old?`Заказ №${o.num} сохранён`:`Заказ №${o.num} принят`); }
+    lsSet("sushi.autoprint", $("#oPrint").checked ? "1" : "0"); if ($("#oPrint").checked) setTimeout(()=>printOrder(o, !!old), 300); S.view="orders"; S.ordView="open"; render(true); toast(req ? `Заказ №${o.num} сохранён. Убрать блюда: запрос отправлен админу` : old?`Заказ №${o.num} сохранён`:`Заказ №${o.num} принят`); }
   catch(err){ ODsaving = false; console.error(err); toast("Не удалось сохранить заказ. Проверьте права на изменение."); }
 }
 
@@ -2711,6 +2832,62 @@ function oDiff(b, x){
   }
   for (const k of Object.keys(OE_LBL)) if (!same(b[k], x[k])) out.push(`<div><span>${OE_LBL[k]}: ${esc(oVal(k, b[k]))} → <b>${esc(oVal(k, x[k]))}</b></span></div>`);
   return out.join("");
+}
+/* ----- order log and taking dishes out of an order the kitchen already started (В4) ----- */
+// once the order is «Готовится» (or later) a worker cannot take a dish out on their own: it goes to the admin as o.rmReq;
+// every change is written to o.log (who, when, what was added or taken out), shown in the order card
+const ORD_LOCK = ["cooking","ready","served"];
+const rmReqOf = o => o && isOpen(o) && o.rmReq && o.rmReq.status==="pending" ? o.rmReq : null;
+// dish counts per dish or set (comment and promo price aside)
+function lineQty(lines){
+  const m = new Map();
+  for (const l of lines||[]){ const k = l.kind+":"+l.id, e = m.get(k); if (e) e.qty += Number(l.qty)||0; else m.set(k, {kind:l.kind, id:l.id, name:l.name, qty:Number(l.qty)||0}); }
+  return m;
+}
+// a → b (both in the oEdit form): dishes added, taken out, edited (same count, other comment or price), other fields
+function oChange(a, b){
+  const A = lineQty(a.lines), B = lineQty(b.lines), add = [], rm = [], ed = [], f = [];
+  const keys = (ls, k) => ls.filter(l=>l.kind+":"+l.id===k).map(lKey).sort().join("|");
+  for (const k of new Set([...A.keys(), ...B.keys()])){
+    const d = (B.has(k) ? B.get(k).qty : 0) - (A.has(k) ? A.get(k).qty : 0), l = B.get(k) || A.get(k), x = {kind:l.kind, id:l.id, name:l.name};
+    if (d>0) add.push(Object.assign(x, {qty:d})); else if (d<0) rm.push(Object.assign(x, {qty:-d}));
+    else if (keys(a.lines, k)!==keys(b.lines, k)) ed.push(x);
+  }
+  for (const k of Object.keys(OE_LBL)) if (!same(a[k], b[k])) f.push({k, a:a[k]==null ? null : a[k], b:b[k]==null ? null : b[k]});
+  return {add, rm, ed, f};
+}
+const chEmpty = c => !c.add.length && !c.rm.length && !c.ed.length && !c.f.length;
+// the lines of `from` that make up the taken-out counts (to put them back while the admin decides)
+function rmLines(from, rm){
+  const out = [];
+  for (const r of rm){ let left = r.qty;
+    for (const l of from.slice().reverse()){ if (left<=0) break; if (l.kind!==r.kind || l.id!==r.id) continue;
+      const q = Math.min(left, l.qty); out.push(Object.assign({}, l, {qty:q})); left -= q; } }
+  return out;
+}
+const addLines = (ls, more) => [...lCount([...ls, ...more]).values()];
+// take the requested lines out of the current order lines: the same line first, then any line of that dish
+function takeLines(ls, req){
+  const out = ls.map(l=>Object.assign({}, l));
+  for (const r of req){ let left = Number(r.qty)||0;
+    for (const pass of [l=>lKey(l)===lKey(r), l=>l.kind===r.kind && l.id===r.id])
+      for (const l of out.slice().reverse()){ if (left<=0) break; if (!pass(l) || !(l.qty>0)) continue; const q = Math.min(left, l.qty); l.qty -= q; left -= q; } }
+  return out.filter(l=>l.qty>0);
+}
+const logItems = ls => (ls||[]).map(l=>`${fmt(l.qty)} × ${NL(l)}`).join(", ");
+const logAdd = (o, ...es) => { o.log = [...(o.log||[]), ...es].slice(-40); };
+function logHtml(o){
+  const lg = o.log||[]; if (!lg.length) return "";
+  const row = e => { const p = [];
+    if (e.t==="req") p.push(`просит убрать: ${logItems(e.rm)} <small class="hint">(${esc(e.reason||"")})</small>`);
+    else if (e.t==="ok") p.push(`убрано с согласия админа: ${logItems(e.rm)}`);
+    else if (e.t==="no") p.push(`админ отклонил запрос убрать: ${logItems(e.rm)}`);
+    else if (e.t==="back") p.push(`запрос убрать отозван: ${logItems(e.rm)}`);
+    else { if ((e.add||[]).length) p.push(`+ ${logItems(e.add)}`); if ((e.rm||[]).length) p.push(`<span class="neg">− ${logItems(e.rm)}</span>`);
+      if ((e.ed||[]).length) p.push(`изменён комментарий или цена: ${e.ed.map(l=>NL(l)).join(", ")}`);
+      for (const f of e.f||[]) p.push(`${OE_LBL[f.k]||esc(f.k)}: ${esc(oVal(f.k, f.a))} → ${esc(oVal(f.k, f.b))}`); }
+    return `<div><small class="hint">${hhmm(e.ts||0)} ${N(e.by||"")}</small> ${p.join("; ")}</div>`; };
+  return `<details class="olog"><summary>Изменения заказа (${lg.length})</summary>${lg.slice().reverse().map(row).join("")}</details>`;
 }
 let OM = null;
 function omAsk(b, m, t){
@@ -2925,6 +3102,29 @@ async function decideVoid(id, ok){
     render();
   } catch(err){ console.error(err); render(); toast("Не удалось сохранить. Проверьте права на изменение."); }
 }
+
+// a request to take dishes out (o.rmReq): the admin approves («ok») or rejects («no»), a worker can take it back («back»)
+async function decideRm(id, how){
+  const seen = orderById(id), srq = rmReqOf(seen); if (!srq) return false;
+  if (how!=="back" && !isAdmin()) return false;
+  if (how==="ok" && !tConfirm(`Заказ №${seen.num}: убрать ${srq.rm.map(l=>`${fmt(l.qty)} × ${lName(l)}`).join(", ")}?`)) return false;
+  try {
+    const o = await freshOrder(id), rq = rmReqOf(o);
+    if (!rq || rq.ts!==srq.ts){ render(); toast(`Заказ №${seen.num}: запрос уже решён на другом устройстве. Ничего не изменено.`); return false; }
+    const me = S.me ? S.me.name : "", now = Date.now(), n = Object.assign({}, o, {updatedAt:now});
+    if (how==="ok"){ n.lines = takeLines(oEdit(o).lines, rq.lines); n.total = orderTotal(n); n.editedBy = me; }
+    if (how==="back") delete n.rmReq; else n.rmReq = Object.assign({}, rq, {status: how==="ok" ? "done" : "rejected", decidedBy:me, decidedAt:now});
+    logAdd(n, {t:how, ts:now, by:me, rm:rq.rm});
+    await commit(`Заказ №${o.num}: ${how==="ok" ? "блюда убраны" : how==="no" ? "отклонён запрос убрать блюда" : "запрос отозван"}`, [{col:"orders", id, after:n}]);
+    render(); toast(how==="ok" ? `Заказ №${o.num}: блюда убраны` : how==="no" ? "Запрос отклонён" : "Запрос отозван");
+    return true;
+  } catch(err){ console.error(err); render(); toast("Не удалось сохранить. Проверьте права на изменение."); return false; }
+}
+document.addEventListener("click", e=>{
+  const b = e.target.closest("[data-rmok],[data-rmno],[data-rmback]"); if (!b || !S.me) return;
+  const how = b.dataset.rmok ? "ok" : b.dataset.rmno ? "no" : "back";
+  guarded(()=>decideRm(b.dataset.rmok || b.dataset.rmno || b.dataset.rmback, how));
+});
 
 /* ----- packaging settings ----- */
 function readPList(el){
@@ -3178,7 +3378,7 @@ function invCalc(items, at, ts0, own){
 }
 const draftOwn = d => "m"+d.id+"_";
 function renderInvDrafts(){
-  const ds = S.invdrafts.filter(x=>x.status!=="done").sort((a,b)=>(b.ts||0)-(a.ts||0));
+  const ds = S.invdrafts.filter(x=>x.status!=="done" && x.kind!=="move").sort((a,b)=>(b.ts||0)-(a.ts||0));
   if (!ds.length) return "";
   if (!isAdmin()) { const mine = ds.filter(x=>x.byId===S.me?.id); return mine.length ? `<div class="notice">Ваш пересчёт отправлен админу на утверждение (${mine.length}).</div>` : ""; }
   const sg = x => (x>0?"+":"")+fmt(x);
@@ -3752,7 +3952,10 @@ document.addEventListener("click", async e => {
   if (t.dataset.onew) return openOrder(null, t.dataset.onew);
   if (t.dataset.oedit) return openOrder(t.dataset.oedit);
   if (t.dataset.onext) return guarded(()=>setOrderStatus(t.dataset.onext, t.dataset.to));
-  if (t.dataset.opay) return openPay(t.dataset.opay);
+  if (t.dataset.opay){ const ro = rmReqOf(orderById(t.dataset.opay));
+    if (ro){ if (!tConfirm(`Запрос убрать блюда (${ro.rm.map(l=>`${fmt(l.qty)} × ${lName(l)}`).join(", ")}) ещё не решён админом. Закрыть заказ со всеми блюдами? Запрос будет отозван.`)) return;
+      return guarded(async()=>{ if (await decideRm(t.dataset.opay, "back")) openPay(t.dataset.opay); }); }
+    return openPay(t.dataset.opay); }
   if (t.dataset.ocancel) return guarded(()=>cancelOrder(t.dataset.ocancel));
   if (t.dataset.oreopen) return guarded(()=>reopenOrder(t.dataset.oreopen));
   if (t.dataset.ovoid){ if (!can("orderCancel")) return; return openVoid(t.dataset.ovoid); }
@@ -3775,7 +3978,7 @@ document.addEventListener("click", async e => {
   if (t.dataset.prod) return openCard(t.dataset.prod);
   if (t.dataset.cook!==undefined) return openCook(t.dataset.cook || null);
   if (t.dataset.edit) return openProd(t.dataset.edit);
-  if (t.dataset.go){ S.view="stock"; S.lowOnly=true; S.q=""; return render(true); }
+  if (t.dataset.go){ S.view="stock"; S.lowOnly = t.dataset.go!=="mvreq"; S.q=""; render(true); if (t.dataset.go==="mvreq") window.scrollTo({top:0}); return; }
   if (t.id==="addProd") return openProd(null);
   if (t.dataset.delmove){
     const m = S.moves.find(x=>x.id===t.dataset.delmove); const p = m && byId(m.productId);
@@ -3868,6 +4071,7 @@ Object.assign(I18N, {"Устройства берут из базы только
 Object.assign(I18N, {"Нажмите на продукт — откроется его карточка: остаток, описание, рецепт и кнопки прихода, расхода и списания.": ["Tap a product to open its card: stock, description, recipe and buttons for receipt, usage and write-off.", "Ürüne dokunun — kartı açılır: stok, açıklama, reçete ve giriş, çıkış, fire düğmeleri."], "Цены закупки и себестоимость видит только админ: работник вводит цену только при приходе.": ["Only the admin sees purchase prices and costs: staff only enter the price when receiving goods.", "Alış fiyatlarını ve maliyetleri yalnızca yönetici görür: çalışan fiyatı yalnızca giriş yaparken girer."]});
 Object.assign(I18N, {"цена закупки сильно отличается от прежней.": ["the purchase price is very different from the previous one.", "alış fiyatı öncekinden çok farklı."], "Было:": ["Was:", "Önceki:"], "Станет:": ["Will be:", "Yeni:"], "Проверьте, нет ли опечатки. Сохранить эту цену?": ["Check for a typo. Save this price?", "Yazım hatası olup olmadığını kontrol edin. Bu fiyat kaydedilsin mi?"], "Проверьте, нет ли опечатки.": ["Check for a typo.", "Yazım hatası olup olmadığını kontrol edin."], "цена сильно отличается от прежней: было": ["the price is very different from the previous one: was", "fiyat öncekinden çok farklı: önceki"], "Цена сильно отличается от прежней в строках:": ["The price is very different from the previous one in lines:", "Fiyatı öncekinden çok farklı olan satır sayısı:"], "(отмечены ⚠).": ["(marked ⚠).", "(⚠ ile işaretli)."], "Сохранить приход с этими ценами?": ["Save the receipt with these prices?", "Giriş bu fiyatlarla kaydedilsin mi?"], "Будет сохранено:": ["Will be saved:", "Kaydedilecek:"], "сильно отличается от прежней цены:": ["very different from the previous price:", "önceki fiyattan çok farklı:"]});
 Object.assign(I18N, {"Новая ставка действует с": ["New rate applies from", "Yeni ücret şu günden itibaren geçerli"], "Смены до этого дня считаются по старой ставке": ["Shifts before this day are paid at the old rate", "Bu günden önceki vardiyalar eski ücretle hesaplanır"], "зарплата прошлых месяцев не изменится": ["the pay of past months will not change", "geçmiş ayların maaşı değişmez"], "Укажите, с какого дня действует новая ставка": ["Enter the day the new rate applies from", "Yeni ücretin hangi günden itibaren geçerli olduğunu girin"], "Смены закрылись сами: проверьте": ["Shifts closed by themselves: please check", "Kendiliğinden kapanan vardiyalar: kontrol edin"], "после начала смены действий в программе нет": ["no actions in the app after the shift started", "vardiya başladıktan sonra programda işlem yok"], "Конец в": ["End at", "Bitiş"], "Верно": ["Correct", "Doğru"], "Отмечено: верно": ["Marked as correct", "Doğru olarak işaretlendi"], "Смена:": ["Shift:", "Vardiya:"], "Бывшие работники": ["Former workers", "Eski çalışanlar"], "Не могут входить в программу. Их смены и зарплата за прошлые месяцы сохраняются.": ["They cannot log in. Their shifts and pay for past months are kept.", "Programa giriş yapamazlar. Vardiyaları ve geçmiş ayların maaşı saklanır."], "В бывшие работники": ["To former workers", "Eski çalışanlara taşı"], "Перенести": ["Move", "Taşınsın mı:"], "в «Бывшие работники»? Удалить совсем нельзя: у него есть смены, и пропала бы его зарплата за прошлые месяцы в Финансах. Бывший работник не может входить в программу, его смены и зарплата сохраняются.": ["to «Former workers»? Deleting is not possible: they have shifts, and their pay for past months would disappear from Finance. A former worker cannot log in; their shifts and pay are kept.", "→ «Eski çalışanlar»? Tamamen silinemez: vardiyaları var, silinirse geçmiş ayların maaşı Finans'tan kaybolur. Eski çalışan programa giriş yapamaz, vardiyaları ve maaşı saklanır."], "Перенесён(а) в «Бывшие работники»": ["Moved to «Former workers»", "«Eski çalışanlar»a taşındı"], "Работник не нажал «Закончить смену». Если он ушёл раньше, нажмите на смену и поставьте время ухода.": ["The worker did not press «End shift». If they left earlier, tap the shift and set the time they left.", "Çalışan «Vardiyayı bitir» düğmesine basmadı. Daha erken çıktıysa vardiyaya dokunup çıkış saatini girin."], "продлена после 23:00, последнее действие:": ["continued after 23:00, last action:", "23:00'ten sonra uzatıldı, son işlem:"], "последнее действие до 23:00:": ["last action before 23:00:", "23:00'ten önceki son işlem:"], "продлена после 23:00": ["continued after 23:00", "23:00'ten sonra uzatıldı"], "Смена продолжается с": ["The shift continues from", "Vardiya şu saatten beri devam ediyor:"]});
+Object.assign(I18N, {"Заказ уже готовится: добавить блюда можно, а убрать — только через запрос админу.": ["The order is already being cooked: you can add dishes, but taking one out needs a request to the admin.", "Sipariş hazırlanıyor: yemek eklenebilir, çıkarmak ise yalnızca yöneticiye talep ile olur."], "Запросы": ["Requests", "Talepler"], "Запросов нет.": ["No requests.", "Talep yok."], "убрать": ["take out", "çıkar"], "Одобрить: убрать": ["Approve: take out", "Onayla: çıkar"], "Отозвать запрос": ["Withdraw request", "Talebi geri al"], "Изменения заказа": ["Order changes", "Sipariş değişiklikleri"], "просит убрать:": ["asks to take out:", "çıkarılmasını istiyor:"], "убрано с согласия админа:": ["taken out with the admin's approval:", "yönetici onayıyla çıkarıldı:"], "админ отклонил запрос убрать:": ["the admin rejected taking out:", "yönetici çıkarma talebini reddetti:"], "запрос убрать отозван:": ["request to take out withdrawn:", "çıkarma talebi geri alındı:"], "изменён комментарий или цена:": ["comment or price changed:", "not veya fiyat değişti:"], "уже готовится. Убрать блюда": ["is already being cooked. Taking out dishes", "zaten hazırlanıyor. Yemekleri çıkarmak"], "можно только с согласия админа. Напишите причину — запрос уйдёт админу, остальные изменения сохранятся сразу:": ["needs the admin's approval. Write the reason: the request goes to the admin, other changes are saved right away:", "yalnızca yönetici onayıyla olur. Nedenini yazın: talep yöneticiye gider, diğer değişiklikler hemen kaydedilir:"], "Блюда не убраны: нужна причина для админа": ["Dishes not taken out: the admin needs a reason", "Yemekler çıkarılmadı: yönetici için neden gerekli"], "запрос убрать блюда уже ждёт решения админа. Дождитесь ответа или отзовите запрос в карточке заказа.": ["a request to take out dishes is already waiting for the admin. Wait for the answer or withdraw it in the order card.", "yemek çıkarma talebi zaten yönetici kararını bekliyor. Cevabı bekleyin veya sipariş kartında talebi geri alın."], "сохранён. Убрать блюда: запрос отправлен админу": ["saved. Taking out dishes: request sent to the admin", "kaydedildi. Yemek çıkarma: talep yöneticiye gönderildi"], "блюда убраны": ["dishes taken out", "yemekler çıkarıldı"], "отклонён запрос убрать блюда": ["request to take out dishes rejected", "yemek çıkarma talebi reddedildi"], "запрос отозван": ["request withdrawn", "talep geri alındı"], "Запрос отозван": ["Request withdrawn", "Talep geri alındı"], "Запрос убрать блюда": ["The request to take out dishes", "Yemek çıkarma talebi"], "ещё не решён админом. Закрыть заказ со всеми блюдами? Запрос будет отозван.": ["has not been decided by the admin yet. Close the order with all dishes? The request will be withdrawn.", "henüz yönetici tarafından karara bağlanmadı. Sipariş tüm yemeklerle kapatılsın mı? Talep geri alınır."], "На складе только": ["Only in stock:", "Depoda yalnızca"], "Всё равно списать": ["Write off anyway", "Yine de fireye yaz"], "Всё равно записать расход": ["Record the usage anyway", "Yine de çıkış yaz"], "Остаток станет": ["Stock will become", "Stok şöyle olacak:"], "Напишите причину — админ увидит её в запросе": ["Write the reason: the admin will see it in the request", "Nedenini yazın: yönetici talepte görecek"], "сумма": ["the amount", "tutar"], "больше, чем можно без админа": ["is more than allowed without the admin", "yönetici olmadan izin verilenden fazla"], "Отправить админу на согласование? Остаток изменится только после одобрения.": ["Send to the admin for approval? Stock changes only after approval.", "Onay için yöneticiye gönderilsin mi? Stok yalnızca onaydan sonra değişir."], "Запросы на расход и списание": ["Usage and write-off requests", "Çıkış ve fire talepleri"], "сейчас на складе": ["now in stock", "şu an depoda"], "Ваш запрос ждёт решения админа:": ["Your request is waiting for the admin:", "Talebiniz yönetici kararını bekliyor:"], "Понятно": ["OK", "Tamam"], "запрос": ["request", "talep"], "запроса": ["requests", "talep"], "запросов": ["requests", "talep"], "на расход и списание": ["for usage and write-off", "çıkış ve fire için"], "Одобрить:": ["Approve:", "Onayla:"], "Этот запрос уже решён на другом устройстве": ["This request was already decided on another device", "Bu talep başka bir cihazda zaten karara bağlandı"], "Одобрено, остаток изменён": ["Approved, stock changed", "Onaylandı, stok değişti"], "Запрос прочитан": ["Request read", "Talep okundu"], "Расход и списание со склада": ["Stock usage and write-offs", "Depodan çıkış ve fire"], "Все записи за день": ["All entries of the day", "Günün tüm kayıtları"], "Расход и списание": ["Usage and write-off", "Çıkış ve fire"], "Расход и списание работникам: без админа до": ["Usage and write-off for staff: without the admin up to", "Çalışanlar için çıkış ve fire: yönetici olmadan en fazla"], "за запись.": ["per entry.", "kayıt başına."], "Правило для работников. Админ вносит расход и списание без ограничений.": ["Rule for staff. The admin enters usage and write-offs without limits.", "Çalışanlar için kural. Yönetici çıkış ve fireyi sınırsız girer."], "Без согласования админа — до, ₺ за одну запись": ["Without the admin's approval: up to, ₺ per entry", "Yönetici onayı olmadan: en fazla, kayıt başına ₺"], "Сумма считается по цене закупки продукта. Дороже — запись уходит админу на согласование, остаток меняется только после одобрения. 0 — любой расход и списание только через админа. У продуктов без цены закупки сумма 0, они проходят без согласования.": ["The amount is counted at the product's purchase price. Above it, the entry goes to the admin for approval and stock changes only after approval. 0: any usage or write-off goes through the admin. Products without a purchase price count as 0 and pass without approval.", "Tutar ürünün alış fiyatıyla hesaplanır. Üstündeyse kayıt onay için yöneticiye gider, stok yalnızca onaydan sonra değişir. 0: her çıkış ve fire yöneticiden geçer. Alış fiyatı olmayan ürünler 0 sayılır ve onaysız geçer."], "Введите сумму: 0 или больше": ["Enter an amount: 0 or more", "Tutar girin: 0 veya daha fazla"], "Предел расхода и списания": ["Usage and write-off limit", "Çıkış ve fire sınırı"], "Запрос админу:": ["Request to the admin:", "Yöneticiye talep:"], "одобрено:": ["approved:", "onaylandı:"], "Отклонён запрос:": ["Request rejected:", "Talep reddedildi:"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
