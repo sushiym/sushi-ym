@@ -323,7 +323,6 @@ details.det .slist .srow,.srow{display:grid;grid-template-columns:1fr auto auto;
 .chip.me b{margin:0 4px}
 button.chip{cursor:pointer}
 .box.draft{background:var(--surface);border-color:var(--accent);margin-bottom:12px}
-label:has(> #mWho),label:has(> #cWho),label:has(> #cutWho),label:has(> #eWho){display:none!important}
 #acct{z-index:45}
 #netChipRow{margin-top:6px}
 #netChipRow:has(#netChip[hidden]){display:none}
@@ -450,7 +449,6 @@ details.finun{margin-top:10px}
   <p class="hint" id="stockHint"></p>
   <label class="f" id="mCostWrap"><span>Цена за 1 <span id="mCostUnit">ед.</span>, ₺ <span id="mCostReq">(необязательно)</span></span><input id="mCost" inputmode="decimal" autocomplete="off" placeholder="цена закупки"><small class="hint" id="mCostHint"></small></label>
   <label class="f">Комментарий<input id="mNote" autocomplete="off" placeholder="Например: поставщик, причина списания"></label>
-  <label class="f">Кто вносит<input id="mWho" autocomplete="name" placeholder="Ваше имя"></label>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
@@ -522,7 +520,6 @@ details.finun{margin-top:10px}
   <label class="f">Заготовка<select id="cProd" required></select></label>
   <label class="f"><span id="cQtyLabel">Сколько приготовили</span><input id="cQty" inputmode="decimal" autocomplete="off" placeholder="0"></label>
   <div id="cPreview" class="prev"></div>
-  <label class="f">Кто готовил<input id="cWho" autocomplete="name" placeholder="Ваше имя"></label>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
@@ -614,7 +611,6 @@ details.finun{margin-top:10px}
   <div id="cutPrev" class="prev"></div>
   <label class="f">Фактический вес филе, кг (если взвешивали)<input id="cF" inputmode="decimal" autocomplete="off" placeholder="необязательно"></label>
   <label class="toggle" id="cUpdWrap" hidden><input type="checkbox" id="cUpd"> <span id="cUpdText"></span></label>
-  <label class="f">Кто разделывал<input id="cutWho" autocomplete="name" placeholder="Ваше имя"></label>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
@@ -732,12 +728,14 @@ details.finun{margin-top:10px}
 </form></dialog>
 
 <dialog id="expDlg"><form method="dialog" id="expForm">
-  <h3>Расход</h3>
+  <h3 id="expTitle">Расход</h3>
   <p class="hint">Расходы не со склада: аренда, зарплата, коммуналка, комиссии агрегаторов. Учитываются в разделе «Финансы».</p>
   <div class="two"><label class="f">Статья<select id="eCat"></select></label><label class="f">Сумма, ₺<input id="eAmt" inputmode="decimal" autocomplete="off" placeholder="0"></label></div>
-  <div class="two"><label class="f">Дата<input id="eDate" type="date"></label><label class="f">Кто вносит<input id="eWho" autocomplete="name" placeholder="Ваше имя"></label></div>
+  <label class="f">Дата<input id="eDate" type="date"></label>
   <label class="f">Комментарий<input id="eNote" autocomplete="off" placeholder="Например: аренда за октябрь"></label>
+  <p class="hint" id="eWhoLine"></p>
   <div class="dlg-actions">
+    <button type="button" class="btn danger" id="expDel" hidden>Удалить</button>
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
   </div>
@@ -825,7 +823,10 @@ const TYPES = {in:{label:"Приход",sign:1},out:{label:"Расход",sign:-
 const SUBUNIT = {"кг":["г",1000], "л":["мл",1000]};
 const HINTS = {in:"Товар пришёл от поставщика или с рынка.",out:"Только то, чего нет в техкартах: еда персонала, проба, отдали соседям. Продукты для блюд списываются сами при закрытии заказа, для заготовок есть «Приготовить».",off:"Испорчено, просрочено, брак — потери."};
 
-const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], mdocs:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", invQ:"", invDraft:{}, invAt:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
+const HIST_PAGE = 300;
+// the name on every record comes only from the PIN login (no field to type another name)
+const whoNow = () => (S.me && S.me.name) || lsGet("sklad.who") || "";
+const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], mdocs:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", histDay:"", histN:HIST_PAGE, invQ:"", invDraft:{}, invAt:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1011,7 +1012,7 @@ function renderControls(){
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
-    c.innerHTML = `<div class="controls"><input class="search" id="hq" type="search" placeholder="Фильтр по продукту или имени" value="${esc(S.histQ)}" aria-label="Фильтр истории"></div>`;
+    c.innerHTML = `<div class="controls"><input class="search" id="hq" type="search" placeholder="Фильтр по продукту или имени" value="${esc(S.histQ)}" aria-label="Фильтр истории"><label class="toggle">Перейти к дню <input type="date" id="hday" value="${esc(S.histDay)}" max="${todayKey()}"></label></div>`;
   } else if (S.view==="inv"){
     c.innerHTML = `<p class="hint" style="margin:0 0 10px">${isAdmin() ? "Пересчитайте продукты и впишите фактическое количество. Пустые поля не меняются. Так же вносятся начальные остатки в первый раз." : "Пересчитайте продукты и впишите, сколько есть на самом деле. Пустые поля не меняются. Админ сверит с учётом при утверждении."}</p>
       <div class="controls"><input class="search" id="iq" type="search" placeholder="Найти продукт" value="${esc(S.invQ)}" aria-label="Поиск продукта"></div>`;
@@ -1021,7 +1022,7 @@ function renderControls(){
     renderFinControls(c);
   } else if (S.view==="staff"){
     c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${SH_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-shp="${k}" aria-pressed="${S.shPeriod===k}">${l}</button>`).join("")}</div>
-      <div class="controls"><button class="btn primary" id="addStaff">+ Сотрудник</button><button class="btn" id="addShift">+ Смена вручную</button>${devIsMain()?"":`<button class="btn" id="devSignOut">Отключить это устройство</button>`}<button class="btn" id="importOld">Перенести данные из старой программы</button></div>
+      <div class="controls"><button class="btn primary" id="addStaff">+ Сотрудник</button><button class="btn" id="addShift">+ Смена вручную</button>${devIsMain()?"":`<button class="btn" id="devSignOut">Отключить это устройство</button>`}</div>
       <p class="hint" style="margin:0 0 10px">Смена начинается и заканчивается на экране входа. Если работник не закрыл смену, программа закрывает её сама в 23:00. Если после 23:00 он что-то делает в программе, смена продлевается одним куском до 10 минут после его последнего действия (паузы до часа тоже входят в смену). Такие смены помечены «авто» и ждут проверки. Нажмите на смену, чтобы исправить время.</p>`;
   }
 }
@@ -1074,19 +1075,24 @@ const histOrder = moves => { const x = moves.find(x=>x.orderId); const o = x && 
 function renderHist(L){
   const q = S.histQ.trim().toLowerCase();
   const sorted = [...S.moves].sort((a,b)=>(b.ts||0)-(a.ts||0));
-  const entries = [], seen = new Set();
+  const entries = [], groups = new Map();
   for (const m of sorted){
     const k = histKey(m);
-    if (k){ if (seen.has(k)) continue; seen.add(k); entries.push({batch:true, moves: sorted.filter(x=>histKey(x)===k), m}); }
-    else entries.push({batch:false, moves:[m], m});
+    if (!k){ entries.push({batch:false, moves:[m], m}); continue; }
+    const g = groups.get(k);
+    if (g){ g.moves.push(m); continue; }
+    const e = {batch:true, moves:[m], m}; groups.set(k, e); entries.push(e);
   }
   const match = e => {
     if (!q) return true;
     if (String(e.m.who||"").toLowerCase().includes(q) || String(e.m.note||"").toLowerCase().includes(q) || String(e.m.batchLabel||"").toLowerCase().includes(q)) return true;
     return e.moves.some(x => { const p = byId(x.productId); return p && allNames(p).some(n=>n.toLowerCase().includes(q)); });
   };
-  const list = entries.filter(match).slice(0,300);
-  if (!list.length){ L.innerHTML = `<div class="empty-state">${q?"Ничего не найдено.":"Операций пока нет. Внесите первый приход или проведите инвентаризацию."}</div>`; return; }
+  // «Перейти к дню»: that day at the top, older below
+  const dayEnd = S.histDay ? new Date(S.histDay+"T00:00").getTime() + 86400000 : Infinity;
+  const all = entries.filter(e => (e.m.ts||0) < dayEnd && match(e));
+  const list = all.slice(0, S.histN);
+  if (!list.length){ L.innerHTML = `<div class="empty-state">${q||S.histDay?"Ничего не найдено.":"Операций пока нет. Внесите первый приход или проведите инвентаризацию."}</div>`; return; }
   let html="", day="";
   for (const e of list){
     const m = e.m, d = new Date(m.ts||0);
@@ -1123,7 +1129,9 @@ function renderHist(L){
         <span class="meta">${time}${m.who?", "+esc(m.who):""}${m.note?" — "+esc(m.note):""} ${del}</span></div>`;
     }
   }
-  L.innerHTML = html + "</div>";
+  const more = all.length - list.length;
+  html += "</div>" + (more>0 ? `<p class="hint histmore" style="margin:12px 0 8px">Показано: ${list.length} · всего: ${all.length}</p><button type="button" class="btn" id="histMore">Показать ещё ${Math.min(more, HIST_PAGE)}</button>` : "");
+  L.innerHTML = html;
 }
 function renderInv(L, st){
   const q = S.invQ.trim().toLowerCase();
@@ -1182,7 +1190,7 @@ function updateMoveHints(){
 function openMove(type, productId){
   document.querySelector(`input[name="mtype"][value="${type||"in"}"]`).checked = true;
   fillProdSelect($("#mProd"), productId);
-  $("#mQty").value=""; $("#mNote").value=""; $("#mCost").value=""; $("#mUnit").dataset.for = "-"; $("#mUnit").innerHTML = ""; $("#mWho").value = lsGet("sklad.who");
+  $("#mQty").value=""; $("#mNote").value=""; $("#mCost").value=""; $("#mUnit").dataset.for = "-"; $("#mUnit").innerHTML = "";
   updateMoveHints();
   $("#moveDlg").showModal();
   (productId ? $("#mQty") : $("#mProd")).focus();
@@ -1197,7 +1205,7 @@ $("#moveForm").addEventListener("submit", async e => {
   if (!(q0>0)){ need($("#mQty"), "Введите количество больше нуля"); return; }
   const pu = byId(pid).unit, sub = SUBUNIT[pu] && $("#mUnit").value===SUBUNIT[pu][0];
   const q = sub ? Math.round(q0/SUBUNIT[pu][1]*100000)/100000 : q0;
-  const who = $("#mWho").value.trim(); lsSet("sklad.who", who);
+  const who = whoNow();
   const mv = {id:uid("m"), productId:pid, unit:byId(pid).unit, type, delta: TYPES[type].sign*q, note:[sub?`${fmt(q0)} ${SUBUNIT[pu][0]}`:"", $("#mNote").value.trim()].filter(Boolean).join(", "), who, ts:Date.now()};
   const label = `${TYPES[type].label}: ${byId(pid).name}, ${fmt(q)} ${byId(pid).unit}`;
   const mc = numMoney($("#mCost").value);
@@ -1288,7 +1296,7 @@ $("#bulkForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async
   const rows = bulkRows; if (!rows.length || rows.some(r=>r.err)) return;
   const jumps = rows.filter(r=>r.jump).length;
   if (jumps && !tConfirm(`Цена сильно отличается от прежней в строках: ${jumps} (отмечены ⚠).\n\nПроверьте, нет ли опечатки. Сохранить приход с этими ценами?`)) return;
-  const who = lsGet("sklad.who") || (S.me && S.me.name) || "", note = $("#bulkNote").value.trim(), ts = Date.now(), ops = [], mvs = [], seen = new Set();
+  const who = whoNow(), note = $("#bulkNote").value.trim(), ts = Date.now(), ops = [], mvs = [], seen = new Set();
   const batchId = uid("b"), label = "Приход списком: " + rows.length + " " + plural(rows.length,"строка","строки","строк");
   rows.forEach((r,i)=>{
     if (r.isNew && !seen.has(r.p.id)){ r.p.order = Math.max(0, ...S.products.map(x=>x.order||0)) + 1 + i; seen.add(r.p.id); }
@@ -1390,7 +1398,7 @@ $("#prodForm").addEventListener("submit", async e => {
     if (st!==0){
       const nv = num($("#ucNew").value);
       if (isNaN(nv) || nv<0){ need($("#ucNew"), `Укажите, сколько сейчас на складе в «${p.unit}»`); return; }
-      conv = {id:uid("m"), productId:p.id, unit:p.unit, type:"inv", delta: Math.round((nv-st)*1000)/1000, note:`Смена единицы: ${fmt(st)} ${old.unit} → ${fmt(nv)} ${p.unit}`, who:lsGet("sklad.who"), ts:Date.now()};
+      conv = {id:uid("m"), productId:p.id, unit:p.unit, type:"inv", delta: Math.round((nv-st)*1000)/1000, note:`Смена единицы: ${fmt(st)} ${old.unit} → ${fmt(nv)} ${p.unit}`, who:whoNow(), ts:Date.now()};
     }
   }
   // recipe
@@ -1457,7 +1465,7 @@ function cookable(){ return sortedProducts().filter(p=>p.active!==false && (p.ca
 function openCook(pid){
   const list = cookable(); let html = `<option value="" disabled ${pid?"":"selected"}>Выберите заготовку</option>`;
   for (const p of list) html += `<option value="${esc(p.id)}" ${p.id===pid?"selected":""}>${esc(dn(p))} (${esc(p.unit)})${recipeOf(p.id)?"":" — без рецепта"}</option>`;
-  $("#cProd").innerHTML = html; $("#cQty").value = ""; $("#cWho").value = lsGet("sklad.who");
+  $("#cProd").innerHTML = html; $("#cQty").value = "";
   updateCook(); $("#cookDlg").showModal(); (pid?$("#cQty"):$("#cProd")).focus();
 }
 const yf = pid => { const p = byId(pid); const y = p && Number(p.yieldPct); return y>0 && y<100 ? y/100 : 1; };
@@ -1486,7 +1494,7 @@ $("#cookForm").addEventListener("submit", async e => {
   const p = byId($("#cProd").value), q = num($("#cQty").value);
   if (!p){ toast("Выберите заготовку"); return; }
   if (!(q>0)){ need($("#cQty"), "Введите количество больше нуля"); return; }
-  const who = $("#cWho").value.trim(); lsSet("sklad.who", who);
+  const who = whoNow();
   const batchId = uid("b"), ts = Date.now(), plan = cookPlan(p.id, q);
   const moves = [{productId:p.id, unit:p.unit, type:"prod", delta:q, note: plan.length?"По рецепту":"Без рецепта", who, ts, batchId}]
     .concat(plan.filter(it=>tracked(byId(it.productId))).map(it=>({productId:it.productId, unit:(byId(it.productId)||{}).unit, type:"use", delta:-it.qty, note:`На: ${p.name}, ${fmt(q)} ${p.unit}`, who, ts, batchId})));
@@ -1696,7 +1704,7 @@ async function dishOff(){
   const why = (document.querySelector('input[name="wwhy"]:checked')||{}).value, note = $("#wNote").value.trim();
   if (!why){ need($("#wWhy"), "Выберите причину списания"); return; }
   if (why==="other" && !note){ need($("#wNote"), "Напишите, почему списываете"); return; }
-  const me = S.me ? S.me.name : lsGet("sklad.who"), {ing} = expandCart(S.cart), st = stockMap(), batchId = uid("b"), ts = Date.now();
+  const me = whoNow(), {ing} = expandCart(S.cart), st = stockMap(), batchId = uid("b"), ts = Date.now();
   const dishes = S.cart.map(l=>({kind:l.kind, refId:l.id, name:lineName(l), qty:l.qty}));
   let label = dishes.map(l=>`${l.name} ×${l.qty}`).join(", "); if (label.length>90) label = label.slice(0,88)+"…";
   // the worker does not see stock numbers (only the admin does): just which products are short
@@ -2009,7 +2017,7 @@ function updateCut(){
   } else { wrap.hidden = true; $("#cUpd").checked = false; }
 }
 function openCut(){
-  ["#cW","#cN","#cF"].forEach(id=>$(id).value=""); $("#cUpd").checked=false; $("#cutWho").value = lsGet("sklad.who");
+  ["#cW","#cN","#cF"].forEach(id=>$(id).value=""); $("#cUpd").checked=false;
   updateCut(); $("#cutDlg").showModal(); $("#cW").focus();
 }
 $("#cutForm").addEventListener("input", updateCut);
@@ -2020,7 +2028,7 @@ $("#cutForm").addEventListener("submit", async e=>{
   if (!(w>0)){ need($("#cW"), "Введите общий вес рыбы"); return; }
   if (!(n>0) || Math.round(n)!==n){ need($("#cN"), "Введите количество рыб целым числом"); return; }
   if (f>w){ need($("#cF"), "Вес филе не может быть больше веса рыбы"); return; }
-  const who = $("#cutWho").value.trim(); lsSet("sklad.who", who);
+  const who = whoNow();
   const y = Number(sp.yieldPct)>0 ? Number(sp.yieldPct) : 100;
   const useY = $("#cUpd").checked && f>0 ? Math.round(f/w*1000)/10 : y;
   const fil = f>0 ? f : Math.round(w*useY/100*1000)/1000;
@@ -2426,7 +2434,7 @@ function renderFin(L){
   if (cashExps.length) html += `<details class="det"><summary>Кассовые расходы за период: ${cashExps.length} ${plural(cashExps.length,"запись","записи","записей")}, ${money(cashS.total)}</summary><div class="list" style="margin-top:8px">${cashExps.slice(0,300).map(x=>cashRow(x, true)).join("")}</div></details>`;
   const oexps = exps.filter(x=>!x.monthly && !x.auto && !isCash(x));
   html += `<h2 class="cat"><span>Прочие расходы</span><span>${oexps.length}</span></h2>` + (oexps.length
-    ? `<div class="list">${oexps.map(x=>`<div class="hist"><span><span class="tag off">${esc(x.category||"Прочее")}</span> ${esc(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long"})}${x.who?", "+esc(x.who):""} <button class="del" data-delexp="${esc(x.id)}" aria-label="Удалить расход" title="Удалить расход">×</button></span></div>`).join("")}</div>`
+    ? `<div class="list">${oexps.map(x=>`<button type="button" class="hist" data-exp="${esc(x.id)}" title="Исправить или удалить"><span><span class="tag off">${esc(x.category||"Прочее")}</span> ${esc(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long"})}${x.who?", "+esc(x.who):""}${x.editedBy?` · исправил(а) ${esc(x.editedBy)}`:""}</span></button>`).join("")}</div>`
     : `<p class="hint">Аренда, зарплата, коммуналка и другие расходы не со склада. Внесите их кнопкой «+ Расход», чтобы видеть настоящую чистую прибыль.</p>`);
   L.innerHTML = html;
 }
@@ -2462,35 +2470,47 @@ $("#offForm").addEventListener("submit", async e=>{
   try { await commit("Предел расхода и списания", [{col:"settings", id:"offlim", after:x}]); $("#offDlg").close(); render(true); toast("Сохранено"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
-function openExp(){
-  $("#eCat").innerHTML = EXP_CATS.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
-  $("#eAmt").value = ""; $("#eNote").value = ""; $("#eDate").value = todayKey(); $("#eWho").value = lsGet("sklad.who");
+let expEdit = null;
+function openExp(id){
+  if (!isAdmin()) return;
+  const x = id ? S.expenses.find(y=>y.id===id) : null;
+  expEdit = x ? x.id : null;
+  const cats = x && x.category && !EXP_CATS.includes(x.category) ? [...EXP_CATS, x.category] : EXP_CATS;
+  $("#eCat").innerHTML = cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  $("#expTitle").textContent = x ? "Исправить расход" : "Расход";
+  $("#eCat").value = x ? x.category||"Прочее" : EXP_CATS[0];
+  $("#eAmt").value = x ? String(x.amount) : ""; $("#eNote").value = x ? x.note||"" : ""; $("#eDate").value = x ? dayKey(x.ts||0) : todayKey();
+  $("#eWhoLine").textContent = x ? `Записал(а): ${x.who||"—"}${x.editedBy?` · исправил(а) ${x.editedBy}`:""}` : `Записывает: ${whoNow()}`;
+  $("#expDel").hidden = !x;
   $("#expDlg").showModal(); $("#eAmt").focus();
 }
 $("#expForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const amt = numMoney($("#eAmt").value);
   if (!(amt>0)){ need($("#eAmt"), "Введите сумму больше нуля"); return; }
-  const who = $("#eWho").value.trim(); lsSet("sklad.who", who);
-  const d = $("#eDate").value, now = new Date();
-  const ts = d ? new Date(d+"T"+String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0")).getTime() : Date.now();
-  const x = {id:uid("e"), category:$("#eCat").value, amount:Math.round(amt*100)/100, note:$("#eNote").value.trim(), who, ts, createdAt:Date.now()};
-  try { await commit(`Расход: ${x.category}, ${money(x.amount)}`, [{col:"expenses", id:x.id, after:x}]); $("#expDlg").close(); render(); toast(`Расход внесён: ${x.category}, ${money(x.amount)}`); }
+  const old = expEdit ? S.expenses.find(y=>y.id===expEdit) : null;
+  if (expEdit && !old){ $("#expDlg").close(); return; }
+  const d = $("#eDate").value, t = old ? new Date(old.ts||Date.now()) : new Date();
+  const ts = old && d===dayKey(old.ts||0) ? old.ts : d ? new Date(d+"T"+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0")).getTime() : Date.now();
+  const f = {category:$("#eCat").value, amount:Math.round(amt*100)/100, note:$("#eNote").value.trim(), ts};
+  const x = old ? Object.assign({}, old, f, {editedBy:whoNow(), editedAt:Date.now()}) : Object.assign({id:uid("e")}, f, {who:whoNow(), createdAt:Date.now()});
+  try { await commit(`Расход: ${x.category}, ${money(x.amount)}`, [{col:"expenses", id:x.id, after:x}]); $("#expDlg").close(); render(); toast(old ? "Исправлено" : `Расход внесён: ${x.category}, ${money(x.amount)}`); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
+$("#expDel").addEventListener("click", async ()=>{
+  const x = S.expenses.find(y=>y.id===expEdit); if (!x || !isAdmin()) return;
+  if (!tConfirm(`Удалить расход «${x.category}» на ${money(x.amount)}?`)) return;
+  try { await commit(`Удалён расход: ${x.category}`, [{col:"expenses", id:x.id, after:null}]); $("#expDlg").close(); render(); toast("Расход удалён"); }
+  catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
+});
 document.addEventListener("click", async e=>{
-  const t = e.target.closest("[data-finp],[data-fins],#addExp,#openPromo,#openOff,[data-delexp]"); if (!t) return;
+  const t = e.target.closest("[data-finp],[data-fins],#addExp,#openPromo,#openOff,[data-exp]"); if (!t) return;
   if (t.dataset.finp){ S.finPeriod = t.dataset.finp; lsSet("sushi.finp", S.finPeriod); return render(true); }
   if (t.dataset.fins){ S.finSort = t.dataset.fins; return renderList(); }
-  if (t.id==="addExp") return openExp();
+  if (t.id==="addExp") return openExp(null);
   if (t.id==="openPromo") return openPromo();
   if (t.id==="openOff") return openOff();
-  if (t.dataset.delexp){
-    const x = S.expenses.find(y=>y.id===t.dataset.delexp); if (!x) return;
-    if (!tConfirm(`Удалить расход «${x.category}» на ${money(x.amount)}?`)) return;
-    try { await commit(`Удалён расход: ${x.category}`, [{col:"expenses", id:x.id, after:null}]); render(); toast("Расход удалён"); }
-    catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
-  }
+  if (t.dataset.exp) return openExp(t.dataset.exp);
 });
 document.addEventListener("change", e=>{
   if (e.target.id==="finFrom"){ S.finFrom = e.target.value; renderList(); }
@@ -2575,7 +2595,7 @@ function courOps(o, cancelId){
   if (ex){ if (Number(ex.amount)===fee && ex.note===note) return [];
     return [{col:"expenses", id:ex.id, after:Object.assign({}, ex, {amount:fee, note, editedBy:S.me?S.me.name:"", editedAt:Date.now()})}]; }
   const x = {id:"cour_"+o.id, cash:true, category:"Кассовые расходы", kind:"Курьер", note, amount:fee, orderId:o.id, orderNum:o.num, fromOrder:true,
-    who:S.me?S.me.name:lsGet("sklad.who"), whoId:S.me?S.me.id:"", ts:o.createdAt||Date.now(), createdAt:Date.now()};
+    who:whoNow(), whoId:S.me?S.me.id:"", ts:o.createdAt||Date.now(), createdAt:Date.now()};
   return [{col:"expenses", id:x.id, after:x}];
 }
 
@@ -2682,12 +2702,12 @@ $("#orderDlg").addEventListener("change", e=>{
   if (e.target.name==="otype"){ readODFields(); OD.type = e.target.value; renderODFields(); renderODLines(); }
   else if (e.target.id==="oDiscOn"){
     OD.discPct = null; $("#oDiscPct").value = "";
-    OD.discBy = e.target.checked ? (S.me ? S.me.name : lsGet("sklad.who")) : "";
+    OD.discBy = e.target.checked ? whoNow() : "";
     odTotal(); if (e.target.checked) $("#oDiscPct").focus();
   }
   else if (e.target.dataset.opromo!==undefined){
     const i = +e.target.dataset.opromo, l = OD.lines[i]; if (!l) return;
-    if (e.target.checked){ l.basePrice = Number(l.price)||0; l.price = null; l.promo = true; l.promoBy = S.me ? S.me.name : lsGet("sklad.who"); }
+    if (e.target.checked){ l.basePrice = Number(l.price)||0; l.price = null; l.promo = true; l.promoBy = whoNow(); }
     else { l.price = l.basePrice!=null ? Number(l.basePrice)||0 : itemPrice({kind:l.kind, id:l.id}); l.promo = false; delete l.basePrice; delete l.promoBy; }
     renderODLines();
     if (l.promo){ const inp = document.querySelector(`[data-oprice="${i}"]`); if (inp){ inp.focus(); inp.select(); } }
@@ -2812,7 +2832,7 @@ $("#orderForm").addEventListener("submit", async e=>{
   await saveOrder(ed, old);
 });
 async function saveOrder(ed, old, rmw){
-  const me = S.me ? S.me.name : lsGet("sklad.who"), now = Date.now(), log = [], ops = [];
+  const me = whoNow(), now = Date.now(), log = [], ops = [];
   if (old){
     const ch = oChange(oEdit(old), ed), late = ch.rm.length && ORD_LOCK.includes(old.status);
     // a dish taken out after the kitchen started: first the window asks why and whether it was already cooked
@@ -2832,7 +2852,7 @@ async function saveOrder(ed, old, rmw){
   if (log.length) logAdd(o, ...log);
   if (!(ed.discPct>0)){ delete o.discPct; delete o.discBy; }
   if (!(ed.courierFee>0)) delete o.courierFee;
-  if (!old){ const nn = await nextOrderNum(); o.id = uid("o"); o.num = nn.num; if (nn.tmp) o.numTmp = true; o.status = "new"; o.createdAt = Date.now(); o.who = lsGet("sklad.who"); }
+  if (!old){ const nn = await nextOrderNum(); o.id = uid("o"); o.num = nn.num; if (nn.tmp) o.numTmp = true; o.status = "new"; o.createdAt = Date.now(); o.who = whoNow(); }
   if ($("#oPrint").checked && o.status==="new"){ o.status = "cooking"; o.cookingAt = now; } // the kitchen ticket is printed: the kitchen starts
   o.total = orderTotal(o);
   ODsaving = true; // my own save comes back through the live list: not a change from another device
@@ -3028,7 +3048,7 @@ async function payOrder(){
   if (!o || !isOpen(o)){ $("#payDlg").close(); return orderStale(o, seen.num); }
   if (paySig(o)!==paySeen){ openPay(o.id); toast(`Заказ №${o.num} изменён на другом устройстве. Проверьте сумму и нажмите ещё раз.`); return; }
   // one sale per order: if two devices close the same order, they write the same documents instead of two sales
-  const {ing} = orderIng(o), batchId = "b" + o.id, ts = Date.now(), who = lsGet("sklad.who");
+  const {ing} = orderIng(o), batchId = "b" + o.id, ts = Date.now(), who = whoNow();
   const where = o.type==="hall" ? (o.table?`, стол ${o.table}`:"") : (o.name?`, ${o.name}`:"");
   const label = `Заказ №${o.num} (${OTYPES[o.type]}${where})`;
   const mvs = Object.entries(ing).map(([pid,q])=>({productId:pid, unit:byId(pid).unit, type:"sale", delta:-q, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id}));
@@ -3316,7 +3336,7 @@ function renderGate(){
       <label class="f">PIN-код, 4–6 цифр<input id="gsPin" type="password" inputmode="numeric" maxlength="6" required></label>
       <label class="f">Повторите PIN<input id="gsPin2" type="password" inputmode="numeric" maxlength="6" required></label>
       <button class="btn primary" type="submit">Создать и войти</button>
-      ${S.products.length ? "" : `<p class="hint" style="margin:6px 0 0">Или перенесите всё из прошлой версии — справочник, меню, рецепты, остатки и сотрудников с их PIN-кодами. Понадобится файл sushi-ym-data.json:</p><button class="btn" type="button" id="importOld">Перенести данные из старой программы</button>`}</form>`;
+      </form>`;
     $("#gsName").focus(); return;
   }
   const people = activeStaff().filter(x=>roleOf(x)===gateRole).sort((x,y)=>String(x.name).localeCompare(y.name,"ru"));
@@ -4115,7 +4135,7 @@ document.addEventListener("click", async e => {
     return;
   }
   if (t.id==="invSave"){
-    const who = lsGet("sklad.who"), items = {}; let n=0, bad=0, newer=0; const ops = [];
+    const who = whoNow(), items = {}; let n=0, bad=0, newer=0; const ops = [];
     for (const [pid, v] of Object.entries(S.invDraft)){ if (v==="") continue; const f = num(v); if (isNaN(f) || f<0){ bad++; continue; } items[pid] = f; }
     if (bad){ toast(`Проверьте числа: ${bad} поз. с ошибкой`); return; }
     const calc = invCalc(items, S.invAt, Date.now());
@@ -4130,10 +4150,12 @@ document.addEventListener("click", async e => {
     toast((bad ? `Сохранено: ${n}. Не удалось: ${bad} — проверьте числа и права.` : `Инвентаризация сохранена, изменено позиций: ${n}`) + (newer ? `. Не изменено (есть более свежий пересчёт): ${newer}` : ""));
   }
 });
+document.addEventListener("change", e => { if (e.target.id==="hday"){ S.histDay = e.target.value; S.histN = HIST_PAGE; renderList(); } });
+document.addEventListener("click", e => { if (e.target.closest("#histMore")){ S.histN += HIST_PAGE; renderList(); } });
 document.addEventListener("input", e => {
   const t = e.target;
   if (t.id==="q"){ S.q=t.value; renderList(); }
-  else if (t.id==="hq"){ S.histQ=t.value; renderList(); }
+  else if (t.id==="hq"){ S.histQ=t.value; S.histN=HIST_PAGE; renderList(); }
   else if (t.id==="sq"){ S.saleQ=t.value; renderList(); }
   else if (t.id==="mq"){ S.menuQ=t.value; renderList(); }
   else if (t.id==="iq"){ S.invQ=t.value; renderList(); }
@@ -4186,6 +4208,7 @@ Object.assign(I18N, {"Пересчитайте продукты и впишит�
 Object.assign(I18N, {"Нажмите на продукт — откроется его карточка: описание, рецепт и кнопки прихода, расхода и списания.": ["Tap a product to open its card: description, recipe and buttons for receipt, usage and write-off.", "Ürüne dokunun — kartı açılır: açıklama, reçete ve giriş, çıkış, fire düğmeleri."], "По учёту на складе меньше, чем": ["The records show less in stock than", "Kayda göre depoda şundan az var:"], "Проверьте количество.": ["Check the quantity.", "Miktarı kontrol edin."], "Всё равно списать?": ["Write off anyway?", "Yine de fire olarak düşülsün mü?"], "Всё равно записать расход?": ["Record the usage anyway?", "Yine de çıkış kaydedilsin mi?"], "достаточно": ["enough", "yeterli"]});
 Object.assign(I18N, {"стоимость": ["value", "değer"], "остаток": ["stock", "stok"], "закупка за": ["purchase per", "alış /"], "нет цены": ["no price", "fiyat yok"]});
 Object.assign(I18N, {"Списать блюда": ["Write off dishes", "Yemek fire"], "Списание блюд": ["Dish write-off", "Yemek firesi"], "Списано блюд сегодня": ["Dishes written off today", "Bugün fire verilen yemekler"], "Блюда не продаются: продукты спишутся со склада по техкартам, в выручку ничего не попадёт.": ["The dishes are not sold: products are taken from stock by the recipe cards, nothing goes into revenue.", "Yemekler satılmaz: ürünler reçetelere göre depodan düşülür, ciroya hiçbir şey yazılmaz."], "Для блюд, которые не продали: еда персонала, брак, дегустация. Нажимайте на блюда и сеты, потом «Списать…» — продукты спишутся по техкартам, в выручку ничего не попадёт.": ["For dishes that were not sold: staff meals, defects, tasting. Tap dishes and sets, then «Write off…» — products are taken by the recipe cards, nothing goes into revenue.", "Satılmayan yemekler için: personel yemeği, kusurlu, tadım. Yemek ve setlere dokunun, sonra «Fire…» — ürünler reçetelere göre düşülür, ciroya hiçbir şey yazılmaz."], "Причина списания": ["Write-off reason", "Fire nedeni"], "Персонал": ["Staff", "Personel"], "Брак, переделка": ["Defect, remake", "Kusurlu, yeniden yapım"], "Дегустация": ["Tasting", "Tadım"], "Например: обед Aysel; пересолили": ["E.g.: Aysel's lunch; too salty", "Örn.: Aysel'in öğle yemeği; çok tuzlu"], "Обязательно: что случилось": ["Required: what happened", "Zorunlu: ne oldu"], "Ничего не выбрано.": ["Nothing selected.", "Hiçbir şey seçilmedi."], "К списанию:": ["To write off:", "Fire verilecek:"], "Списать…": ["Write off…", "Fire…"], "Списать": ["Write off", "Fire ver"], "Списано:": ["Written off:", "Fire verildi:"], "По цене закупки:": ["At purchase price:", "Alış fiyatıyla:"], "Без техкарты, ничего не спишется:": ["No recipe card, nothing will be taken:", "Reçete yok, hiçbir şey düşülmeyecek:"], "Спишется со склада:": ["Will be taken from stock:", "Depodan düşülecek:"], "по некоторым не хватает остатка": ["not enough stock for some", "bazılarında stok yetmiyor"], "Выберите причину списания": ["Choose the write-off reason", "Fire nedenini seçin"], "Напишите, почему списываете": ["Write why you are writing it off", "Neden fire verdiğinizi yazın"], "На складе не хватает (сейчас → после списания):": ["Not enough in stock (now → after the write-off):", "Depoda yetmiyor (şimdi → fireden sonra):"], "По учёту этого на складе почти нет:": ["By the records there is almost none of this in stock:", "Kayda göre depoda bundan neredeyse yok:"], "Всё равно списать? Остаток уйдёт в минус.": ["Write off anyway? Stock will go below zero.", "Yine de fire verilsin mi? Stok eksiye düşecek."], "Это большое списание, запись попадёт админу на проверку. Сохранить?": ["This is a large write-off, the admin will review it. Save?", "Bu büyük bir fire, yönetici kontrol edecek. Kaydedilsin mi?"], "Не удалось сохранить списание. Проверьте права на изменение.": ["Could not save the write-off. Check your edit rights.", "Fire kaydedilemedi. Düzenleme yetkinizi kontrol edin."], "в т.ч. списание блюд": ["incl. dish write-offs", "dahil: yemek firesi"], "и неоплаченные заказы, списанные блюда": ["and unpaid orders, written-off dishes", "ve ödenmemiş siparişler, fire verilen yemekler"], "уже открыт заказ №": ["an order is already open #", "zaten açık sipariş #"], "Чтобы добавить блюда к нему, откройте его: блюда из этого окна перейдут туда.": ["To add dishes to it, open it: the dishes from this window move there.", "Ona yemek eklemek için açın: bu penceredeki yemekler oraya taşınır."], "Открыть заказ №": ["Open order #", "Siparişi aç #"], "Блюда добавлены в заказ №": ["Dishes added to order #", "Yemekler siparişe eklendi #"], "Проверьте и нажмите «Сохранить».": ["Check and press «Save».", "Kontrol edip «Kaydet»e basın."], "Всё равно открыть на этом столе второй заказ?": ["Open a second order at this table anyway?", "Yine de bu masada ikinci sipariş açılsın mı?"], "ждёт выдачи": ["waiting to be handed out", "teslim bekliyor"]});
+Object.assign(I18N, {"Перейти к дню": ["Go to day", "Güne git"], "Показано:": ["Shown:", "Gösterilen:"], "всего:": ["total:", "toplam:"], "Показать ещё": ["Show more", "Daha fazla göster"], "Исправить расход": ["Edit expense", "Gideri düzelt"], "Исправить или удалить": ["Edit or delete", "Düzelt veya sil"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
@@ -4704,29 +4727,7 @@ document.addEventListener("click", async e=>{
     if (!tConfirm("Отключить это устройство от базы ресторана? Для повторного подключения понадобятся почта и пароль.")) return;
     setMe(null); await firebase.auth().signOut(); location.reload();
   }
-  if (e.target.closest("#importOld")) importOld();
 });
-/* one-time import from the Claude version */
-async function importOld(){
-  if (S.products.length && !tConfirm("В базе уже есть продукты. Всё равно перенести данные из старой программы? Совпадающие записи будут перезаписаны.")) return;
-  if (S.me && !isAdmin()) return;
-  const btn = $("#importOld"); if (btn){ btn.disabled = true; btn.textContent = "Переношу…"; }
-  try {
-    const file = await new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = ".json,application/json"; i.onchange = () => res(i.files && i.files[0]); i.addEventListener("cancel", () => res(null)); i.click(); });
-    if (!file){ if (btn){ btn.disabled = false; btn.textContent = "Перенести данные из старой программы"; } return; }
-    const data = JSON.parse(await file.text());
-    if (!data || !data.products || !data.staff) throw new Error("not a SUSHI YM export");
-    let batch = FS.batch(), n = 0, total = 0;
-    for (const [col, docs] of Object.entries(data)){
-      for (const [id, d] of Object.entries(docs)){
-        batch.set(FS.doc(col+"/"+id), Object.assign(JSON.parse(JSON.stringify(d)), {upd: srvTs()})); n++; total++;
-        if (n>=400){ batch.commit().catch(writeErr); batch = FS.batch(); n = 0; }
-      }
-    }
-    if (n) batch.commit().catch(writeErr);
-    toast(`Перенесено записей: ${total}. Войдите своим PIN-кодом.`);
-  } catch(er){ console.error(er); toast("Это не тот файл. Выберите файл sushi-ym-data.json"); if (btn){ btn.disabled = false; btn.textContent = "Перенести данные из старой программы"; } }
-}
 /* online / offline indicator */
 function netChip(){ const c = $("#netChip"); if (c) c.hidden = navigator.onLine; }
 window.addEventListener("online", ()=>{ netChip(); toast("Интернет есть — данные синхронизируются"); setTimeout(fixNums, 3000); });
