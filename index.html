@@ -1065,7 +1065,7 @@ function renderControls(){
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
-    c.innerHTML = `<div class="controls"><input class="search" id="hq" type="search" placeholder="Фильтр по продукту или имени" value="${esc(S.histQ)}" aria-label="Фильтр истории"><label class="toggle">Перейти к дню <input type="date" id="hday" value="${esc(S.histDay)}" max="${todayKey()}"></label></div>`;
+    c.innerHTML = `<div class="controls"><input class="search" id="hq" type="search" placeholder="Фильтр по продукту или имени" value="${esc(S.histQ)}" aria-label="Фильтр истории"><label class="toggle">Перейти к дню <input type="date" id="hday" value="${esc(S.histDay)}" max="${calKey(Date.now())}"></label></div>`;
   } else if (S.view==="inv"){
     c.innerHTML = `<p class="hint" style="margin:0 0 10px">${isAdmin() ? "Пересчитайте продукты и впишите фактическое количество. Пустые поля не меняются. Так же вносятся начальные остатки в первый раз." : "Пересчитайте продукты и впишите, сколько есть на самом деле. Пустые поля не меняются. Админ сверит с учётом при утверждении."}</p>
       <div class="controls"><input class="search" id="iq" type="search" placeholder="Найти продукт" value="${esc(S.invQ)}" aria-label="Поиск продукта"></div>`;
@@ -2126,8 +2126,16 @@ const paidBy = (sl, m) => payParts(sl).reduce((a,x)=>a+(x.m===m?x.sum:0),0);
 const payText = o => Array.isArray(o.pays) && o.pays.length ? o.pays.map(x=>esc(x.m)+(showMoney()?" "+money(x.sum):"")).join(" + ") : esc(o.payment||"");
 const OVERDUE_MIN = 30;
 const money = n => (Math.round((Number(n)||0)*100)/100).toLocaleString(LOC(),{maximumFractionDigits:2}) + " ₺";
-const dayKey = ts => { const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+// the working day lasts until 06:00 in the morning: sales, orders, cash records and closing made after midnight belong to the day before.
+// calKey is the plain calendar day (History, shifts)
+const DAY_EDGE = 6;
+const calKey = ts => { const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+const dayKey = ts => { const d = new Date(ts); if (d.getHours() < DAY_EDGE) d.setDate(d.getDate()-1); return calKey(d.getTime()); };
 const todayKey = () => dayKey(Date.now());
+// start of a working day (06:00), and the moment on working day dk at the clock time of t (night hours fall on the next calendar date)
+const dayStart = dk => new Date(dk+"T"+String(DAY_EDGE).padStart(2,"0")+":00").getTime();
+const dayNext = dk => calKey(dayStart(dk) + 30*3600000);
+const dayAt = (dk, t) => { const d = new Date(t), x = new Date(dk+"T"+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")); if (d.getHours() < DAY_EDGE) x.setDate(x.getDate()+1); return x.getTime(); };
 // promo rules set by admin in Finance (settings/promo); no doc = everything allowed
 const PROMO_DEF = {id:"promo", on:true, itemOn:true, itemMin:0, ordOn:true, ordMin:1, ordMax:100};
 // each part (item = promo price per dish, ord = % off whole order) has its own dates and hours;
@@ -2226,8 +2234,10 @@ function stopOf(kind, id){
   return null;
 }
 const stopList = () => S.settings.filter(x=>x.id.startsWith("stop~")).map(x=>({m:x, src: x.kind==="set" ? setById(x.ref) : dishById(x.ref)})).filter(x=>x.src);
-const stopTxt = m => m.via ? `нет блюда: ${dn(dishById(m.via)||{name:"?"})}` : `закончилось${m.by ? " · " + m.by : ""}${m.ts ? ", " + hhmm(m.ts) : ""}`;
-const stopHtml = m => m.via ? `нет блюда: ${N(dn(dishById(m.via)||{name:"?"}))}` : `закончилось${m.by ? " · " + N(m.by) : ""}${m.ts ? ", " + hhmm(m.ts) : ""}`;
+// since when: the time today, the date when it was marked on an earlier day
+const stopWhen = m => !m.ts ? "" : dayKey(m.ts)===todayKey() ? hhmm(m.ts) : new Date(m.ts).toLocaleDateString(LOC(),{day:"numeric",month:"short"});
+const stopTxt = m => m.via ? `нет блюда: ${dn(dishById(m.via)||{name:"?"})}` : `закончилось${m.by ? " · " + m.by : ""}${m.ts ? ", " + stopWhen(m) : ""}`;
+const stopHtml = m => m.via ? `нет блюда: ${N(dn(dishById(m.via)||{name:"?"}))}` : `закончилось${m.by ? " · " + N(m.by) : ""}${m.ts ? ", " + stopWhen(m) : ""}`;
 async function toggleStop(kind, id){
   if (!can("stopList")) return;
   const src = kind==="set" ? setById(id) : dishById(id); if (!src) return;
@@ -2285,7 +2295,7 @@ function renderOrdersControls(c){
   c.innerHTML = (acts ? `<div class="actions oacts">${acts}</div>` : "") + `
     <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}${isAdmin() ? seg("rev", `На проверку${nRev?` (${nRev})`:""}`) : ""}${can("stopList") ? seg("stop", `Стоп-лист${nStop?` (${nStop})`:""}`) : ""}
       ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}${bellBtn()}</div>`;
-  if (S.ordView==="open" && nStop) c.innerHTML += `<div class="ostop"><b>Стоп-лист:</b> ${N(stops.map(x=>dn(x.src)).join(", "))}</div>`;
+  if (S.ordView==="open" && nStop) c.innerHTML += `<div class="ostop"><b>Стоп-лист:</b> ${stops.map(x=>N(dn(x.src)) + (x.m.ts && dayKey(x.m.ts)!==todayKey() ? ` <small class="hint">(отмечено ${stopWhen(x.m)})</small>` : "")).join(", ")}</div>`;
   if (S.ordView==="stop") c.innerHTML += `<div class="controls"><input class="search" id="sq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.saleQ)}" aria-label="Поиск блюда"></div>
       <p class="hint" style="margin:0 0 10px">Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.</p>`;
   const dup = isAdmin() ? dupSales() : [];
@@ -2406,6 +2416,7 @@ function renderReport(L){
       <div><span>Кассовые расходы <small class="hint">(${cashList.length})</small></span><b>${cashOut ? "− "+money(cashOut) : money(0)}</b></div>
       <div class="subtot"><span>Должно остаться в кассе <small class="hint">без учёта размена на начало дня</small></span><b>${money(cashIn-cashOut)}</b></div></div>
     ${dayCloseHtml(dk)}
+    ${(()=>{ const dm = dayMoney(dk); return dm.nTransfer ? `<h2 class="cat"><span>Переводы на счёт</span></h2><div class="sum"><div><span>${esc(`Переводом за день, заказов: ${dm.nTransfer}`)} <small class="hint">сверьте с выпиской банка</small></span><b>${money(dm.transfer)}</b></div></div>` : ""; })()}
     ${cour.length ? `<p class="hint">${esc(`Доставка за день (заказов: ${cour.length}): ${money(courSum)}. Это деньги курьера: в выручку и средний чек не входят.`)}</p>` : ""}
     ${noPay.length ? `<p class="hint">Быстрые продажи (${noPay.length}, ${money(noPaySum)}) сюда не входят: у них не указан способ оплаты.</p>` : ""}
     ${cashList.length ? `<details class="det"><summary>Кассовые расходы за день</summary><div class="list" style="margin-top:8px">${cashList.map(x=>cashRow(x)).join("")}</div></details>` : ""}
@@ -2427,20 +2438,20 @@ function renderReport(L){
 /* ----- finance ----- */
 const EXP_CATS = ["Аренда","Зарплата","Коммунальные услуги","Комиссия агрегаторов","Реклама","Налоги","Хозтовары","Ремонт и обслуживание","Прочее"];
 const FIN_PERIODS = [["today","Сегодня"],["week","7 дней"],["month","Этот месяц"],["prev","Прошлый месяц"],["custom","Период"],["all","Всё время"]];
+// working days: each one from 06:00 to 06:00 of the next morning
 function finRange(){
-  const now = new Date(), sod = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const end = sod(now) + 864e5;
+  const tk = todayKey(), end = dayStart(dayNext(tk)), ym = tk.slice(0,7);
   switch (S.finPeriod){
-    case "today": return [sod(now), end];
+    case "today": return [dayStart(tk), end];
     case "week": return [end - 7*864e5, end];
-    case "prev": return [new Date(now.getFullYear(), now.getMonth()-1, 1).getTime(), new Date(now.getFullYear(), now.getMonth(), 1).getTime()];
+    case "prev": return [dayStart(ymShift(ym,-1)+"-01"), dayStart(ym+"-01")];
     case "custom": {
-      const f = S.finFrom ? new Date(S.finFrom+"T00:00").getTime() : 0;
-      const t = S.finTo ? new Date(S.finTo+"T00:00").getTime() + 864e5 : end;
+      const f = S.finFrom ? dayStart(S.finFrom) : 0;
+      const t = S.finTo ? dayStart(dayNext(S.finTo)) : end;
       return [f, t];
     }
     case "all": return [0, Infinity];
-    default: return [new Date(now.getFullYear(), now.getMonth(), 1).getTime(), end];
+    default: return [dayStart(ym+"-01"), end];
   }
 }
 const finSaleTotal = saleFood;
@@ -2491,7 +2502,7 @@ function renderFin(L){
   }
   const cogs = sumBy.sale, writeOff = sumBy.off, manualOut = sumBy.out, invLoss = sumBy.inv; // invLoss >0 shortage, <0 surplus
   // courier fees of delivered orders are neither revenue nor expense; a written-off order's courier stays an expense (paid, but the customer did not pay)
-  const expsAll = [...S.expenses.filter(x=>inR(x.ts)), ...monthlyAutoIn(t0, t1)].sort((a,b)=>(b.ts||0)-(a.ts||0));
+  const expsAll = [...S.expenses.filter(x=>inR(x.monthly ? monTs(x) : x.ts)), ...monthlyAutoIn(t0, t1)].sort((a,b)=>(b.ts||0)-(a.ts||0));
   const exps = expsAll.filter(x=>!courPass(x)), courSum = sales.reduce((a,sl)=>a+(Number(sl.courierFee)||0),0), courN = sales.filter(sl=>Number(sl.courierFee)>0).length;
   const expTotal = exps.reduce((a,x)=>a+(Number(x.amount)||0),0);
   const gross = revenue - cogs;
@@ -2542,8 +2553,9 @@ function renderFin(L){
       ${line("Чистая прибыль", money(net), "total "+(net<0?"minus":"plus"))}
     </div>
     ${(()=>{ const cl = S.settings.filter(x=>x.kind==="dayClose" && inR(new Date(x.day+"T12:00").getTime())); if (!cl.length) return "";
-      const sum = k => r2(cl.reduce((a,x)=>a+(Number(x[k])||0),0)), d = sum("cashDiff"), c = sum("cardDiff");
-      return `<p class="hint">Закрытие дня за период (дней: ${cl.length}): наличные — ${diffTxt(d)}, карты — ${diffTxt(c)}. В прибыль не входит, для сведения.</p>`; })()}
+      const sum = k => r2(cl.reduce((a,x)=>a+(Number(x[k])||0),0)), d = sum("cashDiff"), c = sum("cardDiff"), tk = cl.filter(x=>x.take!=null);
+      return `<p class="hint">Закрытие дня за период (дней: ${cl.length}): наличные — ${diffTxt(d)}, карты — ${diffTxt(c)}. В прибыль не входит, для сведения.</p>`
+        + (tk.length ? `<p class="hint">${esc(`Забрали из кассы за период (дней: ${tk.length}): ${money(sum("take"))}.`)}</p>` : ""); })()}
     ${courN ? `<p class="hint">${esc(`Доставка за период (заказов: ${courN}): ${money(courSum)}. Это деньги курьера: клиент платит их вместе с заказом, курьер забирает их из кассы. В выручку, средний чек и расходы не входят.`)}</p>` : ""}
     <p class="hint">Закуплено продуктов за период: <b>${money(sumBy.in)}</b>. Закупки не вычитаются из прибыли сразу — в расход идёт только то, что продано, списано или ушло в недостачу.${(()=>{ const v = stockValue(); return v.sum>0 ? ` Сейчас на складе продуктов на ${money(v.sum)}.` : ""; })()}</p>
     <p class="hint">Себестоимость и списания считаются по цене закупки на день продажи или списания.${oldPrice.size ? ` Записей без сохранённой цены за период: ${oldPrice.size}. Они сделаны до этого обновления или когда цены закупки ещё не было — считаются по текущей цене.` : ""}</p>
@@ -2636,7 +2648,7 @@ $("#expForm").addEventListener("submit", async e=>{
   const old = expEdit ? S.expenses.find(y=>y.id===expEdit) : null;
   if (expEdit && !old){ $("#expDlg").close(); return; }
   const d = $("#eDate").value, t = old ? new Date(old.ts||Date.now()) : new Date();
-  const ts = old && d===dayKey(old.ts||0) ? old.ts : d ? new Date(d+"T"+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0")).getTime() : Date.now();
+  const ts = old && d===dayKey(old.ts||0) ? old.ts : d ? dayAt(d, t) : Date.now();
   const f = {category:$("#eCat").value, amount:Math.round(amt*100)/100, note:$("#eNote").value.trim(), ts};
   const x = old ? Object.assign({}, old, f, {editedBy:whoNow(), editedAt:Date.now()}) : Object.assign({id:uid("e")}, f, {who:whoNow(), createdAt:Date.now()});
   try { await commit(`Расход: ${x.category}, ${money(x.amount)}`, [{col:"expenses", id:x.id, after:x}]); $("#expDlg").close(); render(); toast(old ? "Исправлено" : `Расход внесён: ${x.category}, ${money(x.amount)}`); }
@@ -2712,7 +2724,7 @@ $("#cashForm").addEventListener("submit", async e=>{
   const old = cashEdit ? S.expenses.find(y=>y.id===cashEdit) : null;
   if (cashEdit && (!old || !canEditCash(old))){ $("#cashDlg").close(); return; }
   let ts = old ? old.ts : Date.now();
-  if (isAdmin()){ const d = $("#cDate").value; if (d && d!==dayKey(ts)){ const t = new Date(ts); ts = new Date(d+"T"+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0")).getTime(); } }
+  if (isAdmin()){ const d = $("#cDate").value; if (d && d!==dayKey(ts)) ts = dayAt(d, ts); }
   const amount = Math.round(amt*100)/100;
   const x = old ? Object.assign({}, old, {kind, note, amount, ts, editedBy:S.me.name, editedAt:Date.now()})
     : {id:uid("c"), cash:true, category:"Кассовые расходы", kind, note, amount, who:S.me.name, whoId:S.me.id, ts, createdAt:Date.now()};
@@ -2739,16 +2751,18 @@ const r2 = n => Math.round((Number(n)||0)*100)/100;
 const closeOf = dk => S.settings.find(x=>x.id==="close_"+dk);
 function dayMoney(dk){
   const sales = S.sales.filter(x=>dayKey(x.ts||0)===dk), by = m => r2(sales.reduce((a,sl)=>a+paidBy(sl,m),0));
-  return {cashIn:by("Наличные"), cashOut:r2(cashSums(cashOfDay(dk)).total), card:by("Карта"), nCard:sales.filter(sl=>paidBy(sl,"Карта")>0).length, transfer:by("Перевод")};
+  return {cashIn:by("Наличные"), cashOut:r2(cashSums(cashOfDay(dk)).total), card:by("Карта"), nCard:sales.filter(sl=>paidBy(sl,"Карта")>0).length,
+    transfer:by("Перевод"), nTransfer:sales.filter(sl=>paidBy(sl,"Перевод")>0).length};
 }
-// размен: what was in the till in the morning; by default the same as at the last closing
-const lastFloat = dk => { const r = S.settings.filter(x=>x.kind==="dayClose" && x.day<dk && x.float!=null).sort((a,b)=>a.day<b.day?1:-1)[0]; return r ? Number(r.float)||0 : null; };
+// размен: what was in the till in the morning — what was left at the last closing (С2), or its размен when that was not written
+const lastFloat = dk => { const r = S.settings.filter(x=>x.kind==="dayClose" && x.day<dk && (x.left!=null || x.float!=null)).sort((a,b)=>a.day<b.day?1:-1)[0];
+  return r ? Number(r.left!=null ? r.left : r.float)||0 : null; };
 function dayOpen(){
   return {orders:S.orders.filter(isOpen).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)), shifts:S.shifts.filter(x=>!x.end && x.start),
     req:S.orders.filter(voidReqOf).length, drafts:S.invdrafts.filter(x=>x.status!=="done").length, rev:isAdmin() ? revItems().length : 0};
 }
 const diffTxt = d => Math.abs(d)<0.005 ? `<b class="okc">сходится</b>` : d<0 ? `<b class="neg">недостача ${money(-d)}</b>` : `<b class="okc">излишек ${money(d)}</b>`;
-let dayDk = "", daySaving = false;
+let dayDk = "", daySaving = false, dayPair = "";
 function openDay(dk){
   if (!S.me || !can("orderPay")) return;
   dayDk = isAdmin() && dk ? dk : todayKey();
@@ -2766,18 +2780,30 @@ function openDay(dk){
       ${op.rev ? bad(`На проверку: ${op.rev}`, "«Продажи» → «На проверку».") : ""}</div>`;
   }
   const fl = rec ? rec.float : lastFloat(dayDk), v = x => x==null ? "" : String(x);
+  // С3: the stop-list is asked about at closing, so that the morning does not start with dishes marked out
+  const stops = today && can("stopList") ? stopList() : [];
+  const stopBox = stops.length ? `<div class="box"><h4>Снять стоп-лист на завтра?</h4>
+      <p class="hint" style="margin:0 0 6px">Отметьте блюда, которые завтра снова будут: метка снимется. Неотмеченные останутся в стоп-листе.</p>
+      ${stops.map(x=>`<label class="toggle" style="color:var(--ink)"><input type="checkbox" data-unstop="${esc(x.m.id)}"> ${N(dn(x.src))}${x.m.kind==="set"?" (сет)":""} <small class="hint">${esc(x.m.ts ? stopWhen(x.m) : "")}${x.m.by ? " · " + N(x.m.by) : ""}</small></label>`).join("")}
+      ${stops.length>1 ? `<div><button type="button" class="btn small" data-unstopall>Отметить все</button></div>` : ""}</div>` : "";
+  dayPair = "";
   $("#dayBody").innerHTML = `${rec ? `<div class="oreq">${esc(`День уже закрыт: ${rec.who||""}, ${hhmm(rec.ts||0)}.`)} Если закрыть ещё раз, запись заменится${adm ? "" : " (админ увидит обе)"}.</div>` : ""}
     ${chk}
     <div class="box"><h4>Наличные в кассе</h4>
       <p class="hint" style="margin:0">${adm ? "Пересчитайте все деньги в кассе вместе с разменом." : "Пересчитайте все деньги в кассе вместе с разменом и впишите сумму. Сколько должно быть, программа не показывает: разницу увидит админ."}</p>
       <div class="two daytwo"><label class="f">Размен утром, ₺<input id="dcFloat" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(fl))}"></label>
         <label class="f">Сейчас в кассе, всего ₺<input id="dcCash" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(rec && rec.cash))}"></label></div>
-      ${adm ? `<div class="sum" id="dcCashRes"></div>` : ""}</div>
+      ${adm ? `<div class="sum" id="dcCashRes"></div>` : ""}
+      <div class="two daytwo"><label class="f">Забрали из кассы, ₺<input id="dcTake" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(rec && rec.take))}"></label>
+        <label class="f">Оставили на размен, ₺<input id="dcLeft" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(rec && rec.left))}"></label></div>
+      <p class="hint" style="margin:0">Сколько денег забрали из кассы и сколько оставили на завтра. Достаточно вписать одно: второе посчитается. Завтра «Размен утром» подставится сам.</p></div>
     <div class="box"><h4>Терминал карт</h4>
       <label class="f">Итог по терминалу за день, ₺<input id="dcCard" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(rec && rec.card))}"></label>
       <p class="hint" style="margin:0">Сумма из отчёта терминала за день. Если по карте сегодня не платили — оставьте пусто.</p>
       ${adm ? `<div class="sum" id="dcCardRes"></div>` : ""}</div>
+    ${stopBox}
     <label class="f">Комментарий<textarea id="dcNote" rows="2" placeholder="Например: почему не сходится">${esc(rec && rec.note || "")}</textarea></label>
+    <p class="hint" style="margin:0">Рабочий день длится до 06:00 утра: всё, что продано после полуночи, входит в этот день.</p>
     <p class="hint" style="margin:0">${esc(`Закрывает: ${S.me.name}`)}</p>`;
   dayCalc();
   if (!$("#dayDlg").open) $("#dayDlg").showModal();
@@ -2795,7 +2821,17 @@ function dayCalc(){
   $("#dcCardRes").innerHTML = `<div><span>По карте в программе <small class="hint">(${dm.nCard})</small></span><b>${money(dm.card)}</b></div>
     ${tv && !isNaN(card) ? `<div><span>Разница</span>${diffTxt(r2(card-dm.card))}</div>` : ""}`;
 }
-document.addEventListener("input", e=>{ if (["dcFloat","dcCash","dcCard"].includes(e.target.id)) dayCalc(); });
+document.addEventListener("input", e=>{
+  const id = e.target.id; if (!["dcFloat","dcCash","dcCard","dcTake","dcLeft"].includes(id)) return;
+  // С2: taken + left = what is in the till; the one typed last fills the other
+  if (id==="dcTake" || id==="dcLeft") dayPair = e.target.value.trim() ? id : "";
+  if ((id==="dcCash" || id==="dcTake" || id==="dcLeft") && dayPair){
+    const cash = numMoney($("#dcCash").value), a = numMoney($("#"+dayPair).value), other = $(dayPair==="dcTake" ? "#dcLeft" : "#dcTake");
+    other.value = $("#dcCash").value.trim() && cash>=0 && a>=0 && a<=cash ? String(r2(cash-a)) : "";
+  }
+  dayCalc();
+});
+document.addEventListener("click", e=>{ if (!e.target.closest("[data-unstopall]")) return; document.querySelectorAll("#dayBody [data-unstop]").forEach(c=>{ c.checked = true; }); });
 UNSAVED.dayDlg = () => !daySaving && !!$("#dcCash") && !!$("#dcCash").value.trim() && !closeOf(dayDk);
 $("#dayForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(saveDay); });
 async function saveDay(){
@@ -2805,15 +2841,25 @@ async function saveDay(){
   if (fv && !(fl>=0)){ need($("#dcFloat"), "Введите размен числом или оставьте пусто"); return; }
   if (!cv || !(cash>=0)){ need($("#dcCash"), "Впишите, сколько всего денег в кассе (можно 0)"); return; }
   if (tv && !(card>=0)){ need($("#dcCard"), "Введите сумму числом или оставьте пусто"); return; }
+  const kv = $("#dcTake").value.trim(), lv = $("#dcLeft").value.trim();
+  let take = kv ? numMoney(kv) : null, left = lv ? numMoney(lv) : null;
+  if (kv && !(take>=0)){ need($("#dcTake"), "Введите сумму числом или оставьте пусто"); return; }
+  if (lv && !(left>=0)){ need($("#dcLeft"), "Введите сумму числом или оставьте пусто"); return; }
+  if (take!=null && left==null) left = r2(cash - take);
+  if (left!=null && take==null) take = r2(cash - left);
+  if (take!=null && (left < 0 || take < 0 || Math.abs(take + left - cash) >= 0.005)){ need($(kv ? "#dcTake" : "#dcLeft"), `Забрали и оставили на размен вместе — столько, сколько в кассе: ${money(cash)}`); return; }
+  const unstop = [...document.querySelectorAll("#dayBody [data-unstop]:checked")].map(c=>c.dataset.unstop).filter(id=>S.settings.some(x=>x.id===id));
   const dk = dayDk, dm = dayMoney(dk), op = dk===todayKey() ? dayOpen() : null;
   if (op && op.orders.length && !tConfirm(`Открытых заказов: ${op.orders.length}. Их деньги не войдут в этот день. Всё равно закрыть день?`)) return;
   const old = closeOf(dk), exp = r2(fl + dm.cashIn - dm.cashOut), ts = Date.now();
   const x = {id:"close_"+dk, kind:"dayClose", day:dk, ts, who:S.me.name, whoId:S.me.id, float:r2(fl), cash:r2(cash), cashIn:dm.cashIn, cashOut:dm.cashOut, cashExp:exp, cashDiff:r2(cash-exp),
-    card:card==null ? null : r2(card), cardExp:dm.card, cardDiff:card==null ? null : r2(card-dm.card), transfer:dm.transfer, note:$("#dcNote").value.trim()};
+    card:card==null ? null : r2(card), cardExp:dm.card, cardDiff:card==null ? null : r2(card-dm.card), transfer:dm.transfer, nTransfer:dm.nTransfer,
+    take:take==null ? null : r2(take), left:left==null ? null : r2(left), note:$("#dcNote").value.trim()};
+  if (unstop.length) x.unstop = unstop.length;
   if (op) x.open = {orders:op.orders.length, shifts:op.shifts.map(sh=>sh.name||""), req:op.req, drafts:op.drafts};
   if (old) x.hist = [...(old.hist||[]), {who:old.who||"", ts:old.ts||0, cash:old.cash, cashDiff:old.cashDiff, card:old.card==null ? null : old.card, cardDiff:old.cardDiff==null ? null : old.cardDiff}].slice(-10);
   daySaving = true;
-  try { await commit(`Закрытие дня ${dmy(dk)}`, [{col:"settings", id:x.id, after:x}]); $("#dayDlg").close(); render(); toast(isAdmin() ? `День закрыт. Наличные: ${Math.abs(x.cashDiff)<0.005 ? "сходится" : (x.cashDiff<0 ? "недостача " : "излишек ")+money(Math.abs(x.cashDiff))}` : "День закрыт. Спасибо! Итоги увидит админ."); }
+  try { await commit(`Закрытие дня ${dmy(dk)}`, [{col:"settings", id:x.id, after:x}, ...unstop.map(id=>({col:"settings", id, after:null}))]); $("#dayDlg").close(); render(); toast((isAdmin() ? `День закрыт. Наличные: ${Math.abs(x.cashDiff)<0.005 ? "сходится" : (x.cashDiff<0 ? "недостача " : "излишек ")+money(Math.abs(x.cashDiff))}` : "День закрыт. Спасибо! Итоги увидит админ.") + (unstop.length ? ` Снято со стоп-листа: ${unstop.length}.` : "")); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
   finally { daySaving = false; }
 }
@@ -2835,6 +2881,7 @@ function dayCloseHtml(dk){
       <div><span>По карте в программе</span><b>${money(rec.cardExp)}</b></div>
       <div><span>По терминалу</span><b>${rec.card==null ? "не введено" : money(rec.card)}</b></div>
       ${rec.card==null ? "" : `<div class="subtot"><span>Карты</span>${diffTxt(Number(rec.cardDiff)||0)}</div>`}
+      ${rec.take!=null ? `<div><span>Забрали из кассы</span><b>${money(rec.take)}</b></div><div><span>Оставили на размен</span><b>${money(rec.left)}</b></div>` : ""}
       ${rec.note ? `<div><span>Комментарий: ${N(rec.note)}</span></div>` : ""}</div>
     ${moved ? `<p class="hint">После закрытия дня суммы изменились: сейчас в кассе должно быть ${money(live)}, по карте ${money(dm.card)}. Например, закрыли ещё заказ или исправили кассовый расход.</p>` : ""}
     ${(rec.hist||[]).length ? `<p class="hint">${esc("Закрывали раньше: " + rec.hist.map(h=>`${h.who||""} ${hhmm(h.ts||0)}`).join("; "))} — ${rec.hist.map(h=>`наличные ${h.cashDiff==null?"—":(h.cashDiff<0?"−":"+")+money(Math.abs(h.cashDiff))}${h.cardDiff==null?"":`, карты ${(h.cardDiff<0?"−":"+")+money(Math.abs(h.cardDiff))}`}`).join("; ")}</p>` : ""}
@@ -3006,7 +3053,9 @@ $("#orderDlg").addEventListener("click", e=>{
 // online: the number is reserved on the server (settings/ordnum keeps the numbers given out per day);
 // offline: the device takes the next number it knows and marks it numTmp; back online the number is checked on the server
 // and, if another order already has it, the order gets the next free one (numWas keeps the old one, it is on the kitchen ticket)
-const dayNums = (day, skip) => S.orders.filter(o=>o.id!==skip && dayKey(o.createdAt||0)===day).map(o=>Number(o.num)||0);
+// numbering day of an order: the working day (nday, kept from the start); orders made before it existed counted by the calendar day
+const numDay = o => o.nday || calKey(o.createdAt||0);
+const dayNums = (day, skip) => S.orders.filter(o=>o.id!==skip && numDay(o)===day).map(o=>Number(o.num)||0);
 async function onumTx(fn){
   if (!FS || !navigator.onLine) throw new Error("offline");
   const ref = FS.collection("settings").doc("ordnum");
@@ -3020,16 +3069,16 @@ async function onumTx(fn){
 }
 async function nextOrderNum(){
   const tk = todayKey(), known = dayNums(tk);
-  try { return {num: await onumTx((t, days) => { const used = days[tk]||[], n = Math.max(0, ...used, ...known) + 1; days[tk] = [...used, n]; return n; })}; }
-  catch(e){ if (e.message!=="offline") console.warn("order number", e); return {num: Math.max(0, ...known) + 1, tmp: !!FS}; }
+  try { return {num: await onumTx((t, days) => { const used = days[tk]||[], n = Math.max(0, ...used, ...known) + 1; days[tk] = [...used, n]; return n; }), day:tk}; }
+  catch(e){ if (e.message!=="offline") console.warn("order number", e); return {num: Math.max(0, ...known) + 1, tmp: !!FS, day:tk}; }
 }
 async function fixNum(o){
-  const day = dayKey(o.createdAt||0), ref = FS.collection("orders").doc(o.id);
+  const day = numDay(o), ref = FS.collection("orders").doc(o.id);
   const r = await onumTx(async (t, days) => {
     const d = await t.get(ref); if (!d.exists) return null; // not on the server yet
     const x = d.data(); if (!x.numTmp) return null;
     const num = Number(x.num)||0, used = days[day]||[], ts = x.createdAt||0;
-    const taken = used.includes(num) || S.orders.some(y=>y.id!==o.id && dayKey(y.createdAt||0)===day && Number(y.num)===num
+    const taken = used.includes(num) || S.orders.some(y=>y.id!==o.id && numDay(y)===day && Number(y.num)===num
       && (!y.numTmp || (y.createdAt||0) < ts || ((y.createdAt||0)===ts && y.id < o.id)));
     if (!taken){ days[day] = [...used, num]; t.update(ref, {numTmp:false, upd: srvTs()}); return {num}; }
     const n = Math.max(0, ...used, ...dayNums(day, o.id), num) + 1; days[day] = [...used, n];
@@ -3055,7 +3104,7 @@ async function fixNums(){
 // the same number on one day (made before this check existed): shown to the admin
 function dupNums(){
   const by = {};
-  for (const o of S.orders) if (!o.numTmp && o.num) (by[dayKey(o.createdAt||0)+"|"+o.num] = by[dayKey(o.createdAt||0)+"|"+o.num]||[]).push(o);
+  for (const o of S.orders) if (!o.numTmp && o.num) (by[numDay(o)+"|"+o.num] = by[numDay(o)+"|"+o.num]||[]).push(o);
   return Object.entries(by).filter(([,a])=>a.length>1).map(([k,a])=>({day:k.split("|")[0], num:a[0].num, n:a.length})).sort((p,q)=>p.day<q.day ? 1 : -1);
 }
 $("#orderForm").addEventListener("submit", async e=>{
@@ -3110,7 +3159,7 @@ async function saveOrder(ed, old, rmw){
   if (log.length) logAdd(o, ...log);
   if (!(ed.discPct>0)){ delete o.discPct; delete o.discBy; }
   if (!(ed.courierFee>0)) delete o.courierFee;
-  if (!old){ const nn = await nextOrderNum(); o.id = uid("o"); o.num = nn.num; if (nn.tmp) o.numTmp = true; o.status = "new"; o.createdAt = Date.now(); o.who = whoNow(); }
+  if (!old){ const nn = await nextOrderNum(); o.id = uid("o"); o.num = nn.num; o.nday = nn.day; if (nn.tmp) o.numTmp = true; o.status = "new"; o.createdAt = Date.now(); o.who = whoNow(); }
   if ($("#oPrint").checked && o.status==="new"){ o.status = "cooking"; o.cookingAt = now; } // the kitchen ticket is printed: the kitchen starts
   o.total = orderTotal(o);
   ODsaving = true; // my own save comes back through the live list: not a change from another device
@@ -4252,12 +4301,14 @@ function monthlyAuto(cat, ym){
   if (cat==="Зарплата"){ const sl = salaryByShifts(ym); return sl.sum>0 ? {amount:sl.sum, hrs:sl.hrs, noRate:sl.noRate} : null; }
   return null;
 }
+// a monthly entry belongs to the working day of the 1st (its ts is 00:00 of the 1st, before 06:00)
+const monTs = x => x.month ? dayStart(x.month+"-01") : (x.ts||0);
 // auto entries for the months whose 1st day falls in [t0,t1) — same rule as saved monthly entries
 function monthlyAutoIn(t0, t1){
   const out = [], now = ymOf(Date.now());
   const first = Math.min(...S.expenses.filter(x=>x.monthly).map(x=>ymStart(x.month||ymOf(x.ts||Date.now()))), ...S.shifts.map(sh=>sh.start||Date.now()), Date.now());
-  for (let ym = ymOf(Math.max(t0, first)); ym <= now && ymStart(ym) < t1; ym = ymShift(ym, 1)){
-    if (ymStart(ym) < t0) continue;
+  for (let ym = ymOf(Math.max(t0, first)); ym <= now && dayStart(ym+"-01") < t1; ym = ymShift(ym, 1)){
+    if (dayStart(ym+"-01") < t0) continue;
     for (const cat of ["Аренда","Зарплата"]){ const a = monthlyAuto(cat, ym); if (a) out.push({category:cat, amount:a.amount, ts:ymStart(ym), month:ym, auto:true}); }
   }
   return out;
@@ -4559,6 +4610,7 @@ Object.assign(I18N, {"Нал + карта": ["Cash + card", "Nakit + kart"], "Н
 Object.assign(I18N, {"Удержание с оплаты картой": ["Card payment deduction", "Kartlı ödeme kesintisi"], "КДВ и комиссия банка. В «Финансах» вычитается из суммы, которую клиенты заплатили картой.": ["VAT (KDV) and the bank commission. In «Finance» it is taken off the amount customers paid by card.", "KDV ve banka komisyonu. «Finans» bölümünde müşterilerin kartla ödediği tutardan düşülür."], "Удерживается, % от оплаты картой": ["Deducted, % of card payments", "Kesinti, kartlı ödemenin %'si"], "КДВ 10% + комиссия банка. Точную комиссию видно в выписке банка: сравните итог терминала за день с суммой, которая пришла на счёт. 0 — не вычитать.": ["VAT (KDV) 10% + bank commission. The exact commission is in the bank statement: compare the terminal's day total with the amount that reached the account. 0 — do not deduct.", "KDV %10 + banka komisyonu. Kesin komisyon banka ekstresinde görünür: terminalin gün toplamını hesaba geçen tutarla karşılaştırın. 0 — düşme."], "Удержание с карт": ["Card deduction", "Kart kesintisi"], "С оплаты картой вычитается": ["Deducted from card payments:", "Kartlı ödemelerden düşülen:"], "(КДВ и комиссия банка).": ["(VAT (KDV) and bank commission).", "(KDV ve banka komisyonu)."], "Удержание с оплат картой": ["Card payment deductions", "Kartlı ödeme kesintileri"], "КДВ и комиссия банка": ["VAT (KDV) and bank commission", "KDV ve banka komisyonu"], "оплачено картой": ["paid by card", "kartla ödenen"], "удержание": ["deduction", "kesinti"], "Введите процент от 0 до 100": ["Enter a percentage from 0 to 100", "0 ile 100 arasında bir yüzde girin"]});
 Object.assign(I18N, {"Стоп-лист": ["Stop list", "Tükenenler"], "Сейчас в стоп-листе": ["In the stop list now", "Şu an tükenenler"], "в стоп-листе": ["in the stop list", "tükenenlerde"], "закончилось": ["sold out", "tükendi"], "в продаже": ["available", "satışta"], "нет блюда:": ["dish out:", "tükenen yemek:"], "снова есть": ["is available again", "yeniden var"], "Снова есть": ["Available again", "Yeniden var"], "Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.": ["Tap a dish or set that has run out: in «New order» it turns grey and cannot be added. When it is available again, tap it once more.", "Tükenen yemeğe veya sete dokunun: «Yeni sipariş» ekranında gri olur ve eklenemez. Yeniden olduğunda bir kez daha dokunun."], "в стоп-листе: в «Новом заказе» оно серое": ["is in the stop list: it is grey in «New order»", "tükenenlerde: «Yeni sipariş» ekranında gri"], "В сете есть блюдо": ["The set contains the dish", "Sette şu yemek var:"], "оно закончилось. Снимите метку с этого блюда.": ["it has run out. Take the mark off that dish.", "tükendi. İşareti o yemekten kaldırın."], "Снять метку: Продажи → Стоп-лист.": ["To take the mark off: Sales → Stop list.", "İşareti kaldırmak için: Satışlar → Tükenenler."], "Не удалось сохранить. Проверьте интернет.": ["Could not save. Check the internet connection.", "Kaydedilemedi. İnternet bağlantısını kontrol edin."], "Звук новых заказов: вкл": ["New order sound: on", "Yeni sipariş sesi: açık"], "Звук новых заказов: выкл": ["New order sound: off", "Yeni sipariş sesi: kapalı"], "Коснитесь экрана, чтобы включить звук": ["Touch the screen to turn the sound on", "Sesi açmak için ekrana dokunun"], "Звук при новом заказе — только на этом устройстве": ["Sound on a new order — on this device only", "Yeni siparişte ses — yalnızca bu cihazda"], "Звук включён на этом устройстве: при новом заказе прозвучит сигнал": ["Sound is on on this device: a signal will play on a new order", "Bu cihazda ses açık: yeni siparişte sinyal çalacak"], "Звук выключен на этом устройстве": ["Sound is off on this device", "Bu cihazda ses kapalı"], "Новые заказы:": ["New orders:", "Yeni siparişler:"]});
 Object.assign(I18N, {"Укажите цену закупки за единицу": ["Enter the purchase price per unit", "Birim alış fiyatını girin"], "приход списком": ["bulk receipt", "toplu giriş"], "Убрано из заказа, уже приготовлено": ["Removed from the order, already cooked", "Siparişten çıkarıldı, zaten pişirilmişti"], "блюдо": ["dish", "yemek"], "блюда": ["dishes", "yemek"], "блюд": ["dishes", "yemek"]});
+Object.assign(I18N, {"Снять стоп-лист на завтра?": ["Take dishes off the stop list for tomorrow?", "Yarın için tükenenlerden çıkarılsın mı?"], "Отметьте блюда, которые завтра снова будут: метка снимется. Неотмеченные останутся в стоп-листе.": ["Tick the dishes that will be available tomorrow: their mark is taken off. The rest stay in the stop list.", "Yarın yeniden olacak yemekleri işaretleyin: işaretleri kalkar. İşaretlenmeyenler tükenenlerde kalır."], "Отметить все": ["Tick all", "Tümünü işaretle"], "Забрали из кассы, ₺": ["Taken from the till, ₺", "Kasadan alınan, ₺"], "Оставили на размен, ₺": ["Left as float, ₺", "Bozuk para olarak bırakılan, ₺"], "Сколько денег забрали из кассы и сколько оставили на завтра. Достаточно вписать одно: второе посчитается. Завтра «Размен утром» подставится сам.": ["How much money was taken from the till and how much was left for tomorrow. Enter one of them: the other is worked out. Tomorrow «Morning float» is filled in by itself.", "Kasadan ne kadar para alındı ve yarına ne kadar bırakıldı. Birini yazmanız yeterli: diğeri hesaplanır. Yarın «Sabah bozuk para» kendiliğinden gelir."], "Рабочий день длится до 06:00 утра: всё, что продано после полуночи, входит в этот день.": ["The working day lasts until 06:00 in the morning: everything sold after midnight belongs to this day.", "İş günü sabah 06:00'ya kadar sürer: gece yarısından sonra satılan her şey bu güne dahildir."], "Забрали и оставили на размен вместе — столько, сколько в кассе:": ["Taken plus left as float must equal what is in the till:", "Alınan ve bırakılan bozuk para toplamı kasadaki tutara eşit olmalı:"], "Снято со стоп-листа:": ["Taken off the stop list:", "Tükenenlerden çıkarılan:"], "Забрали из кассы": ["Taken from the till", "Kasadan alınan"], "Оставили на размен": ["Left as float", "Bozuk para olarak bırakılan"], "Переводы на счёт": ["Bank transfers", "Banka havaleleri"], "Переводом за день, заказов:": ["By transfer for the day, orders:", "Günlük havale, sipariş:"], "сверьте с выпиской банка": ["check against the bank statement", "banka ekstresiyle karşılaştırın"], "Забрали из кассы за период (дней:": ["Taken from the till in the period (days:", "Dönemde kasadan alınan (gün:"], "отмечено": ["marked", "işaret:"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
