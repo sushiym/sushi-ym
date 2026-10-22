@@ -272,6 +272,21 @@ s.oldp{color:var(--muted)}
 .ocourl{display:flex;justify-content:space-between;gap:8px}
 .ototal b{font-family:var(--display);font-weight:500}
 .seg.seg4{grid-template-columns:repeat(4,1fr)}
+.seg.seg5{grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line)}
+.seg.seg5 label{grid-column:span 2;border-right:0;background:var(--surface);display:flex;align-items:center;justify-content:center}
+.seg.seg5 label:nth-child(n+4){grid-column:span 3}
+.okc{color:var(--ok);font-weight:600}
+.sum .neg{color:var(--empty);font-weight:600}
+.daytwo{align-items:end}
+.daychk>div{display:flex;gap:8px;align-items:flex-start}
+.daychk>div>span:first-child{width:1em;flex:none;text-align:center}
+.act-day{border-left:4px solid var(--accent)!important}
+.paycash{display:flex;flex-direction:column;gap:10px}
+label.f input[readonly]{background:transparent;border-style:dashed}
+.paycash[hidden],.paycash [hidden]{display:none}
+.paychg{align-self:end;padding:10px 0;font-size:1.05rem}
+.paychg b{font-family:var(--display);font-weight:500;font-size:1.2rem}
+.paychg .neg{color:var(--empty);font-weight:600}
 .seg.seg4>*,.seg.seg22>*{display:flex;align-items:center;justify-content:center}
 .seg.seg22{grid-template-columns:1fr 1fr}
 .seg.seg22>*:nth-child(odd){border-right:1px solid var(--line)}
@@ -738,6 +753,15 @@ details.finun{margin-top:10px}
     <button type="button" class="btn danger" id="expDel" hidden>Удалить</button>
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
+<dialog id="dayDlg"><form method="dialog" id="dayForm">
+  <h3 id="dayTitle">Закрытие дня</h3>
+  <div id="dayBody" style="display:flex;flex-direction:column;gap:12px"></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Закрыть день</button>
   </div>
 </form></dialog>
 
@@ -2053,7 +2077,14 @@ const servedLabel = t => t==="hall" ? "Подан" : t==="delivery" ? "Отпр�
 const statLabel = o => o.status==="cancelled" && o.voidKind==="writeoff" ? "Списан" : o.status==="served" ? servedLabel(o.type) : (OSTAT[o.status]||o.status);
 const SOURCES = ["Свои (телефон, на месте)","Собственный: сайт","Собственный: Telegram-бот","Yemeksepeti","Uber Eats","Migros Yemek","Другое"];
 const AGGREGATORS = ["Yemeksepeti","Uber Eats","Migros Yemek","Trendyol Yemek","Getir"];
-const PAYS = ["Наличные","Карта","Перевод","Агрегатор"];
+const SPLIT = "Нал + карта";
+const PAYS = ["Наличные","Карта",SPLIT,"Перевод","Агрегатор"];
+// how a sale was paid: [{m, sum}] with sums that add up to sl.total (courier fee included). Paid in parts («Нал + карта»): sl.pays;
+// one way: the whole total. Quick sales have no payment.
+const saleSum = sl => sl.total!=null ? Number(sl.total)||0 : saleFood(sl);
+const payParts = sl => Array.isArray(sl.pays) && sl.pays.length ? sl.pays.map(x=>({m:x.m, sum:Number(x.sum)||0})) : sl.payment ? [{m:sl.payment, sum:saleSum(sl)}] : [];
+const paidBy = (sl, m) => payParts(sl).reduce((a,x)=>a+(x.m===m?x.sum:0),0);
+const payText = o => Array.isArray(o.pays) && o.pays.length ? o.pays.map(x=>esc(x.m)+(showMoney()?" "+money(x.sum):"")).join(" + ") : esc(o.payment||"");
 const OVERDUE_MIN = 30;
 const money = n => (Math.round((Number(n)||0)*100)/100).toLocaleString(LOC(),{maximumFractionDigits:2}) + " ₺";
 const dayKey = ts => { const d = new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
@@ -2168,7 +2199,8 @@ function renderOrdersControls(c){
   const seg = (v, t) => `<button class="btn small ${S.ordView===v?"primary":""}" data-ordview="${v}">${t}</button>`;
   const acts = (can("orderEdit") ? `
       <button class="btn act-in" data-onew="hall">+ Новый заказ</button>` : "")
-    + (can("dishOff") ? `<button class="btn act-off ${S.ordView==="woff"?"primary":""}" data-ordview="woff">Списать блюда</button>` : "");
+    + (can("dishOff") ? `<button class="btn act-off ${S.ordView==="woff"?"primary":""}" data-ordview="woff">Списать блюда</button>` : "")
+    + (can("orderPay") ? `<button class="btn act-day" data-dayclose="">Закрытие дня${closeOf(todayKey()) ? " ✓" : ""}</button>` : "");
   c.innerHTML = (acts ? `<div class="actions oacts">${acts}</div>` : "") + `
     <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}${isAdmin() ? seg("rev", `На проверку${nRev?` (${nRev})`:""}`) : ""}
       ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}</div>`;
@@ -2184,7 +2216,7 @@ function orderCard(o){
   if (o.status==="cancelled" && o.cancelReason) meta.push("причина: "+esc(o.cancelReason)+(o.cancelledBy?" ("+esc(o.cancelledBy)+(o.approvedBy?", одобрил(а) "+esc(o.approvedBy):"")+")":""));
   if (o.type!=="hall" && o.source) meta.push(esc(o.source));
   if (o.type==="delivery"){ if (o.address) meta.push(esc(o.address)); if (o.courier) meta.push("курьер: "+esc(o.courier)); if (o.due) meta.push("к "+esc(o.due)); }
-  if (o.status==="closed" && o.payment) meta.push("оплата: "+esc(o.payment));
+  if (o.status==="closed" && o.payment) meta.push("оплата: "+payText(o)+(o.change>0 && showMoney() ? ", сдача "+money(o.change) : ""));
   let btns = "", reqBox = "";
   const rq = o.voidReq, pend = voidReqOf(o);
   if (pend) reqBox = `<div class="oreq">Запрос: <b>${VKIND[rq.kind]||""}</b> — ${esc(rq.reason)} <small class="hint">(${esc(rq.by||"")})</small>${isAdmin()?"":`<br><small class="hint">Ждёт решения админа</small>`}</div>`;
@@ -2265,12 +2297,17 @@ function renderReport(L){
   const offRows = []; { const byDoc = {}; for (const m of offs){ if (m.dishOff && m.doc){ if (!byDoc[m.doc]) offRows.push(byDoc[m.doc] = {m, ms:[]}); byDoc[m.doc].ms.push(m); } else offRows.push({m, ms:[m]}); } }
   const rowSum = r => r.ms.reduce((a,m)=>a+offSum(m),0);
   for (const r of offRows){ const k = r.m.who||"—"; offBy[k] = offBy[k] || {n:0, sum:0}; offBy[k].n++; offBy[k].sum += rowSum(r); }
-  if (!sales.length && !voidedAll.length && !cashList.length && !offs.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>`; return; }
+  if (!sales.length && !voidedAll.length && !cashList.length && !offs.length){ L.innerHTML = `<div class="empty-state">За этот день продаж нет.</div>` + (closeOf(dk) ? dayCloseHtml(dk) : ""); return; }
   const ps = promoSummary(sales);
-  const cashIn = sales.filter(sl=>sl.payment==="Наличные").reduce((a,sl)=>a+saleTotal(sl)+(Number(sl.courierFee)||0),0);
+  const cashIn = sales.reduce((a,sl)=>a+paidBy(sl,"Наличные"),0);
   const noPay = sales.filter(sl=>!sl.payment), noPaySum = noPay.reduce((a,sl)=>a+saleTotal(sl),0);
   // the cash block counts real cash: delivery paid in cash comes in with the fee, the fee goes out as the cash record «Курьер»
-  const cashCour = sales.filter(sl=>sl.payment==="Наличные").reduce((a,sl)=>a+(Number(sl.courierFee)||0),0);
+  const cashCour = sales.reduce((a,sl)=>a+Math.min(Number(sl.courierFee)||0, paidBy(sl,"Наличные")),0);
+  // by way of payment: a sale paid in parts counts in each way with its part (without the courier fee, in proportion, like revenue)
+  const byPay = {}, nSplit = sales.filter(sl=>Array.isArray(sl.pays) && sl.pays.length>1).length;
+  for (const sl of sales){ const parts = payParts(sl), all = saleSum(sl), k = all ? saleTotal(sl)/all : 0;
+    if (!parts.length){ const r = byPay["Не указан"] = byPay["Не указан"] || {n:0, sum:0}; r.n++; r.sum += saleTotal(sl); continue; }
+    for (const x of parts){ const r = byPay[x.m] = byPay[x.m] || {n:0, sum:0}; r.n++; r.sum += parts.length>1 ? x.sum*k : saleTotal(sl); } }
   const cour = sales.filter(sl=>Number(sl.courierFee)>0), courSum = cour.reduce((a,sl)=>a+(Number(sl.courierFee)||0),0);
   L.innerHTML = `<div class="kpis">
       <div class="kpi"><small>Выручка</small><b>${money(total)}</b></div>
@@ -2283,6 +2320,7 @@ function renderReport(L){
       <div><span>Получено наличными${cashCour?` <small class="hint">вместе с доставкой ${money(cashCour)}</small>`:""}</span><b>${money(cashIn)}</b></div>
       <div><span>Кассовые расходы <small class="hint">(${cashList.length})</small></span><b>${cashOut ? "− "+money(cashOut) : money(0)}</b></div>
       <div class="subtot"><span>Должно остаться в кассе <small class="hint">без учёта размена на начало дня</small></span><b>${money(cashIn-cashOut)}</b></div></div>
+    ${dayCloseHtml(dk)}
     ${cour.length ? `<p class="hint">${esc(`Доставка за день (заказов: ${cour.length}): ${money(courSum)}. Это деньги курьера: в выручку и средний чек не входят.`)}</p>` : ""}
     ${noPay.length ? `<p class="hint">Быстрые продажи (${noPay.length}, ${money(noPaySum)}) сюда не входят: у них не указан способ оплаты.</p>` : ""}
     ${cashList.length ? `<details class="det"><summary>Кассовые расходы за день</summary><div class="list" style="margin-top:8px">${cashList.map(x=>cashRow(x)).join("")}</div></details>` : ""}
@@ -2293,7 +2331,8 @@ function renderReport(L){
         return `<div><span><small class="hint">${hhmm(m.ts||0)}</small> ${(TYPES[m.type]||{}).label||""}: ${p?N(dn(p)):""} ${fmt(-(Number(m.delta)||0))} ${esc(m.unit||"")}${m.note?` <small class="hint">${esc(m.note)}</small>`:""} <small class="hint">${N(m.who||"")}</small></span><b>${money(offSum(m))}</b></div>`; }).join("")}</div></details>` : ""}
     ${voidedAll.length ? `<h2 class="cat"><span>Отменённые и списанные заказы</span></h2><div class="sum">${voidedAll.map(o=>`<div><span>№${esc(o.num)} <span class="tag os-cancelled">${statLabel(o)}</span> ${esc(o.cancelReason||"")} <small class="hint">${esc(o.cancelledBy||"")}${o.approvedBy?", одобрил(а) "+esc(o.approvedBy):""}</small></span><b>${money(orderFood(o))}</b></div>`).join("")}</div>` : ""}
     ${table("По типу заказа", agg(typeName))}
-    ${table("По способу оплаты", agg(sl=>sl.payment||"Не указан"))}
+    ${table("По способу оплаты", Object.entries(byPay).sort((a,b)=>b[1].sum-a[1].sum))}
+    ${nSplit ? `<p class="hint" style="margin-top:6px">${esc(`Оплачено частями (нал + карта): ${nSplit}. Такой заказ входит и в «Наличные», и в «Карта» — своей частью.`)}</p>` : ""}
     ${table("По источнику", agg(sl=>sl.orderType && sl.orderType!=="hall" ? (sl.source||"Не указан") : (sl.orderType==="hall"?"Зал":"Продажи без заказа")))}
     ${top.length ? `<h2 class="cat"><span>Что продано</span><span>${top.length}</span></h2><div class="sum">${top.map(r=>`<div><span>${N(r.name)}${r.kind==="set"?" (сет)":""}</span><span><b>${fmt(r.qty)}</b>${r.sum?` <small class="hint">${money(r.sum)}</small>`:""}</span></div>`).join("")}</div>` : ""}
     ${promoHtml(ps, false)}
@@ -2412,6 +2451,9 @@ function renderFin(L){
       ${Object.entries(expByCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>line(esc(k), neg(v))).join("")}
       ${line("Чистая прибыль", money(net), "total "+(net<0?"minus":"plus"))}
     </div>
+    ${(()=>{ const cl = S.settings.filter(x=>x.kind==="dayClose" && inR(new Date(x.day+"T12:00").getTime())); if (!cl.length) return "";
+      const sum = k => r2(cl.reduce((a,x)=>a+(Number(x[k])||0),0)), d = sum("cashDiff"), c = sum("cardDiff");
+      return `<p class="hint">Закрытие дня за период (дней: ${cl.length}): наличные — ${diffTxt(d)}, карты — ${diffTxt(c)}. В прибыль не входит, для сведения.</p>`; })()}
     ${courN ? `<p class="hint">${esc(`Доставка за период (заказов: ${courN}): ${money(courSum)}. Это деньги курьера: клиент платит их вместе с заказом, курьер забирает их из кассы. В выручку, средний чек и расходы не входят.`)}</p>` : ""}
     <p class="hint">Закуплено продуктов за период: <b>${money(sumBy.in)}</b>. Закупки не вычитаются из прибыли сразу — в расход идёт только то, что продано, списано или ушло в недостачу.${(()=>{ const v = stockValue(); return v.sum>0 ? ` Сейчас на складе продуктов на ${money(v.sum)}.` : ""; })()}</p>
     ${noPrice.size ? `<div class="notice">Себестоимость занижена: нет цены закупки у ${noPrice.size} ${plural(noPrice.size,"продукта","продуктов","продуктов")} — ${[...noPrice].slice(0,6).map(N).join(", ")}${noPrice.size>6?" и др.":"."}<br>Цена заполняется при приходе товара или в карточке продукта на «Складе».</div>` : ""}`;
@@ -2585,6 +2627,115 @@ document.addEventListener("click", e=>{
   openCash(t.dataset.cash);
 });
 document.addEventListener("change", e=>{ if (e.target.id==="cashDate"){ S.cashDate = e.target.value || todayKey(); renderList(); } });
+
+/* ----- closing the day (Д1): what is still open, cash counted vs expected, card terminal vs card payments ----- */
+// one record per day in settings, id "close_<day>"; closing again replaces it and keeps the earlier versions in hist.
+// A worker counts blind (like the stock recount): only the admin sees what was expected and the difference.
+const r2 = n => Math.round((Number(n)||0)*100)/100;
+const closeOf = dk => S.settings.find(x=>x.id==="close_"+dk);
+function dayMoney(dk){
+  const sales = S.sales.filter(x=>dayKey(x.ts||0)===dk), by = m => r2(sales.reduce((a,sl)=>a+paidBy(sl,m),0));
+  return {cashIn:by("Наличные"), cashOut:r2(cashSums(cashOfDay(dk)).total), card:by("Карта"), nCard:sales.filter(sl=>paidBy(sl,"Карта")>0).length, transfer:by("Перевод")};
+}
+// размен: what was in the till in the morning; by default the same as at the last closing
+const lastFloat = dk => { const r = S.settings.filter(x=>x.kind==="dayClose" && x.day<dk && x.float!=null).sort((a,b)=>a.day<b.day?1:-1)[0]; return r ? Number(r.float)||0 : null; };
+function dayOpen(){
+  return {orders:S.orders.filter(isOpen).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)), shifts:S.shifts.filter(x=>!x.end && x.start),
+    req:S.orders.filter(voidReqOf).length, drafts:S.invdrafts.filter(x=>x.status!=="done").length, rev:isAdmin() ? revItems().length : 0};
+}
+const diffTxt = d => Math.abs(d)<0.005 ? `<b class="okc">сходится</b>` : d<0 ? `<b class="neg">недостача ${money(-d)}</b>` : `<b class="okc">излишек ${money(d)}</b>`;
+let dayDk = "", daySaving = false;
+function openDay(dk){
+  if (!S.me || !can("orderPay")) return;
+  dayDk = isAdmin() && dk ? dk : todayKey();
+  const rec = closeOf(dayDk), today = dayDk===todayKey(), adm = isAdmin();
+  $("#dayTitle").textContent = "Закрытие дня · " + new Date(dayDk+"T00:00").toLocaleDateString(LOC(),{day:"numeric",month:"long"});
+  let chk = "";
+  if (today){
+    const op = dayOpen(), ok = t => `<div><span class="okc">✓</span> <span>${t}</span></div>`, bad = (t, x) => `<div><span class="neg">!</span> <span>${t}${x?`<br><small class="hint">${x}</small>`:""}</span></div>`;
+    const nm = sh => N(sh.name || (S.staff.find(x=>x.id===sh.staffId)||{}).name || "") + (S.me && sh.staffId===S.me.id ? " (вы)" : "") + ", смена с " + hhmm(sh.start);
+    chk = `<div class="box daychk"><h4>Проверьте, всё ли закрыто</h4>
+      ${op.orders.length ? bad(`Открытые заказы: ${op.orders.length}`, op.orders.map(o=>`№${esc(o.num)} ${orderWhere(o)} · ${statLabel(o)}`).join("; ")) + `<div><button type="button" class="btn small" data-dayorders>Показать открытые заказы</button></div>` : ok("Открытых заказов нет")}
+      ${op.shifts.length ? bad(`Смена не закрыта: ${op.shifts.length}`, op.shifts.map(nm).join("; ") + ". Каждый закрывает свою смену на экране входа, когда уходит.") : ok("Все смены закрыты")}
+      ${op.req ? bad(`Запросы на отмену или списание заказа: ${op.req}`, adm ? "Ответьте в «Продажи» → «Запросы на отмену»." : "Ждут решения админа. Закрыть день можно.") : ""}
+      ${op.drafts ? bad(`Пересчёты ждут утверждения: ${op.drafts}`, adm ? "Утвердите в разделе «Инвентаризация»." : "Ждут админа. Закрыть день можно.") : ""}
+      ${op.rev ? bad(`На проверку: ${op.rev}`, "«Продажи» → «На проверку».") : ""}</div>`;
+  }
+  const fl = rec ? rec.float : lastFloat(dayDk), v = x => x==null ? "" : String(x);
+  $("#dayBody").innerHTML = `${rec ? `<div class="oreq">${esc(`День уже закрыт: ${rec.who||""}, ${hhmm(rec.ts||0)}.`)} Если закрыть ещё раз, запись заменится${adm ? "" : " (админ увидит обе)"}.</div>` : ""}
+    ${chk}
+    <div class="box"><h4>Наличные в кассе</h4>
+      <p class="hint" style="margin:0">${adm ? "Пересчитайте все деньги в кассе вместе с разменом." : "Пересчитайте все деньги в кассе вместе с разменом и впишите сумму. Сколько должно быть, программа не показывает: разницу увидит админ."}</p>
+      <div class="two daytwo"><label class="f">Размен утром, ₺<input id="dcFloat" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(fl))}"></label>
+        <label class="f">Сейчас в кассе, всего ₺<input id="dcCash" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(rec && rec.cash))}"></label></div>
+      ${adm ? `<div class="sum" id="dcCashRes"></div>` : ""}</div>
+    <div class="box"><h4>Терминал карт</h4>
+      <label class="f">Итог по терминалу за день, ₺<input id="dcCard" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(v(rec && rec.card))}"></label>
+      <p class="hint" style="margin:0">Сумма из отчёта терминала за день. Если по карте сегодня не платили — оставьте пусто.</p>
+      ${adm ? `<div class="sum" id="dcCardRes"></div>` : ""}</div>
+    <label class="f">Комментарий<textarea id="dcNote" rows="2" placeholder="Например: почему не сходится">${esc(rec && rec.note || "")}</textarea></label>
+    <p class="hint" style="margin:0">${esc(`Закрывает: ${S.me.name}`)}</p>`;
+  dayCalc();
+  if (!$("#dayDlg").open) $("#dayDlg").showModal();
+}
+// admin: expected amounts and the difference while typing
+function dayCalc(){
+  if (!isAdmin() || !$("#dcCashRes")) return;
+  const dm = dayMoney(dayDk), fl = numMoney($("#dcFloat").value)||0, cv = $("#dcCash").value.trim(), cash = numMoney(cv), tv = $("#dcCard").value.trim(), card = numMoney(tv);
+  const exp = r2(fl + dm.cashIn - dm.cashOut);
+  $("#dcCashRes").innerHTML = `<div><span>Размен утром</span><b>${money(fl)}</b></div>
+    <div><span>Получено наличными</span><b>+ ${money(dm.cashIn)}</b></div>
+    <div><span>Кассовые расходы</span><b>− ${money(dm.cashOut)}</b></div>
+    <div class="subtot"><span>Должно быть в кассе</span><b>${money(exp)}</b></div>
+    ${cv && !isNaN(cash) ? `<div><span>Разница</span>${diffTxt(r2(cash-exp))}</div>` : ""}`;
+  $("#dcCardRes").innerHTML = `<div><span>По карте в программе <small class="hint">(${dm.nCard})</small></span><b>${money(dm.card)}</b></div>
+    ${tv && !isNaN(card) ? `<div><span>Разница</span>${diffTxt(r2(card-dm.card))}</div>` : ""}`;
+}
+document.addEventListener("input", e=>{ if (["dcFloat","dcCash","dcCard"].includes(e.target.id)) dayCalc(); });
+UNSAVED.dayDlg = () => !daySaving && !!$("#dcCash") && !!$("#dcCash").value.trim() && !closeOf(dayDk);
+$("#dayForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(saveDay); });
+async function saveDay(){
+  if (!S.me) return;
+  const fv = $("#dcFloat").value.trim(), cv = $("#dcCash").value.trim(), tv = $("#dcCard").value.trim();
+  const fl = fv ? numMoney(fv) : 0, cash = numMoney(cv), card = tv ? numMoney(tv) : null;
+  if (fv && !(fl>=0)){ need($("#dcFloat"), "Введите размен числом или оставьте пусто"); return; }
+  if (!cv || !(cash>=0)){ need($("#dcCash"), "Впишите, сколько всего денег в кассе (можно 0)"); return; }
+  if (tv && !(card>=0)){ need($("#dcCard"), "Введите сумму числом или оставьте пусто"); return; }
+  const dk = dayDk, dm = dayMoney(dk), op = dk===todayKey() ? dayOpen() : null;
+  if (op && op.orders.length && !tConfirm(`Открытых заказов: ${op.orders.length}. Их деньги не войдут в этот день. Всё равно закрыть день?`)) return;
+  const old = closeOf(dk), exp = r2(fl + dm.cashIn - dm.cashOut), ts = Date.now();
+  const x = {id:"close_"+dk, kind:"dayClose", day:dk, ts, who:S.me.name, whoId:S.me.id, float:r2(fl), cash:r2(cash), cashIn:dm.cashIn, cashOut:dm.cashOut, cashExp:exp, cashDiff:r2(cash-exp),
+    card:card==null ? null : r2(card), cardExp:dm.card, cardDiff:card==null ? null : r2(card-dm.card), transfer:dm.transfer, note:$("#dcNote").value.trim()};
+  if (op) x.open = {orders:op.orders.length, shifts:op.shifts.map(sh=>sh.name||""), req:op.req, drafts:op.drafts};
+  if (old) x.hist = [...(old.hist||[]), {who:old.who||"", ts:old.ts||0, cash:old.cash, cashDiff:old.cashDiff, card:old.card==null ? null : old.card, cardDiff:old.cardDiff==null ? null : old.cardDiff}].slice(-10);
+  daySaving = true;
+  try { await commit(`Закрытие дня ${dmy(dk)}`, [{col:"settings", id:x.id, after:x}]); $("#dayDlg").close(); render(); toast(isAdmin() ? `День закрыт. Наличные: ${Math.abs(x.cashDiff)<0.005 ? "сходится" : (x.cashDiff<0 ? "недостача " : "излишек ")+money(Math.abs(x.cashDiff))}` : "День закрыт. Спасибо! Итоги увидит админ."); }
+  catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
+  finally { daySaving = false; }
+}
+document.addEventListener("click", e=>{
+  const t = e.target.closest("[data-dayclose],[data-dayorders]"); if (!t) return;
+  if (t.dataset.dayorders!=null){ $("#dayDlg").close(); S.view = "orders"; S.ordView = "open"; return render(true); }
+  openDay(t.dataset.dayclose);
+});
+// Итоги дня (admin): the closing next to the cash block
+function dayCloseHtml(dk){
+  const rec = closeOf(dk), dm = dayMoney(dk);
+  const btn = `<button type="button" class="btn small" data-dayclose="${esc(dk)}">${rec ? "Закрыть заново" : "Закрыть день"}</button>`;
+  if (!rec) return `<div class="oreq" style="margin-top:8px">День не закрыт: наличные и терминал не сверены. ${btn}</div>`;
+  const live = r2((Number(rec.float)||0) + dm.cashIn - dm.cashOut), moved = Math.abs(live - (Number(rec.cashExp)||0))>=0.005 || Math.abs(dm.card - (Number(rec.cardExp)||0))>=0.005;
+  return `<h2 class="cat"><span>Закрытие дня</span><span>${esc(`${rec.who||""}, ${hhmm(rec.ts||0)}`)}</span></h2><div class="sum">
+      <div><span>Должно быть в кассе <small class="hint">${esc(`размен утром ${money(rec.float)} + наличные ${money(rec.cashIn)} − кассовые расходы ${money(rec.cashOut)}`)}</small></span><b>${money(rec.cashExp)}</b></div>
+      <div><span>Насчитали в кассе</span><b>${money(rec.cash)}</b></div>
+      <div class="subtot"><span>Наличные</span>${diffTxt(Number(rec.cashDiff)||0)}</div>
+      <div><span>По карте в программе</span><b>${money(rec.cardExp)}</b></div>
+      <div><span>По терминалу</span><b>${rec.card==null ? "не введено" : money(rec.card)}</b></div>
+      ${rec.card==null ? "" : `<div class="subtot"><span>Карты</span>${diffTxt(Number(rec.cardDiff)||0)}</div>`}
+      ${rec.note ? `<div><span>Комментарий: ${N(rec.note)}</span></div>` : ""}</div>
+    ${moved ? `<p class="hint">После закрытия дня суммы изменились: сейчас в кассе должно быть ${money(live)}, по карте ${money(dm.card)}. Например, закрыли ещё заказ или исправили кассовый расход.</p>` : ""}
+    ${(rec.hist||[]).length ? `<p class="hint">${esc("Закрывали раньше: " + rec.hist.map(h=>`${h.who||""} ${hhmm(h.ts||0)}`).join("; "))} — ${rec.hist.map(h=>`наличные ${h.cashDiff==null?"—":(h.cashDiff<0?"−":"+")+money(Math.abs(h.cashDiff))}${h.cardDiff==null?"":`, карты ${(h.cardDiff<0?"−":"+")+money(Math.abs(h.cardDiff))}`}`).join("; ")}</p>` : ""}
+    <div style="margin:8px 0 4px">${btn}</div>`;
+}
 
 // one cash record «Курьер» per delivery order: created/updated when the order is saved, removed when the fee is cleared or the order is cancelled
 const courRec = oid => S.expenses.find(x=>isCash(x) && x.kind==="Курьер" && x.orderId===oid);
@@ -3026,27 +3177,63 @@ async function setOrderStatus(id, to){
 let payId = null, paySeen = "";
 const paySig = o => JSON.stringify([o.lines||[], orderTotal(o)]);
 function openPay(id){
-  const o = orderById(id); if (!o) return; payId = id; paySeen = paySig(o);
-  const def = o.type!=="hall" && AGGREGATORS.includes(o.source) ? "Агрегатор" : (o.payment||"Наличные");
+  const o = orderById(id); if (!o) return;
+  // the order changed on another device while the window was open: keep what was typed
+  const keep = $("#payDlg").open && payId===id && $("#paySplit") ? {m:payState().m, split:$("#paySplit").value, given:$("#payGiven").value} : null;
+  payId = id; paySeen = paySig(o);
+  const def = keep ? keep.m : o.type!=="hall" && AGGREGATORS.includes(o.source) ? "Агрегатор" : (o.payment||"Наличные");
   const {ing, empty, pack} = orderIng(o), st = stockMap(), order = sortedProducts();
   const rows = Object.entries(ing).map(([pid,q])=>({p:byId(pid), q, after:(st[pid]||0)-q, pk:!!pack[pid]})).filter(r=>r.p).sort((a,b)=>order.indexOf(a.p)-order.indexOf(b.p));
   $("#payTitle").textContent = `Заказ №${o.num} · ${OTYPES[o.type]}${o.type==="hall"&&o.table?", стол "+o.table:""}`;
   $("#payBody").innerHTML = `<div class="prev">${(o.lines||[]).map(l=>`<div><span>${fmt(l.qty)} × ${NL(l)}${promoTag(l)}</span><span>${l.price||l.promo?promoPrice(l)+money(l.price*l.qty):"—"}</span></div>`).join("")}</div>
     ${discLine(o)}${courLine(o)}
     <div class="ototal">К оплате: <b>${money(orderTotal(o))}</b></div>
-    <div class="seg seg4" role="radiogroup" aria-label="Способ оплаты">${PAYS.map(pm=>`<label><input type="radio" name="paym" value="${esc(pm)}" ${pm===def?"checked":""}>${esc(pm)}</label>`).join("")}</div>
+    <div class="seg seg5" role="radiogroup" aria-label="Способ оплаты">${PAYS.map(pm=>`<label><input type="radio" name="paym" value="${esc(pm)}" ${pm===def?"checked":""}>${esc(pm)}</label>`).join("")}</div>
+    <div class="paycash" id="payCash">
+      <div class="two" id="paySplitW"><label class="f">Наличными, ₺<input id="paySplit" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+        <label class="f">Картой, ₺<input id="payCard" readonly tabindex="-1" aria-live="polite"></label></div>
+      <div class="two"><label class="f">Клиент дал наличными, ₺<input id="payGiven" inputmode="decimal" autocomplete="off" placeholder="без сдачи — пусто"></label>
+        <div class="paychg" id="payChange" aria-live="polite"></div></div>
+    </div>
     <details class="det"><summary>Спишется со склада: ${rows.length} ${plural(rows.length,"позиция","позиции","позиций")}${Object.keys(pack).length?", включая упаковку":""}</summary>
       <div class="prev" style="margin-top:6px">${rows.map(r=>`<div><span>${N(dn(r.p))}${r.pk?' <small class="hint">упаковка</small>':""}</span><span class="${r.after<0?"neg":""}">−${fmt(r.q)} ${esc(r.p.unit)}</span></div>`).join("")}</div></details>
     ${empty.length ? `<p class="hint">Без техкарты, продукты не спишутся: ${empty.map(esc).join(", ")}.</p>` : ""}`;
+  if (keep){ $("#paySplit").value = keep.split; $("#payGiven").value = keep.given; }
+  payCalc();
   if (!$("#payDlg").open) $("#payDlg").showModal();
 }
+// cash part of the payment (whole total for «Наличные», the typed part for «Нал + карта»), the card part and the change
+function payState(){
+  const o = orderById(payId), total = o ? orderTotal(o) : 0;
+  const m = (document.querySelector('input[name="paym"]:checked')||{}).value || "Наличные";
+  const split = m===SPLIT, sv = $("#paySplit").value.trim(), part = split ? numMoney(sv) : NaN;
+  const cash = m==="Наличные" ? total : split && part>0 && part<total ? Math.round(part*100)/100 : 0;
+  const gv = $("#payGiven").value.trim(), given = gv ? numMoney(gv) : NaN;
+  return {m, total, split, sv, part, cash, card: split && cash ? Math.round((total-cash)*100)/100 : 0, gv, given};
+}
+function payCalc(){
+  const st = payState(), box = $("#payCash"); if (!box) return;
+  box.hidden = !(st.m==="Наличные" || st.split); $("#paySplitW").hidden = !st.split;
+  $("#payCard").value = st.split ? (st.cash ? fmt(st.card) : "") : "";
+  const ch = $("#payChange");
+  if (!st.gv || !st.cash || isNaN(st.given)) ch.innerHTML = "";
+  else if (st.given < st.cash) ch.innerHTML = `<span class="neg">Не хватает ${money(st.cash-st.given)}</span>`;
+  else ch.innerHTML = `Сдача: <b>${money(st.given-st.cash)}</b>`;
+}
+document.addEventListener("input", e=>{ if (e.target.id==="paySplit" || e.target.id==="payGiven") payCalc(); });
+document.addEventListener("change", e=>{ if (e.target.name==="paym") payCalc(); });
 $("#payForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(payOrder); });
 async function payOrder(){
   const seen = orderById(payId); if (!seen) return;
-  const payment = (document.querySelector('input[name="paym"]:checked')||{}).value || "Наличные";
+  const pst = payState(), payment = pst.m;
+  if (pst.split && !(pst.part>0 && pst.part<pst.total)){ need($("#paySplit"), pst.sv && pst.part>=pst.total ? "Наличными меньше, чем «К оплате». Если всё наличными — выберите «Наличные»." : "Сколько клиент платит наличными? Остальное — картой."); return; }
+  if (pst.gv && pst.cash && !(pst.given >= pst.cash)){ need($("#payGiven"), isNaN(pst.given) ? "Введите сумму числом" : `Клиент дал меньше, чем нужно наличными: ${money(pst.cash)}`); return; }
   const o = await freshOrder(payId);
   if (!o || !isOpen(o)){ $("#payDlg").close(); return orderStale(o, seen.num); }
   if (paySig(o)!==paySeen){ openPay(o.id); toast(`Заказ №${o.num} изменён на другом устройстве. Проверьте сумму и нажмите ещё раз.`); return; }
+  // paid in parts: what part was cash and what part card (they add up to the total, courier fee included)
+  const payx = pst.split ? {pays:[{m:"Наличные", sum:pst.cash}, {m:"Карта", sum:pst.card}]} : {};
+  if (pst.gv && pst.cash) Object.assign(payx, {given:Math.round(pst.given*100)/100, change:Math.round((pst.given-pst.cash)*100)/100});
   // one sale per order: if two devices close the same order, they write the same documents instead of two sales
   const {ing} = orderIng(o), batchId = "b" + o.id, ts = Date.now(), who = whoNow();
   const where = o.type==="hall" ? (o.table?`, стол ${o.table}`:"") : (o.name?`, ${o.name}`:"");
@@ -3055,9 +3242,11 @@ async function payOrder(){
   if (!mvs.length) mvs.push({productId:"", unit:"", type:"sale", delta:0, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id});
   const md = foldMoves("m"+batchId, mvs), ops = [{col:"moves", id:md.id, after:md}];
   const total = orderTotal(o);
-  ops.push({col:"sales", id:batchId, after:Object.assign({id:batchId, lines:(o.lines||[]).map(l=>Object.assign({kind:l.kind, refId:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})), who, ts, orderId:o.id, orderType:o.type, source:o.source||"", payment, total}, courFee(o) ? {courierFee:courFee(o)} : {}, orderPct(o) ? {discPct:orderPct(o), disc:orderDisc(o), subtotal:orderSubtotal(o), discBy:o.discBy||"", orderNum:o.num} : {})});
-  ops.push({col:"orders", id:o.id, after:Object.assign({}, o, {status:"closed", payment, total, closedAt:ts, saleBatchId:batchId, updatedAt:ts})});
-  try { await commit(`Закрыт заказ №${o.num}`, ops); $("#payDlg").close(); render(); toast(`Заказ №${o.num} закрыт: ${money(total)}, ${payment}`); }
+  ops.push({col:"sales", id:batchId, after:Object.assign({id:batchId, lines:(o.lines||[]).map(l=>Object.assign({kind:l.kind, refId:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})), who, ts, orderId:o.id, orderType:o.type, source:o.source||"", payment, total}, payx, courFee(o) ? {courierFee:courFee(o)} : {}, orderPct(o) ? {discPct:orderPct(o), disc:orderDisc(o), subtotal:orderSubtotal(o), discBy:o.discBy||"", orderNum:o.num} : {})});
+  const on = Object.assign({}, o, {status:"closed", payment, total, closedAt:ts, saleBatchId:batchId, updatedAt:ts}, payx);
+  if (!payx.pays) delete on.pays; if (payx.change==null){ delete on.given; delete on.change; }
+  ops.push({col:"orders", id:o.id, after:on});
+  try { await commit(`Закрыт заказ №${o.num}`, ops); $("#payDlg").close(); render(); toast(`Заказ №${o.num} закрыт: ${money(total)}, ${payment}${payx.pays ? ` (наличными ${money(pst.cash)}, картой ${money(pst.card)})` : ""}${payx.change>0 ? `. Сдача ${money(payx.change)}` : ""}`); }
   catch(err){ console.error(err); render(); toast(err.done && err.done.length ? "Сохранено частично. Нажмите ещё раз — лишнего не спишется." : "Не удалось закрыть заказ. Проверьте права на изменение."); }
 }
 async function cancelOrder(id){
@@ -3075,7 +3264,7 @@ async function reopenOrder(id){
   await syncSale(o);
   const ops = S.mdocs.filter(d=>d.batchId && d.batchId===o.saleBatchId).map(d=>({col:"moves", id:d.id, after:null}));
   if (S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
-  const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.closedAt; delete n.saleBatchId; delete n.voidReq;
+  const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.pays; delete n.given; delete n.change; delete n.closedAt; delete n.saleBatchId; delete n.voidReq;
   ops.push({col:"orders", id, after:n});
   try { await commit(`Заказ №${o.num} возвращён в работу`, ops); S.ordView="open"; render(true); toast(`Заказ №${o.num} снова открыт`); }
   catch(err){ console.error(err); toast("Не удалось вернуть заказ."); }
@@ -4209,6 +4398,7 @@ Object.assign(I18N, {"Нажмите на продукт — откроется 
 Object.assign(I18N, {"стоимость": ["value", "değer"], "остаток": ["stock", "stok"], "закупка за": ["purchase per", "alış /"], "нет цены": ["no price", "fiyat yok"]});
 Object.assign(I18N, {"Списать блюда": ["Write off dishes", "Yemek fire"], "Списание блюд": ["Dish write-off", "Yemek firesi"], "Списано блюд сегодня": ["Dishes written off today", "Bugün fire verilen yemekler"], "Блюда не продаются: продукты спишутся со склада по техкартам, в выручку ничего не попадёт.": ["The dishes are not sold: products are taken from stock by the recipe cards, nothing goes into revenue.", "Yemekler satılmaz: ürünler reçetelere göre depodan düşülür, ciroya hiçbir şey yazılmaz."], "Для блюд, которые не продали: еда персонала, брак, дегустация. Нажимайте на блюда и сеты, потом «Списать…» — продукты спишутся по техкартам, в выручку ничего не попадёт.": ["For dishes that were not sold: staff meals, defects, tasting. Tap dishes and sets, then «Write off…» — products are taken by the recipe cards, nothing goes into revenue.", "Satılmayan yemekler için: personel yemeği, kusurlu, tadım. Yemek ve setlere dokunun, sonra «Fire…» — ürünler reçetelere göre düşülür, ciroya hiçbir şey yazılmaz."], "Причина списания": ["Write-off reason", "Fire nedeni"], "Персонал": ["Staff", "Personel"], "Брак, переделка": ["Defect, remake", "Kusurlu, yeniden yapım"], "Дегустация": ["Tasting", "Tadım"], "Например: обед Aysel; пересолили": ["E.g.: Aysel's lunch; too salty", "Örn.: Aysel'in öğle yemeği; çok tuzlu"], "Обязательно: что случилось": ["Required: what happened", "Zorunlu: ne oldu"], "Ничего не выбрано.": ["Nothing selected.", "Hiçbir şey seçilmedi."], "К списанию:": ["To write off:", "Fire verilecek:"], "Списать…": ["Write off…", "Fire…"], "Списать": ["Write off", "Fire ver"], "Списано:": ["Written off:", "Fire verildi:"], "По цене закупки:": ["At purchase price:", "Alış fiyatıyla:"], "Без техкарты, ничего не спишется:": ["No recipe card, nothing will be taken:", "Reçete yok, hiçbir şey düşülmeyecek:"], "Спишется со склада:": ["Will be taken from stock:", "Depodan düşülecek:"], "по некоторым не хватает остатка": ["not enough stock for some", "bazılarında stok yetmiyor"], "Выберите причину списания": ["Choose the write-off reason", "Fire nedenini seçin"], "Напишите, почему списываете": ["Write why you are writing it off", "Neden fire verdiğinizi yazın"], "На складе не хватает (сейчас → после списания):": ["Not enough in stock (now → after the write-off):", "Depoda yetmiyor (şimdi → fireden sonra):"], "По учёту этого на складе почти нет:": ["By the records there is almost none of this in stock:", "Kayda göre depoda bundan neredeyse yok:"], "Всё равно списать? Остаток уйдёт в минус.": ["Write off anyway? Stock will go below zero.", "Yine de fire verilsin mi? Stok eksiye düşecek."], "Это большое списание, запись попадёт админу на проверку. Сохранить?": ["This is a large write-off, the admin will review it. Save?", "Bu büyük bir fire, yönetici kontrol edecek. Kaydedilsin mi?"], "Не удалось сохранить списание. Проверьте права на изменение.": ["Could not save the write-off. Check your edit rights.", "Fire kaydedilemedi. Düzenleme yetkinizi kontrol edin."], "в т.ч. списание блюд": ["incl. dish write-offs", "dahil: yemek firesi"], "и неоплаченные заказы, списанные блюда": ["and unpaid orders, written-off dishes", "ve ödenmemiş siparişler, fire verilen yemekler"], "уже открыт заказ №": ["an order is already open #", "zaten açık sipariş #"], "Чтобы добавить блюда к нему, откройте его: блюда из этого окна перейдут туда.": ["To add dishes to it, open it: the dishes from this window move there.", "Ona yemek eklemek için açın: bu penceredeki yemekler oraya taşınır."], "Открыть заказ №": ["Open order #", "Siparişi aç #"], "Блюда добавлены в заказ №": ["Dishes added to order #", "Yemekler siparişe eklendi #"], "Проверьте и нажмите «Сохранить».": ["Check and press «Save».", "Kontrol edip «Kaydet»e basın."], "Всё равно открыть на этом столе второй заказ?": ["Open a second order at this table anyway?", "Yine de bu masada ikinci sipariş açılsın mı?"], "ждёт выдачи": ["waiting to be handed out", "teslim bekliyor"]});
 Object.assign(I18N, {"Перейти к дню": ["Go to day", "Güne git"], "Показано:": ["Shown:", "Gösterilen:"], "всего:": ["total:", "toplam:"], "Показать ещё": ["Show more", "Daha fazla göster"], "Исправить расход": ["Edit expense", "Gideri düzelt"], "Исправить или удалить": ["Edit or delete", "Düzelt veya sil"]});
+Object.assign(I18N, {"Нал + карта": ["Cash + card", "Nakit + kart"], "Наличными, ₺": ["In cash, ₺", "Nakit, ₺"], "Картой, ₺": ["By card, ₺", "Kartla, ₺"], "наличными": ["in cash", "nakit"], "картой": ["by card", "kartla"], "Клиент дал наличными, ₺": ["Customer gave in cash, ₺", "Müşterinin verdiği nakit, ₺"], "без сдачи — пусто": ["no change — leave empty", "para üstü yoksa boş"], "Не хватает": ["Short by", "Eksik"], "Сдача": ["Change", "Para üstü"], "сдача": ["change", "para üstü"], "Наличными меньше, чем «К оплате». Если всё наличными — выберите «Наличные».": ["The cash part must be less than the amount due. If it is all cash, choose «Cash».", "Nakit kısım ödenecek tutardan az olmalı. Hepsi nakitse «Nakit» seçin."], "Сколько клиент платит наличными? Остальное — картой.": ["How much does the customer pay in cash? The rest is by card.", "Müşteri ne kadar nakit ödüyor? Kalanı kartla."], "Введите сумму числом": ["Enter the amount as a number", "Tutarı sayı olarak girin"], "Клиент дал меньше, чем нужно наличными": ["The customer gave less than the cash due", "Müşterinin verdiği nakit yetersiz"], "Оплачено частями (нал + карта)": ["Paid in parts (cash + card)", "Parçalı ödeme (nakit + kart)"], "Такой заказ входит и в «Наличные», и в «Карта» — своей частью.": ["Such an order counts in both «Cash» and «Card», each with its own part.", "Böyle bir sipariş hem «Nakit» hem «Kart» satırına kendi payıyla girer."], "Закрытие дня": ["Day closing", "Gün sonu"], "Закрыть день": ["Close the day", "Günü kapat"], "Закрыть заново": ["Close again", "Yeniden kapat"], "День не закрыт: наличные и терминал не сверены.": ["The day is not closed: cash and card terminal are not checked.", "Gün kapatılmadı: nakit ve kart terminali kontrol edilmedi."], "Проверьте, всё ли закрыто": ["Check that everything is closed", "Her şeyin kapalı olduğunu kontrol edin"], "Открытые заказы": ["Open orders", "Açık siparişler"], "Открытых заказов нет": ["No open orders", "Açık sipariş yok"], "Показать открытые заказы": ["Show open orders", "Açık siparişleri göster"], "Смена не закрыта": ["Shifts not closed", "Kapatılmamış vardiya"], "Все смены закрыты": ["All shifts are closed", "Tüm vardiyalar kapalı"], "(вы)": ["(you)", "(siz)"], "смена с": ["shift since", "vardiya başlangıcı"], "Каждый закрывает свою смену на экране входа, когда уходит.": ["Everyone closes their own shift on the login screen when leaving.", "Herkes çıkarken kendi vardiyasını giriş ekranında kapatır."], "Запросы на отмену или списание заказа": ["Requests to cancel or write off an order", "Sipariş iptal veya zayi talepleri"], "Ответьте в «Продажи» → «Запросы на отмену».": ["Answer them in «Sales» → «Cancel requests».", "«Satışlar» → «İptal talepleri» bölümünde yanıtlayın."], "Ждут решения админа. Закрыть день можно.": ["Waiting for the admin's decision. You can still close the day.", "Yönetici kararını bekliyor. Günü yine de kapatabilirsiniz."], "Пересчёты ждут утверждения": ["Recounts waiting for approval", "Onay bekleyen sayımlar"], "Утвердите в разделе «Инвентаризация».": ["Approve them in «Stock count».", "«Sayım» bölümünde onaylayın."], "Ждут админа. Закрыть день можно.": ["Waiting for the admin. You can still close the day.", "Yöneticiyi bekliyor. Günü yine de kapatabilirsiniz."], "«Продажи» → «На проверку».": ["«Sales» → «To review».", "«Satışlar» → «Kontrol edilecek»."], "День уже закрыт": ["The day is already closed", "Gün zaten kapatıldı"], "Если закрыть ещё раз, запись заменится": ["If you close it again, the record will be replaced", "Tekrar kapatırsanız kayıt değiştirilir"], "(админ увидит обе)": ["(the admin will see both)", "(yönetici ikisini de görür)"], "Наличные в кассе": ["Cash in the till", "Kasadaki nakit"], "Пересчитайте все деньги в кассе вместе с разменом.": ["Count all the money in the till, including the float.", "Kasadaki tüm parayı bozuk para dahil sayın."], "Пересчитайте все деньги в кассе вместе с разменом и впишите сумму. Сколько должно быть, программа не показывает: разницу увидит админ.": ["Count all the money in the till, including the float, and enter the sum. The program does not show how much there should be: the admin will see the difference.", "Kasadaki tüm parayı bozuk para dahil sayın ve toplamı yazın. Program ne kadar olması gerektiğini göstermez: farkı yönetici görür."], "Размен утром, ₺": ["Morning float, ₺", "Sabah bozuk para, ₺"], "Размен утром": ["Morning float", "Sabah bozuk para"], "размен утром": ["morning float", "sabah bozuk para"], "Сейчас в кассе, всего ₺": ["In the till now, total ₺", "Şu an kasada, toplam ₺"], "Терминал карт": ["Card terminal", "Kart terminali"], "Итог по терминалу за день, ₺": ["Terminal total for the day, ₺", "Günlük terminal toplamı, ₺"], "Сумма из отчёта терминала за день. Если по карте сегодня не платили — оставьте пусто.": ["The total from the terminal's day report. If nobody paid by card today, leave it empty.", "Terminalin gün sonu raporundaki toplam. Bugün kartla ödeme yoksa boş bırakın."], "Например: почему не сходится": ["E.g.: why it does not match", "Ör.: neden tutmuyor"], "Закрывает": ["Closing by", "Kapatan"], "Должно быть в кассе": ["Should be in the till", "Kasada olması gereken"], "Разница": ["Difference", "Fark"], "сходится": ["matches", "tutuyor"], "недостача": ["shortage", "eksik"], "излишек": ["surplus", "fazla"], "По карте в программе": ["By card in the program", "Programda kartla"], "Впишите, сколько всего денег в кассе (можно 0)": ["Enter how much money is in the till in total (0 is fine)", "Kasada toplam ne kadar para olduğunu yazın (0 olabilir)"], "Введите размен числом или оставьте пусто": ["Enter the float as a number or leave it empty", "Bozuk parayı sayı olarak girin veya boş bırakın"], "Введите сумму числом или оставьте пусто": ["Enter the amount as a number or leave it empty", "Tutarı sayı olarak girin veya boş bırakın"], "Открытых заказов": ["Open orders", "Açık sipariş"], "Их деньги не войдут в этот день. Всё равно закрыть день?": ["Their money will not count in this day. Close the day anyway?", "Bunların parası bu güne girmez. Günü yine de kapatalım mı?"], "День закрыт. Спасибо! Итоги увидит админ.": ["The day is closed. Thank you! The admin will see the totals.", "Gün kapatıldı. Teşekkürler! Sonuçları yönetici görecek."], "День закрыт": ["The day is closed", "Gün kapatıldı"], "наличные": ["cash", "nakit"], "кассовые расходы": ["cash expenses", "kasa giderleri"], "Насчитали в кассе": ["Counted in the till", "Kasada sayılan"], "Карты": ["Cards", "Kartlar"], "карты": ["cards", "kartlar"], "По терминалу": ["By terminal", "Terminale göre"], "не введено": ["not entered", "girilmedi"], "После закрытия дня суммы изменились: сейчас в кассе должно быть": ["The amounts changed after the day was closed: the till should now hold", "Gün kapatıldıktan sonra tutarlar değişti: şimdi kasada olması gereken"], "по карте": ["by card", "kartla"], "Например, закрыли ещё заказ или исправили кассовый расход.": ["For example, another order was closed or a cash expense was corrected.", "Örneğin bir sipariş daha kapatıldı veya bir kasa gideri düzeltildi."], "Закрывали раньше": ["Closed earlier", "Daha önce kapatan"], "Закрытие дня за период": ["Day closings in the period", "Dönemdeki gün sonları"], "дней": ["days", "gün"], "В прибыль не входит, для сведения.": ["Not included in profit, for information.", "Kâra dahil değildir, bilgi içindir."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
