@@ -382,6 +382,12 @@ button.chip{cursor:pointer}
 .row .nm small.needtxt,.needtxt{color:var(--empty);font-weight:500}
 .tile.needs{border-color:var(--empty);box-shadow:inset 0 0 0 1px var(--empty)}
 .tile.needs small.needtxt{color:var(--empty)}
+.tile.stopped{background:var(--bg);border-style:dashed;color:var(--muted)}
+.tile.stopped>span{text-decoration:line-through}
+.tile.stopped small.stoptxt,.stoptxt{color:var(--empty);font-weight:500}
+.tag.stop{background:var(--empty-bg);color:var(--empty)}
+.ostop{margin:0 0 10px;padding:8px 12px;border-radius:var(--radius-s);background:var(--empty-bg);color:var(--ink)}
+.bell{margin-left:auto}
 .needbox{border-color:var(--empty)}
 .needbox .toggle{color:var(--empty);font-weight:600}
 .langs{position:relative}
@@ -1773,13 +1779,13 @@ function renderMenu(L){
   const sets = sortedSets().filter(ok), dishes = sortedDishes().filter(ok);
   const need = x => x.needsWork ? `<small class="needtxt">⚠ Доработать${x.todo?": "+esc(x.todo):""}</small>` : "";
   let html = sets.length || !S.needOnly ? `<h2 class="cat"><span>Сеты</span><span>${sets.length}</span></h2>` : "";
-  html += sets.length ? `<div class="list">${sets.map(x=>`<button class="row ${x.needsWork?"needs":""}" style="border-left-color:var(--low)" data-editset="${esc(x.id)}"><span class="nm">${N(dn(x))}${x.price&&isAdmin()?` · ${money(x.price)}`:""}<small>${isAdmin()?esc(costLine(Number(x.price)||0, setCost(x)))+"<br>":""}${(x.items||[]).map(i=>{ const d=dishById(i.dishId); return (d?N(dn(d)):"удалённое блюдо")+((Number(i.qty)||1)>1?" ×"+i.qty:""); }).join(", ") || "состав пуст"}</small>${need(x)}</span>${x.needsWork?'<span class="tag need">доработать</span>':""}${x.active===false?'<span class="tag hid">скрыт</span>':""}</button>`).join("")}</div>`
+  html += sets.length ? `<div class="list">${sets.map(x=>`<button class="row ${x.needsWork?"needs":""}" style="border-left-color:var(--low)" data-editset="${esc(x.id)}"><span class="nm">${N(dn(x))}${x.price&&isAdmin()?` · ${money(x.price)}`:""}<small>${isAdmin()?esc(costLine(Number(x.price)||0, setCost(x)))+"<br>":""}${(x.items||[]).map(i=>{ const d=dishById(i.dishId); return (d?N(dn(d)):"удалённое блюдо")+((Number(i.qty)||1)>1?" ×"+i.qty:""); }).join(", ") || "состав пуст"}</small>${need(x)}</span>${x.needsWork?'<span class="tag need">доработать</span>':""}${stopOf("set", x.id)?'<span class="tag stop">закончилось</span>':""}${x.active===false?'<span class="tag hid">скрыт</span>':""}</button>`).join("")}</div>`
     : (S.needOnly ? "" : `<div class="empty-state">Сетов пока нет.</div>`);
   if (!S.menu.length){ L.innerHTML = html + `<div class="empty-state" style="margin-top:14px">Блюд пока нет. Нажмите «Новое блюдо».</div>`; return; }
   if (!dishes.length && !sets.length){ L.innerHTML = `<div class="empty-state">Ничего не найдено.</div>`; return; }
   html += grouped(dishes, d => {
     const n = (d.items||[]).length, inSets = setsWithDish(d.id).map(x=>dn(x));
-    return `<button class="row ${d.needsWork?"needs":""}" style="border-left-color:${n?"var(--line)":"var(--empty)"}" data-editdish="${esc(d.id)}"><span class="nm">${N(dn(d))}<small>${isAdmin() ? (d.price?money(d.price):"без цены") + " · " + (n ? esc(costLine(Number(d.price)||0, dishCost(d))) : "техкарта не заполнена") : (n ? `${n} продукт(ов) в техкарте` : "техкарта не заполнена")}${inSets.length?" · в сетах: "+N(inSets.join(", ")):""}</small>${need(d)}</span>${d.needsWork?'<span class="tag need">доработать</span>':""}${d.active===false?'<span class="tag hid">скрыт</span>':""}</button>`;
+    return `<button class="row ${d.needsWork?"needs":""}" style="border-left-color:${n?"var(--line)":"var(--empty)"}" data-editdish="${esc(d.id)}"><span class="nm">${N(dn(d))}<small>${isAdmin() ? (d.price?money(d.price):"без цены") + " · " + (n ? esc(costLine(Number(d.price)||0, dishCost(d))) : "техкарта не заполнена") : (n ? `${n} продукт(ов) в техкарте` : "техкарта не заполнена")}${inSets.length?" · в сетах: "+N(inSets.join(", ")):""}</small>${need(d)}</span>${d.needsWork?'<span class="tag need">доработать</span>':""}${stopOf("dish", d.id)?'<span class="tag stop">закончилось</span>':""}${d.active===false?'<span class="tag hid">скрыт</span>':""}</button>`;
   });
   L.innerHTML = html;
 }
@@ -2185,6 +2191,48 @@ function shortOf(kind, id, ctx){
   const {ing} = expandCart([{kind, id, qty:1}]);
   return Object.entries(ing).filter(([pid,q]) => ctx.counted.has(pid) && (ctx.st[pid]||0) < q).map(([pid]) => dn(byId(pid)));
 }
+/* ----- stop-list (Д5) ----- */
+// a dish or a set that ran out: its own document settings/stop~<kind>~<id> (so two devices marking different dishes never overwrite each other);
+// in «Новый заказ» it is grey and is not added until the mark is taken off. A set is out too when one of its dishes is.
+const stopId = (kind, id) => "stop~" + kind + "~" + id;
+const stopMark = (kind, id) => S.settings.find(x=>x.id===stopId(kind, id));
+function stopOf(kind, id){
+  const m = stopMark(kind, id); if (m) return m;
+  if (kind!=="set") return null;
+  const st = setById(id);
+  for (const i of (st && st.items) || []){ const d = stopMark("dish", i.dishId); if (d) return Object.assign({}, d, {via: i.dishId}); }
+  return null;
+}
+const stopList = () => S.settings.filter(x=>x.id.startsWith("stop~")).map(x=>({m:x, src: x.kind==="set" ? setById(x.ref) : dishById(x.ref)})).filter(x=>x.src);
+const stopTxt = m => m.via ? `нет блюда: ${dn(dishById(m.via)||{name:"?"})}` : `закончилось${m.by ? " · " + m.by : ""}${m.ts ? ", " + hhmm(m.ts) : ""}`;
+const stopHtml = m => m.via ? `нет блюда: ${N(dn(dishById(m.via)||{name:"?"}))}` : `закончилось${m.by ? " · " + N(m.by) : ""}${m.ts ? ", " + hhmm(m.ts) : ""}`;
+async function toggleStop(kind, id){
+  if (!can("stopList")) return;
+  const src = kind==="set" ? setById(id) : dishById(id); if (!src) return;
+  const m = stopOf(kind, id);
+  if (m && m.via){ toast(`В сете есть блюдо «${dn(dishById(m.via)||{name:"?"})}», оно закончилось. Снимите метку с этого блюда.`); return; }
+  const on = !m, sid = stopId(kind, id);
+  try {
+    await commit((on ? "Стоп-лист: " : "Снова есть: ") + src.name, [{col:"settings", id:sid, after: on ? {id:sid, kind, ref:id, by:whoNow(), ts:Date.now()} : null}]);
+    render(); toast(on ? `«${dn(src)}» в стоп-листе: в «Новом заказе» оно серое` : `«${dn(src)}» снова есть`);
+  } catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте интернет."); }
+}
+function renderStop(L){
+  const q = S.saleQ.trim().toLowerCase();
+  const tile = (kind, x) => { const m = stopOf(kind, x.id);
+    return `<button class="tile ${kind==="set"?"set":""} ${m?"stopped":""}" data-stop="${kind}:${esc(x.id)}" aria-pressed="${m?"true":"false"}"><span>${N(dn(x))}</span><small class="${m?"stoptxt":""}">${m ? stopHtml(m) : "в продаже"}</small></button>`; };
+  const ok = x => x.active!==false && (!q || allNames(x).some(n=>n.toLowerCase().includes(q)));
+  let html = "";
+  const now = stopList().filter(x=>ok(x.src));
+  if (now.length) html += `<h2 class="cat"><span>Сейчас в стоп-листе</span><span>${now.length}</span></h2><div class="tiles">${now.map(x=>tile(x.m.kind, x.src)).join("")}</div>`;
+  const sets = sortedSets().filter(ok);
+  if (sets.length) html += `<h2 class="cat"><span>Сеты</span><span>${sets.length}</span></h2><div class="tiles">${sets.map(x=>tile("set", x)).join("")}</div>`;
+  let cur=null, buf=[];
+  const flush = () => { if (cur!==null) html += `<h2 class="cat"><span>${esc(cur)}</span><span>${buf.length}</span></h2><div class="tiles">${buf.join("")}</div>`; };
+  for (const d of sortedDishes().filter(ok)){ if (d.category!==cur){ flush(); cur=d.category; buf=[]; } buf.push(tile("dish", d)); }
+  flush();
+  L.innerHTML = html || `<div class="empty-state">${S.menu.length||S.sets.length ? "Ничего не найдено." : "Меню пустое. Добавьте блюда в разделе «Меню»."}</div>`;
+}
 function orderWhere(o){
   if (o.type==="hall") return o.table ? `стол ${esc(o.table)}` : "";
   return esc([o.name, o.phone].filter(Boolean).join(", "));
@@ -2206,15 +2254,18 @@ function dupSales(){
     return {o, a, extra: a.filter(x=>x.id!==keep).reduce((t,x)=>t+saleFood(x), 0), ts: Math.min(...a.map(x=>x.ts||0))}; }).sort((p,q)=>q.ts-p.ts);
 }
 function renderOrdersControls(c){
-  const open = S.orders.filter(isOpen).length, nReq = S.orders.filter(voidReqOf).length, nRev = isAdmin() ? revItems().length : 0;
+  const open = S.orders.filter(isOpen).length, nReq = S.orders.filter(voidReqOf).length, nRev = isAdmin() ? revItems().length : 0, stops = stopList(), nStop = stops.length;
   const seg = (v, t) => `<button class="btn small ${S.ordView===v?"primary":""}" data-ordview="${v}">${t}</button>`;
   const acts = (can("orderEdit") ? `
       <button class="btn act-in" data-onew="hall">+ Новый заказ</button>` : "")
     + (can("dishOff") ? `<button class="btn act-off ${S.ordView==="woff"?"primary":""}" data-ordview="woff">Списать блюда</button>` : "")
     + (can("orderPay") ? `<button class="btn act-day" data-dayclose="">Закрытие дня${closeOf(todayKey()) ? " ✓" : ""}</button>` : "");
   c.innerHTML = (acts ? `<div class="actions oacts">${acts}</div>` : "") + `
-    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}${isAdmin() ? seg("rev", `На проверку${nRev?` (${nRev})`:""}`) : ""}
-      ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}</div>`;
+    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}${isAdmin() ? seg("rev", `На проверку${nRev?` (${nRev})`:""}`) : ""}${can("stopList") ? seg("stop", `Стоп-лист${nStop?` (${nStop})`:""}`) : ""}
+      ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}${bellBtn()}</div>`;
+  if (S.ordView==="open" && nStop) c.innerHTML += `<div class="ostop"><b>Стоп-лист:</b> ${N(stops.map(x=>dn(x.src)).join(", "))}</div>`;
+  if (S.ordView==="stop") c.innerHTML += `<div class="controls"><input class="search" id="sq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.saleQ)}" aria-label="Поиск блюда"></div>
+      <p class="hint" style="margin:0 0 10px">Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.</p>`;
   const dup = isAdmin() ? dupSales() : [];
   const dn2 = isAdmin() ? dupNums() : [];
   if (dn2.length) c.innerHTML += `<div class="oreq" style="margin-top:8px"><b>Одинаковые номера заказов в один день:</b> ${dn2.map(d=>`№${esc(d.num)} (${dmy(d.day)}), заказов: ${d.n}`).join("; ")}</div>`;
@@ -2263,6 +2314,7 @@ function renderOrders(L){
   if (S.ordView==="report") return renderReport(L);
   if (S.ordView==="rev") return renderRev(L);
   if (S.ordView==="woff") return renderDishOff(L);
+  if (S.ordView==="stop"){ if (can("stopList")) return renderStop(L); S.ordView = "open"; }
   let list;
   if (S.ordView==="req" && !isAdmin()) S.ordView = "open";
   if (S.ordView==="open") list = S.orders.filter(isOpen).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
@@ -2820,7 +2872,8 @@ function takeTableOrder(id){
 }
 function renderODPick(){
   const q = OD.q.trim().toLowerCase(), ctx = stopCtx();
-  const tile = (kind, x) => { const sh = shortOf(kind, x.id, ctx); const price = Number(x.price)||0;
+  const tile = (kind, x) => { const sh = shortOf(kind, x.id, ctx); const price = Number(x.price)||0, stp = stopOf(kind, x.id);
+    if (stp) return `<button type="button" class="tile ${kind==="set"?"set":""} stopped" data-oadd="${kind}:${esc(x.id)}" aria-disabled="true"><span>${N(dn(x))}</span><small class="stoptxt">${stopHtml(stp)}</small></button>`;
     return `<button type="button" class="tile ${kind==="set"?"set":""} ${x.needsWork?"needs":""}" data-oadd="${kind}:${esc(x.id)}"><span>${N(dn(x))}</span><small>${price?money(price):"без цены"}${sh.length?` · <span class="neg">нет: ${esc(sh.slice(0,2).join(", "))}${sh.length>2?"…":""}</span>`:""}</small></button>`; };
   const sets = sortedSets().filter(x=>x.active!==false && (!q || allNames(x).some(n=>n.toLowerCase().includes(q))));
   const dishes = sortedDishes().filter(d=>d.active!==false && (!q || allNames(d).some(n=>n.toLowerCase().includes(q))));
@@ -2916,6 +2969,8 @@ $("#orderDlg").addEventListener("click", e=>{
   const a = e.target.closest("[data-oadd]");
   if (a){
     const [kind, id] = a.dataset.oadd.split(/:(.*)/s);
+    const stp = stopOf(kind, id);
+    if (stp){ toast(`«${lineName({kind,id})}» в стоп-листе (${stopTxt(stp)}). Снять метку: Продажи → Стоп-лист.`); renderODPick(); return; }
     const ex = OD.lines.find(l=>l.kind===kind && l.id===id && !l.comment && !l.promo);
     if (ex) ex.qty++; else OD.lines.push({kind, id, name: lineName({kind,id}), qty:1, price:itemPrice({kind,id}), comment:""});
     renderODLines(); return;
@@ -3470,6 +3525,53 @@ $("#packForm").addEventListener("submit", async e=>{
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
 
+/* ----- sound for a new order (Д3) ----- */
+// on/off is kept on this device only. A browser plays sound only after the screen was touched once since the page opened,
+// so the sound is unlocked on the first touch; until then the button says so. Orders made on this device do not ring here.
+const BELL = {ctx:null, seen:new Set()};
+const bellOn = () => lsGet("sushi.bell")==="1";
+const bellReady = () => !!(BELL.ctx && BELL.ctx.state==="running");
+function bellCtx(){
+  if (!BELL.ctx){ const A = window.AudioContext || window.webkitAudioContext; if (!A) return null; try { BELL.ctx = new A(); } catch(e){ return null; } }
+  if (BELL.ctx.state==="suspended") BELL.ctx.resume().then(()=>{ if (S.view==="orders") render(); }).catch(()=>{});
+  return BELL.ctx;
+}
+function bellPlay(){
+  const ctx = bellCtx(); if (!ctx) return;
+  const t0 = ctx.currentTime + 0.02;
+  [[880,0],[1320,0.22],[880,0.6],[1320,0.82]].forEach(([f, at])=>{
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.0001, t0+at); g.gain.exponentialRampToValueAtTime(0.7, t0+at+0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0+at+0.35);
+    o.start(t0+at); o.stop(t0+at+0.4);
+  });
+  try { if (navigator.vibrate) navigator.vibrate([200,100,200]); } catch(e){}
+}
+function bellBtn(){
+  const on = bellOn();
+  return `<button class="btn small bell ${on?"primary":""}" data-bell aria-pressed="${on}" title="Звук при новом заказе — только на этом устройстве">${on ? (bellReady() ? "🔔 Звук новых заказов: вкл" : "🔔 Коснитесь экрана, чтобы включить звук") : "🔕 Звук новых заказов: выкл"}</button>`;
+}
+function bellToggle(){
+  // on, but the browser has not let it play yet: the touch on this button unlocks it (it does not switch it off)
+  if (bellOn() && !bellReady()){ bellPlay(); toast("Звук включён на этом устройстве: при новом заказе прозвучит сигнал"); render(); return; }
+  const on = !bellOn(); lsSet("sushi.bell", on ? "1" : "0");
+  if (on){ bellPlay(); toast("Звук включён на этом устройстве: при новом заказе прозвучит сигнал"); }
+  else toast("Звук выключен на этом устройстве");
+  render();
+}
+// orders that were not here a moment ago and were made just now on another device (a device that was offline brings older ones: no sound)
+function bellNew(prev){
+  const had = new Set(prev.map(o=>o.id));
+  const fresh = S.orders.filter(o=>!had.has(o.id) && !BELL.seen.has(o.id) && isOpen(o) && Date.now() - (o.createdAt||0) < 10*60000);
+  if (!fresh.length) return;
+  fresh.forEach(o=>BELL.seen.add(o.id));
+  if (!bellOn()) return;
+  bellPlay();
+  const o = fresh[fresh.length-1], w = o.type==="hall" ? (o.table ? "стол " + o.table : "") : [o.name, o.phone].filter(Boolean).join(", ");
+  toast(fresh.length > 1 ? `Новые заказы: ${fresh.length}` : `Новый заказ №${o.num} · ${OTYPES[o.type]}${w ? " · " + w : ""}`);
+}
+["pointerdown","keydown"].forEach(ev=>document.addEventListener(ev, e=>{ if (bellOn() && !bellReady() && !(e.target.closest && e.target.closest("[data-bell]"))) bellCtx(); }, true));
+
 /* ----- timers ----- */
 setInterval(()=>{ if (S.view==="orders" && S.ordView==="open" && !document.querySelector("dialog[open]")) renderList(); }, 30000);
 
@@ -3477,7 +3579,7 @@ setInterval(()=>{ if (S.view==="orders" && S.ordView==="open" && !document.query
 const ROLES = {admin:"Админ", worker:"Работник ресторана"};
 const roleOf = st => st && st.role==="admin" ? "admin" : "worker";
 const PERM = {
-  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, prices:1, menuView:1, dishOff:1}
+  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, prices:1, menuView:1, dishOff:1, stopList:1}
 };
 const ALL_VIEWS = ["orders","cash","hist","menu","stock","inv","staff","fin"];
 function can(k){ if (!S.me) return false; if (S.me.role==="admin") return true; const p = PERM[S.me.role]; return !!(p && p[k]); }
@@ -4287,7 +4389,7 @@ $("#navBtn").addEventListener("click", ()=>setNav(!document.body.classList.conta
 $("#navShade").addEventListener("click", ()=>setNav(false));
 document.addEventListener("keydown", e=>{ if (e.key==="Escape" && document.body.classList.contains("navOpen")) setNav(false); });
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-onew],[data-oedit],[data-onext],[data-opay],[data-ocancel],[data-oreopen],[data-ovoid],[data-vok],[data-vno],[data-ordview],#openPack,#openCut,[data-add],[data-editdish],[data-editset],#addDish,#addSet,#openCart,[data-new],[data-cook],[data-prod],[data-edit],[data-delmove],[data-go],#addProd,#invSave,#invReset");
+  const t = e.target.closest("[data-onew],[data-oedit],[data-onext],[data-opay],[data-ocancel],[data-oreopen],[data-ovoid],[data-vok],[data-vno],[data-ordview],[data-stop],[data-bell],#openPack,#openCut,[data-add],[data-editdish],[data-editset],#addDish,#addSet,#openCart,[data-new],[data-cook],[data-prod],[data-edit],[data-delmove],[data-go],#addProd,#invSave,#invReset");
   if (!t) return;
   if ((t.dataset.new || t.dataset.cook!==undefined || t.id==="openCut") && !can("move")) return;
   if ((t.dataset.edit || t.id==="addProd" || t.dataset.delmove || t.dataset.oreopen || t.id==="openPack" || t.id==="addDish" || t.id==="addSet") && !isAdmin()) return;
@@ -4306,6 +4408,8 @@ document.addEventListener("click", async e => {
   if (t.dataset.vok) return guarded(()=>decideVoid(t.dataset.vok, true));
   if (t.dataset.vno) return guarded(()=>decideVoid(t.dataset.vno, false));
   if (t.dataset.ordview){ S.ordView = t.dataset.ordview; return render(true); }
+  if (t.dataset.stop){ const [kind, id] = t.dataset.stop.split(/:(.*)/s); return guarded(()=>toggleStop(kind, id)); }
+  if (t.dataset.bell!==undefined) return bellToggle();
   if (t.id==="openPack") return openPack();
   if (t.id==="openCut") return openCut();
   if (t.dataset.add){ const [kind, id] = t.dataset.add.split(/:(.*)/s); cartAdd(kind, id, 1); return render(); }
@@ -4428,6 +4532,7 @@ Object.assign(I18N, {"Списать блюда": ["Write off dishes", "Yemek fi
 Object.assign(I18N, {"Перейти к дню": ["Go to day", "Güne git"], "Показано:": ["Shown:", "Gösterilen:"], "всего:": ["total:", "toplam:"], "Показать ещё": ["Show more", "Daha fazla göster"], "Исправить расход": ["Edit expense", "Gideri düzelt"], "Исправить или удалить": ["Edit or delete", "Düzelt veya sil"]});
 Object.assign(I18N, {"Нал + карта": ["Cash + card", "Nakit + kart"], "Наличными, ₺": ["In cash, ₺", "Nakit, ₺"], "Картой, ₺": ["By card, ₺", "Kartla, ₺"], "наличными": ["in cash", "nakit"], "картой": ["by card", "kartla"], "Клиент дал наличными, ₺": ["Customer gave in cash, ₺", "Müşterinin verdiği nakit, ₺"], "без сдачи — пусто": ["no change — leave empty", "para üstü yoksa boş"], "Не хватает": ["Short by", "Eksik"], "Сдача": ["Change", "Para üstü"], "сдача": ["change", "para üstü"], "Наличными меньше, чем «К оплате». Если всё наличными — выберите «Наличные».": ["The cash part must be less than the amount due. If it is all cash, choose «Cash».", "Nakit kısım ödenecek tutardan az olmalı. Hepsi nakitse «Nakit» seçin."], "Сколько клиент платит наличными? Остальное — картой.": ["How much does the customer pay in cash? The rest is by card.", "Müşteri ne kadar nakit ödüyor? Kalanı kartla."], "Введите сумму числом": ["Enter the amount as a number", "Tutarı sayı olarak girin"], "Клиент дал меньше, чем нужно наличными": ["The customer gave less than the cash due", "Müşterinin verdiği nakit yetersiz"], "Оплачено частями (нал + карта)": ["Paid in parts (cash + card)", "Parçalı ödeme (nakit + kart)"], "Такой заказ входит и в «Наличные», и в «Карта» — своей частью.": ["Such an order counts in both «Cash» and «Card», each with its own part.", "Böyle bir sipariş hem «Nakit» hem «Kart» satırına kendi payıyla girer."], "Закрытие дня": ["Day closing", "Gün sonu"], "Закрыть день": ["Close the day", "Günü kapat"], "Закрыть заново": ["Close again", "Yeniden kapat"], "День не закрыт: наличные и терминал не сверены.": ["The day is not closed: cash and card terminal are not checked.", "Gün kapatılmadı: nakit ve kart terminali kontrol edilmedi."], "Проверьте, всё ли закрыто": ["Check that everything is closed", "Her şeyin kapalı olduğunu kontrol edin"], "Открытые заказы": ["Open orders", "Açık siparişler"], "Открытых заказов нет": ["No open orders", "Açık sipariş yok"], "Показать открытые заказы": ["Show open orders", "Açık siparişleri göster"], "Смена не закрыта": ["Shifts not closed", "Kapatılmamış vardiya"], "Все смены закрыты": ["All shifts are closed", "Tüm vardiyalar kapalı"], "(вы)": ["(you)", "(siz)"], "смена с": ["shift since", "vardiya başlangıcı"], "Каждый закрывает свою смену на экране входа, когда уходит.": ["Everyone closes their own shift on the login screen when leaving.", "Herkes çıkarken kendi vardiyasını giriş ekranında kapatır."], "Запросы на отмену или списание заказа": ["Requests to cancel or write off an order", "Sipariş iptal veya zayi talepleri"], "Ответьте в «Продажи» → «Запросы на отмену».": ["Answer them in «Sales» → «Cancel requests».", "«Satışlar» → «İptal talepleri» bölümünde yanıtlayın."], "Ждут решения админа. Закрыть день можно.": ["Waiting for the admin's decision. You can still close the day.", "Yönetici kararını bekliyor. Günü yine de kapatabilirsiniz."], "Пересчёты ждут утверждения": ["Recounts waiting for approval", "Onay bekleyen sayımlar"], "Утвердите в разделе «Инвентаризация».": ["Approve them in «Stock count».", "«Sayım» bölümünde onaylayın."], "Ждут админа. Закрыть день можно.": ["Waiting for the admin. You can still close the day.", "Yöneticiyi bekliyor. Günü yine de kapatabilirsiniz."], "«Продажи» → «На проверку».": ["«Sales» → «To review».", "«Satışlar» → «Kontrol edilecek»."], "День уже закрыт": ["The day is already closed", "Gün zaten kapatıldı"], "Если закрыть ещё раз, запись заменится": ["If you close it again, the record will be replaced", "Tekrar kapatırsanız kayıt değiştirilir"], "(админ увидит обе)": ["(the admin will see both)", "(yönetici ikisini de görür)"], "Наличные в кассе": ["Cash in the till", "Kasadaki nakit"], "Пересчитайте все деньги в кассе вместе с разменом.": ["Count all the money in the till, including the float.", "Kasadaki tüm parayı bozuk para dahil sayın."], "Пересчитайте все деньги в кассе вместе с разменом и впишите сумму. Сколько должно быть, программа не показывает: разницу увидит админ.": ["Count all the money in the till, including the float, and enter the sum. The program does not show how much there should be: the admin will see the difference.", "Kasadaki tüm parayı bozuk para dahil sayın ve toplamı yazın. Program ne kadar olması gerektiğini göstermez: farkı yönetici görür."], "Размен утром, ₺": ["Morning float, ₺", "Sabah bozuk para, ₺"], "Размен утром": ["Morning float", "Sabah bozuk para"], "размен утром": ["morning float", "sabah bozuk para"], "Сейчас в кассе, всего ₺": ["In the till now, total ₺", "Şu an kasada, toplam ₺"], "Терминал карт": ["Card terminal", "Kart terminali"], "Итог по терминалу за день, ₺": ["Terminal total for the day, ₺", "Günlük terminal toplamı, ₺"], "Сумма из отчёта терминала за день. Если по карте сегодня не платили — оставьте пусто.": ["The total from the terminal's day report. If nobody paid by card today, leave it empty.", "Terminalin gün sonu raporundaki toplam. Bugün kartla ödeme yoksa boş bırakın."], "Например: почему не сходится": ["E.g.: why it does not match", "Ör.: neden tutmuyor"], "Закрывает": ["Closing by", "Kapatan"], "Должно быть в кассе": ["Should be in the till", "Kasada olması gereken"], "Разница": ["Difference", "Fark"], "сходится": ["matches", "tutuyor"], "недостача": ["shortage", "eksik"], "излишек": ["surplus", "fazla"], "По карте в программе": ["By card in the program", "Programda kartla"], "Впишите, сколько всего денег в кассе (можно 0)": ["Enter how much money is in the till in total (0 is fine)", "Kasada toplam ne kadar para olduğunu yazın (0 olabilir)"], "Введите размен числом или оставьте пусто": ["Enter the float as a number or leave it empty", "Bozuk parayı sayı olarak girin veya boş bırakın"], "Введите сумму числом или оставьте пусто": ["Enter the amount as a number or leave it empty", "Tutarı sayı olarak girin veya boş bırakın"], "Открытых заказов": ["Open orders", "Açık sipariş"], "Их деньги не войдут в этот день. Всё равно закрыть день?": ["Their money will not count in this day. Close the day anyway?", "Bunların parası bu güne girmez. Günü yine de kapatalım mı?"], "День закрыт. Спасибо! Итоги увидит админ.": ["The day is closed. Thank you! The admin will see the totals.", "Gün kapatıldı. Teşekkürler! Sonuçları yönetici görecek."], "День закрыт": ["The day is closed", "Gün kapatıldı"], "наличные": ["cash", "nakit"], "кассовые расходы": ["cash expenses", "kasa giderleri"], "Насчитали в кассе": ["Counted in the till", "Kasada sayılan"], "Карты": ["Cards", "Kartlar"], "карты": ["cards", "kartlar"], "По терминалу": ["By terminal", "Terminale göre"], "не введено": ["not entered", "girilmedi"], "После закрытия дня суммы изменились: сейчас в кассе должно быть": ["The amounts changed after the day was closed: the till should now hold", "Gün kapatıldıktan sonra tutarlar değişti: şimdi kasada olması gereken"], "по карте": ["by card", "kartla"], "Например, закрыли ещё заказ или исправили кассовый расход.": ["For example, another order was closed or a cash expense was corrected.", "Örneğin bir sipariş daha kapatıldı veya bir kasa gideri düzeltildi."], "Закрывали раньше": ["Closed earlier", "Daha önce kapatan"], "Закрытие дня за период": ["Day closings in the period", "Dönemdeki gün sonları"], "дней": ["days", "gün"], "В прибыль не входит, для сведения.": ["Not included in profit, for information.", "Kâra dahil değildir, bilgi içindir."]});
 Object.assign(I18N, {"Удержание с оплаты картой": ["Card payment deduction", "Kartlı ödeme kesintisi"], "КДВ и комиссия банка. В «Финансах» вычитается из суммы, которую клиенты заплатили картой.": ["VAT (KDV) and the bank commission. In «Finance» it is taken off the amount customers paid by card.", "KDV ve banka komisyonu. «Finans» bölümünde müşterilerin kartla ödediği tutardan düşülür."], "Удерживается, % от оплаты картой": ["Deducted, % of card payments", "Kesinti, kartlı ödemenin %'si"], "КДВ 10% + комиссия банка. Точную комиссию видно в выписке банка: сравните итог терминала за день с суммой, которая пришла на счёт. 0 — не вычитать.": ["VAT (KDV) 10% + bank commission. The exact commission is in the bank statement: compare the terminal's day total with the amount that reached the account. 0 — do not deduct.", "KDV %10 + banka komisyonu. Kesin komisyon banka ekstresinde görünür: terminalin gün toplamını hesaba geçen tutarla karşılaştırın. 0 — düşme."], "Удержание с карт": ["Card deduction", "Kart kesintisi"], "С оплаты картой вычитается": ["Deducted from card payments:", "Kartlı ödemelerden düşülen:"], "(КДВ и комиссия банка).": ["(VAT (KDV) and bank commission).", "(KDV ve banka komisyonu)."], "Удержание с оплат картой": ["Card payment deductions", "Kartlı ödeme kesintileri"], "КДВ и комиссия банка": ["VAT (KDV) and bank commission", "KDV ve banka komisyonu"], "оплачено картой": ["paid by card", "kartla ödenen"], "удержание": ["deduction", "kesinti"], "Введите процент от 0 до 100": ["Enter a percentage from 0 to 100", "0 ile 100 arasında bir yüzde girin"]});
+Object.assign(I18N, {"Стоп-лист": ["Stop list", "Tükenenler"], "Сейчас в стоп-листе": ["In the stop list now", "Şu an tükenenler"], "в стоп-листе": ["in the stop list", "tükenenlerde"], "закончилось": ["sold out", "tükendi"], "в продаже": ["available", "satışta"], "нет блюда:": ["dish out:", "tükenen yemek:"], "снова есть": ["is available again", "yeniden var"], "Снова есть": ["Available again", "Yeniden var"], "Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.": ["Tap a dish or set that has run out: in «New order» it turns grey and cannot be added. When it is available again, tap it once more.", "Tükenen yemeğe veya sete dokunun: «Yeni sipariş» ekranında gri olur ve eklenemez. Yeniden olduğunda bir kez daha dokunun."], "в стоп-листе: в «Новом заказе» оно серое": ["is in the stop list: it is grey in «New order»", "tükenenlerde: «Yeni sipariş» ekranında gri"], "В сете есть блюдо": ["The set contains the dish", "Sette şu yemek var:"], "оно закончилось. Снимите метку с этого блюда.": ["it has run out. Take the mark off that dish.", "tükendi. İşareti o yemekten kaldırın."], "Снять метку: Продажи → Стоп-лист.": ["To take the mark off: Sales → Stop list.", "İşareti kaldırmak için: Satışlar → Tükenenler."], "Не удалось сохранить. Проверьте интернет.": ["Could not save. Check the internet connection.", "Kaydedilemedi. İnternet bağlantısını kontrol edin."], "Звук новых заказов: вкл": ["New order sound: on", "Yeni sipariş sesi: açık"], "Звук новых заказов: выкл": ["New order sound: off", "Yeni sipariş sesi: kapalı"], "Коснитесь экрана, чтобы включить звук": ["Touch the screen to turn the sound on", "Sesi açmak için ekrana dokunun"], "Звук при новом заказе — только на этом устройстве": ["Sound on a new order — on this device only", "Yeni siparişte ses — yalnızca bu cihazda"], "Звук включён на этом устройстве: при новом заказе прозвучит сигнал": ["Sound is on on this device: a signal will play on a new order", "Bu cihazda ses açık: yeni siparişte sinyal çalacak"], "Звук выключен на этом устройстве": ["Sound is off on this device", "Bu cihazda ses kapalı"], "Новые заказы:": ["New orders:", "Yeni siparişler:"]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
@@ -4633,8 +4738,8 @@ function startSubs(){
   syncSub("menu", list => { S.menu = list; S.loaded.menu = true; render(); });
   syncSub("sets", list => { S.sets = list; S.loaded.sets = true; render(); });
   syncSub("sales", list => { S.sales = list; S.loaded.sales = true; render(); });
-  syncSub("orders", list => { const prev = S.orders; S.orders = list; S.loaded.orders = true; liveOrder(); render(); numMoved(prev); fixNums(); });
-  syncSub("settings", list => { S.settings = list; S.loaded.settings = true; render(); });
+  syncSub("orders", list => { const prev = S.orders, was = S.loaded.orders; S.orders = list; if (was) bellNew(prev); S.loaded.orders = true; liveOrder(); render(); numMoved(prev); fixNums(); });
+  syncSub("settings", list => { S.settings = list; S.loaded.settings = true; render(); if (OD && $("#orderDlg").open) renderODPick(); });
   syncSub("expenses", list => { S.expenses = list; S.loaded.expenses = true; render(); });
   syncSub("invdrafts", list => { S.invdrafts = list; S.loaded.invdrafts = true; render(); });
   syncSub("shifts", list => { S.shifts = list; S.loaded.shifts = true; autoCloseShifts(); applyRole(); render(); });
