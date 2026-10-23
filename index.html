@@ -276,6 +276,10 @@ s.oldp{color:var(--muted)}
 .seg.seg5 label{grid-column:span 2;border-right:0;background:var(--surface);display:flex;align-items:center;justify-content:center}
 .seg.seg5 label:nth-child(n+4){grid-column:span 3}
 .okc{color:var(--ok);font-weight:600}
+.warnc{color:var(--low);font-weight:600}
+.monlock{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);padding:8px 12px;border-radius:var(--radius-s);margin-bottom:12px;font-size:.92rem}
+.finq{margin:0 0 8px;max-width:420px}
+.monbox .sum b{white-space:nowrap}
 .sum .neg{color:var(--empty);font-weight:600}
 .daytwo{align-items:end}
 .daychk>div{display:flex;gap:8px;align-items:flex-start}
@@ -415,6 +419,8 @@ button.chip{cursor:pointer}
 .frow small{display:block;color:var(--muted);font-size:.78rem}
 .frow.top{border-left-color:var(--ok)} .frow.bottom{border-left-color:var(--empty)}
 .frow .neg{color:var(--empty)}
+.fmon .fhead,.fmon .frow{grid-template-columns:minmax(0,1fr) 104px 104px 46px}
+.fmon .frow span:not(:first-child){white-space:nowrap}
 details.det div.unsold{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:4px 12px;padding:6px 0 0 12px}
 details.finun{margin-top:10px}
 @media (max-width:480px){.fhead,.frow{grid-template-columns:minmax(0,1fr) 34px 78px 78px;gap:6px;font-size:.86rem}}
@@ -747,6 +753,15 @@ details.finun{margin-top:10px}
   </div>
 </form></dialog>
 
+<dialog id="monDlg"><form method="dialog" id="monForm">
+  <h3>Закрыть месяц</h3>
+  <div id="monBody" style="display:flex;flex-direction:column;gap:12px"></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary" id="monGo">Закрыть месяц</button>
+  </div>
+</form></dialog>
+
 <dialog id="cardDlg"><form method="dialog" id="cardForm">
   <h3>Удержание с оплаты картой</h3>
   <p class="hint">КДВ и комиссия банка. В «Финансах» вычитается из суммы, которую клиенты заплатили картой.</p>
@@ -866,7 +881,7 @@ const HINTS = {in:"Товар пришёл от поставщика или с �
 const HIST_PAGE = 300;
 // the name on every record comes only from the PIN login (no field to type another name)
 const whoNow = () => (S.me && S.me.name) || lsGet("sklad.who") || "";
-const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], mdocs:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", histDay:"", histN:HIST_PAGE, invQ:"", invDraft:{}, invAt:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
+const S = {staff:[], invdrafts:[], shifts:[], shPeriod:"week", me:null, products:[], moves:[], mdocs:[], recipes:[], menu:[], sets:[], sales:[], orders:[], settings:[], expenses:[], finPeriod:(["today","week","month","prev","quarter","year","custom","all"].includes(lsGet("sushi.finp"))?lsGet("sushi.finp"):"month"), finOff:0, finSort:"qty", finFrom:"", finTo:"", ordView:"open", repDate:"", cart:[], saleQ:"", menuQ:"", needOnly:false, view:"orders", q:"", lowOnly:false, histQ:"", histDay:"", histN:HIST_PAGE, invQ:"", invDraft:{}, invAt:{}, db:null, noDb:false, loaded:{products:false,moves:false,recipes:false,menu:false,sets:false,sales:false,orders:false,settings:false,expenses:false,staff:false,invdrafts:false,shifts:false}};
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -970,8 +985,12 @@ async function applyOp(col, id, val){
 }
 // ops: [{col, id, after}]; after = null deletes. On error err.done lists the ops already written.
 // (Кнопок «Отменить / Вернуть» больше нет: они возвращали запись целиком и стирали правки с других устройств.)
-async function commit(label, ops){
+async function commit(label, ops, opt){
   const done = [];
+  // a closed month is locked (see «closing a month»); opening it again passes {unlock:true}
+  const lk = opt && opt.unlock ? "" : opsLocked(ops);
+  if (lk){ window.alert(trS(`${dot(`Месяц закрыт: ${ymName(lk)}`)} Записи этого месяца менять нельзя. Если нужно исправить, админ открывает месяц снова: «Финансы» → «Закрыть месяц» → «Открыть снова».`));
+    const err = new Error("month closed"); err.code = "month-closed"; err.done = done; throw err; }
   try { for (const op of ops){ await applyOp(op.col, op.id, clone(op.after)); done.push(op); } }
   catch(err){ err.done = done; throw err; }
 }
@@ -2445,7 +2464,7 @@ function renderReport(L){
 
 /* ----- finance ----- */
 const EXP_CATS = ["Аренда","Зарплата","Коммунальные услуги","Комиссия агрегаторов","Реклама","Налоги","Хозтовары","Ремонт и обслуживание","Прочее"];
-const FIN_PERIODS = [["today","Сегодня"],["week","7 дней"],["month","Этот месяц"],["prev","Прошлый месяц"],["custom","Период"],["all","Всё время"]];
+const FIN_PERIODS = [["today","Сегодня"],["week","7 дней"],["month","Этот месяц"],["prev","Прошлый месяц"],["quarter","Квартал"],["year","Год"],["custom","Период"],["all","Всё время"]];
 // working days: each one from 06:00 to 06:00 of the next morning
 function finRange(){
   const tk = todayKey(), end = dayStart(dayNext(tk)), ym = tk.slice(0,7);
@@ -2453,6 +2472,7 @@ function finRange(){
     case "today": return [dayStart(tk), end];
     case "week": return [end - 7*864e5, end];
     case "prev": return [dayStart(ymShift(ym,-1)+"-01"), dayStart(ym+"-01")];
+    case "quarter": case "year": { const q0 = finQ0(); return [dayStart(q0+"-01"), Math.min(end, dayStart(ymShift(q0, S.finPeriod==="year" ? 12 : 3)+"-01"))]; }
     case "custom": {
       const f = S.finFrom ? dayStart(S.finFrom) : 0;
       const t = S.finTo ? dayStart(dayNext(S.finTo)) : end;
@@ -2462,6 +2482,13 @@ function finRange(){
     default: return [dayStart(ym+"-01"), end];
   }
 }
+// the first month of the quarter or year shown (S.finOff: 0 = this one, -1 = the one before…)
+function finQ0(){
+  const [y, m] = todayKey().slice(0,7).split("-").map(Number), o = Number(S.finOff)||0;
+  return S.finPeriod==="year" ? (y+o)+"-01" : ymShift(y+"-"+String(Math.floor((m-1)/3)*3+1).padStart(2,"0"), 3*o);
+}
+const QN = ["I","II","III","IV"];
+const finQName = () => { const q0 = finQ0(), [y, m] = q0.split("-").map(Number); return S.finPeriod==="year" ? String(y) : `${QN[(m-1)/3]} квартал ${y}`; };
 const finSaleTotal = saleFood;
 const pct = (a,b) => b ? Math.round(a/b*1000)/10 + "%" : "—";
 // promo lines in closed sales: what was given away vs menu price
@@ -2485,19 +2512,26 @@ function promoHtml(ps, withTime){
 function renderFinControls(c){
   const range = finRange(), isC = S.finPeriod==="custom";
   c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${FIN_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-finp="${k}" aria-pressed="${S.finPeriod===k}">${l}</button>`).join("")}</div>
+    ${S.finPeriod==="quarter" || S.finPeriod==="year" ? `<div class="mnav finq"><button type="button" class="btn small" data-finoff="-1" aria-label="Назад">‹</button><b>${esc(finQName())}</b><button type="button" class="btn small" data-finoff="1" aria-label="Вперёд" ${(Number(S.finOff)||0)>=0?"disabled":""}>›</button></div>` : ""}
     ${isC ? `<div class="controls"><label class="f" style="flex:1 1 140px">С<input type="date" id="finFrom" class="search" value="${esc(S.finFrom||"")}"></label><label class="f" style="flex:1 1 140px">По<input type="date" id="finTo" class="search" value="${esc(S.finTo||todayKey())}"></label></div>` : ""}
-    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button><button class="btn" id="openOff">Расход и списание</button><button class="btn" id="openCardFee">Удержание с карт</button></div>
+    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button><button class="btn" id="openOff">Расход и списание</button><button class="btn" id="openCardFee">Удержание с карт</button><button class="btn" id="openMonClose">Закрыть месяц</button></div>
+    ${lastClosed() ? `<p class="hint" style="margin:0">${esc(dot(`Последний закрытый месяц: ${ymName(lastClosed())}`))}</p>` : ""}
     <p class="hint" style="margin:0">${esc(promoCfgText())}</p>
     <p class="hint" style="margin:0">${esc(`С оплаты картой вычитается ${fmt(cardPct())}% (КДВ и комиссия банка).`)}</p>
     <p class="hint" style="margin:0">${esc(`Расход и списание работника дороже ${money(offMax())} за запись попадает вам на проверку.`)}</p>`;
 }
-function renderFin(L){
-  const [t0,t1] = finRange(), inR = ts => (ts||0)>=t0 && (ts||0)<t1;
+// the numbers of Финансы for [t0,t1) from the detailed records. A closed month keeps them in its record (see «closing a month»),
+// so Финансы show it the same after its detailed records are gone. Shifts (hours and pay by worker) may take their own range [s0,s1).
+function finEmpty(){
+  return {revenue:0, nChecks:0, cogs:0, writeOff:0, manualOut:0, invLoss:0, buyIn:0, woffSum:0, woffBy:{}, noPrice:[], oldPrice:0, expTotal:0, cash:{total:0}, cashN:0, expByCat:{},
+    courSum:0, courN:0, cardSum:0, cardCut:0, cardPs:[], promo:{n:0, disc:0, gifts:0, orders:0}, items:{}, dc:{n:0, cashDiff:0, cardDiff:0, takeN:0, take:0}, staff:{}};
+}
+function finCalc(t0, t1, s0, s1){
+  const inR = ts => (ts||0)>=t0 && (ts||0)<t1, F = finEmpty();
   const sales = S.sales.filter(sl=>inR(sl.ts));
-  const revenue = sales.reduce((a,sl)=>a+finSaleTotal(sl),0);
-  const nChecks = sales.length;
+  F.revenue = sales.reduce((a,sl)=>a+finSaleTotal(sl),0); F.nChecks = sales.length;
   // stock movements valued at cost
-  const sumBy = {sale:0, off:0, out:0, inv:0, in:0}, noPrice = new Set(), woffBy = {}; let woffSum = 0; const oldPrice = new Set();
+  const sumBy = {sale:0, off:0, out:0, inv:0, in:0}, noPrice = new Set(), oldPrice = new Set();
   for (const mv of S.moves){
     if (!inR(mv.ts) || !(mv.type in sumBy) || mv.reset) continue;
     const p = byId(mv.productId); if (!p || !tracked(p)) continue;
@@ -2506,68 +2540,117 @@ function renderFin(L){
     const uc = mvUc(mv), u = uc.cost; if (!(Number(mv.uc)>0)) oldPrice.add(mv.doc||mv.id);
     if (mv.type!=="inv"){ if (uc.missing.length) uc.missing.forEach(n=>noPrice.add(n)); else if (!(u>0)) noPrice.add(dn(p)); }
     sumBy[mv.type] += -d*u;   // positive = money out of stock
-    if (mv.dishOff){ woffSum += -d*u; woffBy[mv.why||"other"] = (woffBy[mv.why||"other"]||0) - d*u; }
+    if (mv.dishOff){ F.woffSum += -d*u; F.woffBy[mv.why||"other"] = (F.woffBy[mv.why||"other"]||0) - d*u; }
   }
-  const cogs = sumBy.sale, writeOff = sumBy.off, manualOut = sumBy.out, invLoss = sumBy.inv; // invLoss >0 shortage, <0 surplus
+  F.cogs = sumBy.sale; F.writeOff = sumBy.off; F.manualOut = sumBy.out; F.invLoss = sumBy.inv; F.buyIn = sumBy.in;   // invLoss >0 shortage, <0 surplus
+  F.noPrice = [...noPrice]; F.oldPrice = oldPrice.size;
   // courier fees of delivered orders are neither revenue nor expense; a written-off order's courier stays an expense (paid, but the customer did not pay)
-  const expsAll = [...S.expenses.filter(x=>inR(x.monthly ? monTs(x) : x.ts)), ...monthlyAutoIn(t0, t1)].sort((a,b)=>(b.ts||0)-(a.ts||0));
-  const exps = expsAll.filter(x=>!courPass(x)), courSum = sales.reduce((a,sl)=>a+(Number(sl.courierFee)||0),0), courN = sales.filter(sl=>Number(sl.courierFee)>0).length;
-  const expTotal = exps.reduce((a,x)=>a+(Number(x.amount)||0),0);
-  const gross = revenue - cogs;
-  const ps = promoSummary(sales);
+  const exps = [...S.expenses.filter(x=>inR(x.monthly ? monTs(x) : x.ts)), ...monthlyAutoIn(t0, t1)].filter(x=>!courPass(x));
+  F.expTotal = exps.reduce((a,x)=>a+(Number(x.amount)||0),0);
+  const cashExps = exps.filter(isCash); F.cash = cashSums(cashExps); F.cashN = cashExps.length;
+  exps.filter(x=>!isCash(x)).forEach(x=>{ F.expByCat[x.category||"Прочее"] = (F.expByCat[x.category||"Прочее"]||0) + (Number(x.amount)||0); });
+  F.courSum = sales.reduce((a,sl)=>a+(Number(sl.courierFee)||0),0); F.courN = sales.filter(sl=>Number(sl.courierFee)>0).length;
   // paid by card (whole card part, courier fee included: the bank keeps its share of all of it)
-  const cardSum = sales.reduce((a,sl)=>a+paidBy(sl,"Карта"),0), cardP = cardPct(), cardCut = Math.round(cardSum*cardP)/100;
-  const net = gross - writeOff - manualOut - invLoss - expTotal - cardCut;
+  const cardP = cardPct(); F.cardSum = sales.reduce((a,sl)=>a+paidBy(sl,"Карта"),0); F.cardCut = Math.round(F.cardSum*cardP)/100; F.cardPs = F.cardSum ? [cardP] : [];
+  const ps = promoSummary(sales); F.promo = {n:ps.n, disc:ps.disc, gifts:ps.gifts, orders:ps.orders};
   // dishes
-  const items = {};
   for (const sl of sales) for (const l of sl.lines||[]){
     const kind = l.kind||"dish", k = kind+":"+l.refId, src = kind==="set" ? setById(l.refId) : dishById(l.refId);
-    if (!items[k]) items[k] = {name: src ? dn(src) : l.name, kind, cat: kind==="set" ? "Сеты" : (src && src.category) || "Без раздела", unitCost: src ? (kind==="set" ? setCost(src).cost : dishCost(src).cost) : 0, qty:0, rev:0, cost:0};
-    const q = Number(l.qty)||0; items[k].qty += q; items[k].rev += (Number(l.price)||0)*q*saleK(sl);
-    items[k].cost += (Number(l.uc)>0 ? Number(l.uc) : items[k].unitCost)*q;   // Д8: cost on the day of the sale
+    if (!F.items[k]) F.items[k] = {name: src ? dn(src) : l.name, kind, cat: kind==="set" ? "Сеты" : (src && src.category) || "Без раздела", unitCost: src ? (kind==="set" ? setCost(src).cost : dishCost(src).cost) : 0, qty:0, rev:0, cost:0};
+    const it = F.items[k], q = Number(l.qty)||0; it.qty += q; it.rev += (Number(l.price)||0)*q*saleK(sl);
+    it.cost += (Number(l.uc)>0 ? Number(l.uc) : it.unitCost)*q;   // Д8: cost on the day of the sale
   }
-  const rows = Object.values(items).map(r=>Object.assign(r, {profit:r.rev-r.cost}));
+  for (const it of Object.values(F.items)) delete it.unitCost;
+  const cl = S.settings.filter(x=>x.kind==="dayClose" && inR(new Date(x.day+"T12:00").getTime())), csum = (arr, k) => r2(arr.reduce((a,x)=>a+(Number(x[k])||0),0)), tk = cl.filter(x=>x.take!=null);
+  F.dc = {n:cl.length, cashDiff:csum(cl,"cashDiff"), cardDiff:csum(cl,"cardDiff"), takeN:tk.length, take:csum(tk,"take")};
+  // hours and pay by shifts, by worker
+  const a0 = s0==null ? t0 : s0, a1 = s1==null ? t1 : s1;
+  for (const st of S.staff.filter(x=>roleOf(x)!=="admin" && !isDemoStaff(x))){
+    const shs = S.shifts.filter(sh=>sh.staffId===st.id && (sh.start||0)>=a0 && (sh.start||0)<a1), h = workedH(shs);
+    if (h) F.staff[st.id] = {name:st.name||"", hrs:h, pay:Math.round(payOf(st, shs))};
+  }
+  return F;
+}
+const finGross = F => F.revenue - F.cogs;
+const finNet = F => finGross(F) - F.writeOff - F.manualOut - F.invLoss - F.expTotal - F.cardCut;
+const addTo = (a, b) => { for (const [k,v] of Object.entries(b||{})) a[k] = (a[k]||0) + (Number(v)||0); };
+function finMerge(list){
+  const F = finEmpty(), np = new Set(), cps = new Set();
+  for (const f of list){ if (!f) continue;
+    for (const k of ["revenue","nChecks","cogs","writeOff","manualOut","invLoss","buyIn","woffSum","oldPrice","expTotal","cashN","courSum","courN","cardSum","cardCut"]) F[k] += Number(f[k])||0;
+    for (const k of ["woffBy","cash","expByCat","promo","dc"]) addTo(F[k], f[k]);
+    (f.noPrice||[]).forEach(n=>np.add(n)); (f.cardPs||[]).forEach(p=>cps.add(p));
+    for (const [k,it] of Object.entries(f.items||{})){ const r = F.items[k] = F.items[k] || {name:it.name, kind:it.kind, cat:it.cat, qty:0, rev:0, cost:0};
+      r.qty += Number(it.qty)||0; r.rev += Number(it.rev)||0; r.cost += Number(it.cost)||0; }
+    for (const [id,s] of Object.entries(f.staff||{})){ const r = F.staff[id] = F.staff[id] || {name:s.name, hrs:0, pay:0}; r.hrs += Number(s.hrs)||0; r.pay += Number(s.pay)||0; }
+  }
+  F.noPrice = [...np]; F.cardPs = [...cps];
+  return F;
+}
+// [t0,t1): closed months from their records, the rest from the detailed records
+function finData(t0, t1){
+  const parts = [], closed = []; let cur = t0;
+  for (const ym of closedYms()){
+    const a = ymBeg(ym), b = ymEnd(ym), rec = monthRec(ym); if (a < cur || b > t1 || !rec || !rec.fin) continue;
+    if (a > cur) parts.push(finCalc(cur, a));
+    parts.push(rec.fin); closed.push(ym); cur = b;
+  }
+  if (cur < t1) parts.push(finCalc(cur, t1));
+  return Object.assign(finMerge(parts), {closed});
+}
+function renderFin(L){
+  const [t0,t1] = finRange(), inR = ts => (ts||0)>=t0 && (ts||0)<t1;
+  const F = finData(t0, t1), revenue = F.revenue, nChecks = F.nChecks, cogs = F.cogs, writeOff = F.writeOff, manualOut = F.manualOut, invLoss = F.invLoss;
+  const expTotal = F.expTotal, cardCut = F.cardCut, gross = finGross(F), net = finNet(F), cashS = F.cash;
+  const cp = F.cardPs.length===1 ? F.cardPs[0] : null;
+  // lists come from the detailed records (as long as they are kept)
+  const ps = promoSummary(S.sales.filter(sl=>inR(sl.ts)));
+  const expsRaw = S.expenses.filter(x=>inR(x.monthly ? monTs(x) : x.ts) && !courPass(x)).sort((a,b)=>(b.ts||0)-(a.ts||0));
+  const cashExps = expsRaw.filter(isCash), cashRaw = cashSums(cashExps);
+  const rows = Object.values(F.items).map(r=>Object.assign({}, r, {profit:r.rev-r.cost}));
   const sortKey = {qty:"qty", rev:"rev", profit:"profit"}[S.finSort]||"qty";
   rows.sort((a,b)=>b[sortKey]-a[sortKey] || b.rev-a.rev);
   const cats = {};
   for (const r of rows){ cats[r.cat] = cats[r.cat] || {qty:0, rev:0, profit:0}; cats[r.cat].qty += r.qty; cats[r.cat].rev += r.rev; cats[r.cat].profit += r.profit; }
   const catRows = Object.entries(cats).sort((a,b)=>b[1].rev-a[1].rev);
-  const soldIds = new Set(Object.keys(items));
+  const soldIds = new Set(Object.keys(F.items));
   const unsold = [...S.menu.filter(d=>d.active!==false && !soldIds.has("dish:"+d.id)).map(d=>dn(d)), ...S.sets.filter(x=>x.active!==false && !soldIds.has("set:"+x.id)).map(x=>dn(x)+" (сет)")];
-  const cashExps = exps.filter(isCash), cashS = cashSums(cashExps);
-  const expByCat = {}; exps.filter(x=>!isCash(x)).forEach(x=>{ expByCat[x.category||"Прочее"] = (expByCat[x.category||"Прочее"]||0) + (Number(x.amount)||0); });
+  const one = F.closed.length===1 && t0===ymBeg(F.closed[0]) && t1===ymEnd(F.closed[0]) ? monthRec(F.closed[0]) : null;
 
   const line = (label, val, cls="", hint="") => `<div class="${cls}"><span>${label}${hint?` <small class="hint">${hint}</small>`:""}</span><b>${val}</b></div>`;
   const neg = v => v>0 ? "− "+money(v) : v<0 ? "+ "+money(-v) : money(0);
-  let html = `<div class="kpis">
+  let html = `${F.closed.length ? `<div class="monlock">${esc(dot(`Месяц закрыт: ${F.closed.map(ymName).join(", ")}`))} ${esc("Цифры — из итога месяца, записи этого месяца менять нельзя.")}</div>` : ""}
+    <div class="kpis">
       <div class="kpi"><small>Выручка</small><b>${money(revenue)}</b></div>
       <div class="kpi"><small>Себестоимость продаж</small><b>${money(cogs)}</b><small>${pct(cogs,revenue)} от выручки</small></div>
       <div class="kpi"><small>Расходы и потери</small><b>${money(writeOff+manualOut+invLoss+expTotal+cardCut)}</b></div>
       <div class="kpi finnet ${net<0?"minus":"plus"}"><small>Чистая прибыль</small><b>${money(net)}</b><small>${pct(net,revenue)} от выручки</small></div></div>
     ${monthlyHtml()}
+    ${finMonthsHtml(t0, t1)}
     <h2 class="cat"><span>Доходы и расходы</span></h2>
     <div class="sum finsum">
       ${line("Выручка", money(revenue), "", `${nChecks} ${plural(nChecks,"чек","чека","чеков")}${nChecks?`, средний ${money(revenue/nChecks)}`:""}`)}
-      ${ps.n||ps.orders ? line("Скидки по акциям и подарки", money(ps.disc), "", "уже учтены в выручке, для сведения") : ""}
+      ${F.promo.n||F.promo.orders ? line("Скидки по акциям и подарки", money(F.promo.disc), "", "уже учтены в выручке, для сведения") : ""}
       ${line("Себестоимость проданного", neg(cogs), "", "продукты, списанные по техкартам")}
       ${line("Валовая прибыль", money(gross), "subtot", pct(gross,revenue))}
       ${line("Списания (порча, брак)", neg(writeOff), "", "и неоплаченные заказы, списанные блюда")}
-      ${woffSum ? line(`<small>в т.ч. списание блюд</small>`, `<small>${money(woffSum)}</small>`, "", Object.entries(woffBy).map(([k,v])=>`${WOFF_WHY[k]||k}: ${money(v)}`).join(", ")) : ""}
+      ${F.woffSum ? line(`<small>в т.ч. списание блюд</small>`, `<small>${money(F.woffSum)}</small>`, "", Object.entries(F.woffBy).map(([k,v])=>`${WOFF_WHY[k]||k}: ${money(v)}`).join(", ")) : ""}
       ${manualOut ? line("Расход со склада вручную", neg(manualOut), "", "питание персонала, кухня") : ""}
       ${invLoss ? line(invLoss>0?"Недостача по инвентаризации":"Излишки по инвентаризации", neg(invLoss)) : ""}
-      ${cardCut ? line("Удержание с оплат картой", neg(cardCut), "", esc(`оплачено картой ${money(cardSum)}, удержание ${fmt(cardP)}%: КДВ и комиссия банка`)) : ""}
-      ${cashExps.length ? line("Кассовые расходы", neg(cashS.total), "", CASH_KINDS.filter(k=>cashS[k]).map(k=>k.toLowerCase()+" "+money(cashS[k])).join(", ")) : ""}
-      ${Object.entries(expByCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>line(esc(k), neg(v))).join("")}
+      ${cardCut ? line("Удержание с оплат картой", neg(cardCut), "", esc(`оплачено картой ${money(F.cardSum)}${cp!=null?`, удержание ${fmt(cp)}%`:""}: КДВ и комиссия банка`)) : ""}
+      ${F.cashN ? line("Кассовые расходы", neg(cashS.total), "", CASH_KINDS.filter(k=>cashS[k]).map(k=>k.toLowerCase()+" "+money(cashS[k])).join(", ")) : ""}
+      ${Object.entries(F.expByCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>line(esc(k), neg(v))).join("")}
       ${line("Чистая прибыль", money(net), "total "+(net<0?"minus":"plus"))}
     </div>
-    ${(()=>{ const cl = S.settings.filter(x=>x.kind==="dayClose" && inR(new Date(x.day+"T12:00").getTime())); if (!cl.length) return "";
-      const sum = k => r2(cl.reduce((a,x)=>a+(Number(x[k])||0),0)), d = sum("cashDiff"), c = sum("cardDiff"), tk = cl.filter(x=>x.take!=null);
-      return `<p class="hint">Закрытие дня за период (дней: ${cl.length}): наличные — ${diffTxt(d)}, карты — ${diffTxt(c)}. В прибыль не входит, для сведения.</p>`
-        + (tk.length ? `<p class="hint">${esc(`Забрали из кассы за период (дней: ${tk.length}): ${money(sum("take"))}.`)}</p>` : ""); })()}
-    ${courN ? `<p class="hint">${esc(`Доставка за период (заказов: ${courN}): ${money(courSum)}. Это деньги курьера: клиент платит их вместе с заказом, курьер забирает их из кассы. В выручку, средний чек и расходы не входят.`)}</p>` : ""}
-    <p class="hint">Закуплено продуктов за период: <b>${money(sumBy.in)}</b>. Закупки не вычитаются из прибыли сразу — в расход идёт только то, что продано, списано или ушло в недостачу.${(()=>{ const v = stockValue(); return v.sum>0 ? ` Сейчас на складе продуктов на ${money(v.sum)}.` : ""; })()}</p>
-    <p class="hint">Себестоимость и списания считаются по цене закупки на день продажи или списания.${oldPrice.size ? ` Записей без сохранённой цены за период: ${oldPrice.size}. Они сделаны до этого обновления или когда цены закупки ещё не было — считаются по текущей цене.` : ""}</p>
-    ${noPrice.size ? `<div class="notice">Себестоимость занижена: нет цены закупки у ${noPrice.size} ${plural(noPrice.size,"продукта","продуктов","продуктов")} — ${[...noPrice].slice(0,6).map(N).join(", ")}${noPrice.size>6?" и др.":"."}<br>Цена заполняется при приходе товара или в карточке продукта на «Складе».</div>` : ""}`;
+    ${F.dc.n ? `<p class="hint">Закрытие дня за период (дней: ${F.dc.n}): наличные — ${diffTxt(F.dc.cashDiff)}, карты — ${diffTxt(F.dc.cardDiff)}. В прибыль не входит, для сведения.</p>`
+      + (F.dc.takeN ? `<p class="hint">${esc(`Забрали из кассы за период (дней: ${F.dc.takeN}): ${money(F.dc.take)}.`)}</p>` : "") : ""}
+    ${F.courN ? `<p class="hint">${esc(`Доставка за период (заказов: ${F.courN}): ${money(F.courSum)}. Это деньги курьера: клиент платит их вместе с заказом, курьер забирает их из кассы. В выручку, средний чек и расходы не входят.`)}</p>` : ""}
+    <p class="hint">Закуплено продуктов за период: <b>${money(F.buyIn)}</b>. Закупки не вычитаются из прибыли сразу — в расход идёт только то, что продано, списано или ушло в недостачу.${one && one.stockSum>0 ? ` ${esc(`На конец месяца на складе было продуктов на ${money(one.stockSum)}.`)}` : ""}${(()=>{ const v = stockValue(); return v.sum>0 ? ` Сейчас на складе продуктов на ${money(v.sum)}.` : ""; })()}</p>
+    <p class="hint">Себестоимость и списания считаются по цене закупки на день продажи или списания.${F.oldPrice ? ` Записей без сохранённой цены за период: ${F.oldPrice}. Они сделаны до этого обновления или когда цены закупки ещё не было — считаются по текущей цене.` : ""}</p>
+    ${F.noPrice.length ? `<div class="notice">Себестоимость занижена: нет цены закупки у ${F.noPrice.length} ${plural(F.noPrice.length,"продукта","продуктов","продуктов")} — ${F.noPrice.slice(0,6).map(N).join(", ")}${F.noPrice.length>6?" и др.":"."}<br>Цена заполняется при приходе товара или в карточке продукта на «Складе».</div>` : ""}
+    ${(()=>{ const st = Object.values(F.staff).sort((a,b)=>b.hrs-a.hrs); if (!st.length) return "";
+      return `<details class="det"><summary>${esc(`Часы и оплата по сменам: ${money(st.reduce((a,x)=>a+x.pay,0))}`)}</summary><div class="sum" style="margin-top:8px">${st.map(x=>line(N(x.name), x.pay>0 ? money(x.pay) : "—", "", fmtH(x.hrs))).join("")}</div>
+        <p class="hint">${esc("По ставкам работников. В расходы идёт сумма «Зарплата» из ежемесячных расходов.")}</p></details>`; })()}`;
 
   if (rows.length){
     html += `<h2 class="cat"><span>По разделам меню</span></h2>
@@ -2584,13 +2667,168 @@ function renderFin(L){
   } else {
     html += `<div class="empty-state" style="margin-top:14px">За этот период продаж нет.</div>`;
   }
-  if (cashExps.length) html += `<details class="det"><summary>Кассовые расходы за период: ${cashExps.length} ${plural(cashExps.length,"запись","записи","записей")}, ${money(cashS.total)}</summary><div class="list" style="margin-top:8px">${cashExps.slice(0,300).map(x=>cashRow(x, true)).join("")}</div></details>`;
-  const oexps = exps.filter(x=>!x.monthly && !x.auto && !isCash(x));
+  if (cashExps.length) html += `<details class="det"><summary>Кассовые расходы за период: ${cashExps.length} ${plural(cashExps.length,"запись","записи","записей")}, ${money(cashRaw.total)}</summary><div class="list" style="margin-top:8px">${cashExps.slice(0,300).map(x=>cashRow(x, true)).join("")}</div></details>`;
+  const oexps = expsRaw.filter(x=>!x.monthly && !x.auto && !isCash(x));
   html += `<h2 class="cat"><span>Прочие расходы</span><span>${oexps.length}</span></h2>` + (oexps.length
     ? `<div class="list">${oexps.map(x=>`<button type="button" class="hist" data-exp="${esc(x.id)}" title="Исправить или удалить"><span><span class="tag off">${esc(x.category||"Прочее")}</span> ${N(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long"})}${x.who?", "+esc(x.who):""}${x.editedBy?` · исправил(а) ${esc(x.editedBy)}`:""}</span></button>`).join("")}</div>`
     : `<p class="hint">Аренда, зарплата, коммуналка и другие расходы не со склада. Внесите их кнопкой «+ Расход», чтобы видеть настоящую чистую прибыль.</p>`);
   L.innerHTML = html;
 }
+// quarter and year: one row per month (a closed month from its record)
+function finMonthsHtml(t0, t1){
+  if (S.finPeriod!=="quarter" && S.finPeriod!=="year") return "";
+  const rows = [];
+  for (let ym = ymOf(t0); ymBeg(ym) < t1; ym = ymShift(ym, 1)){
+    const rec = monthRec(ym), f = rec && rec.fin ? rec.fin : finCalc(ymBeg(ym), Math.min(ymEnd(ym), t1));
+    rows.push(`<div class="frow"><span>${esc(ymName(ym))}<small>${rec ? esc("закрыт") : esc("не закрыт")}</small></span><span>${money(f.revenue)}</span><span class="${finNet(f)<0?"neg":""}">${money(finNet(f))}</span><span>${pct(finNet(f), f.revenue)}</span></div>`);
+  }
+  return `<h2 class="cat"><span>По месяцам</span></h2><div class="ftable fmon"><div class="fhead"><span>Месяц</span><span>Выручка</span><span>Прибыль</span><span>%</span></div>${rows.join("")}</div>`;
+}
+
+/* ----- closing a month (экономия чтений, шаг 1): the month's totals in one record, then the month is locked ----- */
+// settings id "month_<YYYY-MM>", kind "monthClose": fin = the month as Финансы show it (finCalc), stock = what was in stock at the end of the month
+// {productId: [qty, cost of 1 unit]}, stockSum = its value. Months are closed one after another, from the first month with records.
+// Everything up to the last closed month is locked: commit() refuses a record of it (lockYm). Only the last closed month can be opened again.
+// Automatic rent and salary of the month become ordinary monthly records (byClose); opening the month again removes them.
+const dot = t => /\.$/.test(t) ? t : t + ".";   // ymName ends with "г." in Russian
+const ymBeg = ym => dayStart(ym+"-01");             // a working month: from 06:00 of the 1st to 06:00 of the 1st of the next one
+const ymEnd = ym => dayStart(ymShift(ym,1)+"-01");
+const wYm = ts => dayKey(ts||0).slice(0,7);
+const monthRec = ym => S.settings.find(x=>x.id==="month_"+ym && x.kind==="monthClose");
+const closedYms = () => S.settings.filter(x=>x.kind==="monthClose" && x.month).map(x=>x.month).sort();
+const lastClosed = () => closedYms().slice(-1)[0] || "";
+const ymLocked = ym => !!ym && ym <= lastClosed();
+// the month a record belongs to, for the lock ("" = not locked by month)
+function lockYm(col, x){
+  if (!x) return "";
+  if (col==="moves" || col==="sales") return x.ts ? wYm(x.ts) : "";
+  if (col==="orders"){ const t = x.closedAt||x.cancelledAt||x.createdAt; return t ? wYm(t) : ""; }
+  if (col==="expenses") return x.monthly ? (x.month||ymOf(x.ts||0)) : x.ts ? wYm(x.ts) : "";
+  if (col==="shifts") return x.start ? ymOf(x.start) : "";   // salary counts shifts by the calendar month
+  if (col==="settings") return x.kind==="dayClose" && x.day ? x.day.slice(0,7) : "";
+  return "";
+}
+function opsLocked(ops){
+  if (!lastClosed()) return "";
+  for (const op of ops){
+    const before = (S[rawKey(op.col)]||[]).find(x=>x.id===op.id);
+    for (const x of [before, op.after]){ const ym = lockYm(op.col, x); if (ymLocked(ym)) return ym; }
+  }
+  return "";
+}
+// the first month with records
+function monFirst(){
+  let t = Infinity; const m = v => { v = Number(v)||0; if (v>0 && v<t) t = v; };
+  S.sales.forEach(x=>m(x.ts)); S.mdocs.forEach(x=>m(x.ts)); S.orders.forEach(x=>m(x.createdAt)); S.shifts.forEach(x=>m(x.start));
+  S.expenses.forEach(x=>m(x.monthly && x.month ? ymBeg(x.month) : x.ts)); S.settings.forEach(x=>{ if (x.kind==="dayClose" && x.day) m(dayStart(x.day)); });
+  return t===Infinity ? "" : wYm(t);
+}
+const monNext = () => { const l = lastClosed(); return l ? ymShift(l, 1) : monFirst(); };
+// what is in stock at moment t, and what 1 unit cost then (the last receipt price before t, otherwise today's cost)
+function stockAt(t){
+  const q = {}, pr = {}, pt = {};
+  for (const mv of S.moves){
+    if ((mv.ts||0) >= t) continue;
+    q[mv.productId] = (q[mv.productId]||0) + (Number(mv.delta)||0);
+    if (mv.type==="in" && Number(mv.price)>0 && (mv.ts||0) >= (pt[mv.productId]||0)){ pt[mv.productId] = mv.ts||0; pr[mv.productId] = Number(mv.price); }
+  }
+  const stock = {}; let sum = 0;
+  for (const [pid, v] of Object.entries(q)){
+    const p = byId(pid), n = Math.round(v*10000)/10000, u = Math.round((pr[pid] || (p ? unitCost(pid).cost : 0))*10000)/10000;
+    stock[pid] = [n, u];
+    if (p && p.active!==false && tracked(p) && n>0 && u>0) sum += n*u;
+  }
+  return {stock, sum:r2(sum)};
+}
+// what has to be done before the month can be closed (bad) and what only should be looked at (warn)
+function monChecks(ym){
+  const end = ymEnd(ym), calEnd = ymStart(ymShift(ym,1)), bad = [], warn = [];
+  const ord = S.orders.filter(o=>isOpen(o) && (o.createdAt||0) < end);
+  if (ord.length) bad.push([`Открытые заказы: ${ord.length}`, ord.slice(0,8).map(o=>`№${esc(o.num)} · ${dmy(dayKey(o.createdAt||0))}`).join("; ") + ". Закройте или отмените их в «Продажи»."]);
+  const sh = S.shifts.filter(x=>!x.end && x.start && x.start < calEnd);
+  if (sh.length) bad.push([`Смена не закрыта: ${sh.length}`, sh.map(x=>N(x.name||"")+" · "+dmy(calKey(x.start))).join("; ") + ". Закройте её в «Сотрудники»: нажмите на смену и укажите конец."]);
+  const req = S.orders.filter(o=>voidReqOf(o) && lockYm("orders", o) <= ym);
+  if (req.length) bad.push([`Запросы на отмену или списание заказа: ${req.length}`, "Ответьте в «Продажи» → «Запросы на отмену»."]);
+  const dr = S.invdrafts.filter(x=>x.status!=="done" && (x.ts||0) < end);
+  if (dr.length) bad.push([`Пересчёты ждут утверждения: ${dr.length}`, "Утвердите в разделе «Склад» → «Инвентаризация»."]);
+  const rv = revItems().filter(x=>x.ts < end);
+  if (rv.length) bad.push([`На проверку: ${rv.length}`, "«Продажи» → «На проверку»."]);
+  const ac = S.shifts.filter(x=>x.autoClosed && !x.checked && x.end && !isDemoStaff(x) && ymOf(x.start||0)===ym);
+  if (ac.length) warn.push([`Смены закрылись сами, не проверены: ${ac.length}`, ac.slice(0,6).map(x=>N(x.name||"")+" · "+dmy(calKey(x.start))).join("; ") + ". Если работник ушёл раньше, исправьте конец смены в «Сотрудники» до закрытия месяца: от этого зависит зарплата."]);
+  if (!monthlyDoc("Коммунальные услуги", ym)) warn.push(["Коммунальные платежи за месяц не внесены", "Если они были, внесите их в «Ежемесячные расходы» до закрытия месяца."]);
+  return {bad, warn};
+}
+// rent and salary that are automatic now and become ordinary records at closing
+function monFixOps(ym){
+  const ops = [];
+  MONTHLY.forEach(([cat], i)=>{ const a = monthlyAuto(cat, ym); if (!a) return;
+    const id = "mon_"+ym+"_"+i;
+    ops.push({col:"expenses", id, after:{id, monthly:true, month:ym, category:cat, amount:a.amount, note:"", ts:ymStart(ym), who:S.me?S.me.name:"", byClose:ym, createdAt:Date.now()}}); });
+  return ops;
+}
+// numbers of the record: 2 decimals are enough and keep it small
+const rnd2 = v => typeof v==="number" ? Math.round(v*100)/100 : Array.isArray(v) ? v.map(rnd2) : v && typeof v==="object" ? Object.fromEntries(Object.entries(v).map(([k,x])=>[k, rnd2(x)])) : v;
+function monRecord(ym){
+  const F = finCalc(ymBeg(ym), ymEnd(ym), ymStart(ym), ymStart(ymShift(ym,1))), st = stockAt(ymEnd(ym));
+  return {id:"month_"+ym, kind:"monthClose", month:ym, v:1, ts:Date.now(), who:S.me?S.me.name:"", whoId:S.me?S.me.id:"",
+    fin:rnd2(Object.assign(F, {noPrice:F.noPrice.slice(0,40), gross:finGross(F), net:finNet(F)})), stock:st.stock, stockSum:st.sum};
+}
+let monYm = "";
+function openMonClose(){
+  if (!isAdmin()) return;
+  const ym = monNext(), now = Date.now(), last = lastClosed();
+  monYm = "";
+  const ok = t => `<div><span class="okc">✓</span> <span>${t}</span></div>`, bad = ([t, x], cls) => `<div><span class="${cls||"neg"}">!</span> <span>${esc(t)}${x?`<br><small class="hint">${x}</small>`:""}</span></div>`;
+  let body = "";
+  if (!ym) body = `<p class="hint">${esc("Записей ещё нет — закрывать нечего.")}</p>`;
+  else if (ymEnd(ym) > now) body = `<p class="hint">${esc(`${ymName(ym)} ещё не закончился. Закрыть месяц можно с 1-го числа следующего месяца, после 06:00.`)}</p>`;
+  else {
+    const c = monChecks(ym), F = finCalc(ymBeg(ym), ymEnd(ym), ymStart(ym), ymStart(ymShift(ym,1))), st = stockAt(ymEnd(ym)), fix = monFixOps(ym);
+    if (!c.bad.length) monYm = ym;
+    body = `${last ? "" : `<p class="hint">${esc("Месяцы закрываются по порядку, начиная с первого месяца с записями.")}</p>`}
+      <div class="box daychk"><h4>${esc(`Проверьте, всё ли закрыто: ${ymName(ym)}`)}</h4>
+        ${c.bad.length ? c.bad.map(x=>bad(x)).join("") : ok("Открытых заказов, смен и запросов нет")}
+        ${c.warn.map(x=>bad(x, "warnc")).join("")}</div>
+      <div class="box monbox"><h4>${esc("Итог месяца")}</h4><div class="sum">
+        <div><span>Выручка</span><b>${money(F.revenue)}</b></div>
+        <div><span>Чистая прибыль</span><b>${money(finNet(F))}</b></div>
+        <div><span>${esc("На складе на конец месяца")}</span><b>${money(st.sum)}</b></div>
+        ${fix.map(o=>`<div><span>${esc(o.after.category)} <small class="hint">${esc("станет записью")}</small></span><b>${money(o.after.amount)}</b></div>`).join("")}</div></div>
+      <p class="hint">${esc("После закрытия записи этого месяца (продажи, заказы, склад, расходы, смены) изменить нельзя. Финансы за месяц, квартал и год считаются по итогу месяца. Ничего не удаляется.")}</p>`;
+  }
+  const cl = closedYms().slice(-3).reverse();
+  if (cl.length) body += `<div class="box"><h4>${esc("Закрытые месяцы")}</h4>${cl.map(m=>{ const r = monthRec(m);
+    return `<div class="mrow"><span>${esc(ymName(m))}<small>${esc(`закрыл(а) ${r.who||"—"}, ${new Date(r.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"short"})}`)}</small></span><b>${money(r.fin ? finNet(r.fin) : 0)}</b>${m===last ? `<button type="button" class="btn small" data-monopen="${esc(m)}">Открыть снова</button>` : "<span></span>"}</div>`; }).join("")}</div>`;
+  $("#monBody").innerHTML = body;
+  $("#monGo").hidden = !ym || ymEnd(ym) > now; $("#monGo").disabled = !monYm;
+  $("#monGo").textContent = ym ? `Закрыть: ${ymName(ym)}` : "Закрыть месяц"; trTree($("#monGo"));
+  $("#monDlg").showModal();
+}
+let monSaving = false;
+$("#monForm").addEventListener("submit", async e=>{
+  e.preventDefault();
+  if (!isAdmin() || monSaving) return;
+  const ym = monYm;
+  if (!ym || ym!==monNext() || ymEnd(ym) > Date.now() || monChecks(ym).bad.length){ openMonClose(); return; }
+  if (!navigator.onLine){ toast("Нужен интернет: закрытие месяца записывается в базу"); return; }
+  if (!tConfirm(`Закрыть месяц: ${ymName(ym)}? Записи этого месяца больше нельзя будет изменить. Открыть месяц снова можно кнопкой «Открыть снова».`)) return;
+  monSaving = true;
+  try { const ops = [...monFixOps(ym), {col:"settings", id:"month_"+ym, after:monRecord(ym)}];
+    await commit(`Закрыт месяц: ${ymName(ym)}`, ops); $("#monDlg").close(); render(true); toast(`Месяц закрыт: ${ymName(ym)}`); }
+  catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
+  finally { monSaving = false; }
+});
+document.addEventListener("click", async e=>{
+  const t = e.target.closest("[data-monopen],#openMonClose"); if (!t || !isAdmin()) return;
+  if (t.id==="openMonClose") return openMonClose();
+  const ym = t.dataset.monopen; if (ym!==lastClosed() || monSaving) return;
+  if (!tConfirm(`Открыть месяц снова: ${ymName(ym)}? Итог месяца удалится, записи месяца снова можно будет менять. Потом закройте месяц ещё раз.`)) return;
+  monSaving = true;
+  try { const ops = S.expenses.filter(x=>x.monthly && x.byClose===ym).map(x=>({col:"expenses", id:x.id, after:null}));
+    await commit(`Открыт снова месяц: ${ymName(ym)}`, [{col:"settings", id:"month_"+ym, after:null}, ...ops], {unlock:true}); render(true); openMonClose(); toast(`Месяц открыт: ${ymName(ym)}`); }
+  catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
+  finally { monSaving = false; }
+});
 function openPromo(){
   if (!isAdmin()) return;
   const c = promoCfg();
@@ -2669,8 +2907,9 @@ $("#expDel").addEventListener("click", async ()=>{
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
 document.addEventListener("click", async e=>{
-  const t = e.target.closest("[data-finp],[data-fins],#addExp,#openPromo,#openOff,#openCardFee,[data-exp]"); if (!t) return;
-  if (t.dataset.finp){ S.finPeriod = t.dataset.finp; lsSet("sushi.finp", S.finPeriod); return render(true); }
+  const t = e.target.closest("[data-finp],[data-fins],[data-finoff],#addExp,#openPromo,#openOff,#openCardFee,[data-exp]"); if (!t) return;
+  if (t.dataset.finoff){ S.finOff = Math.min(0, (Number(S.finOff)||0) + Number(t.dataset.finoff)); return render(true); }
+  if (t.dataset.finp){ S.finPeriod = t.dataset.finp; S.finOff = 0; lsSet("sushi.finp", S.finPeriod); return render(true); }
   if (t.dataset.fins){ S.finSort = t.dataset.fins; return renderList(); }
   if (t.id==="addExp") return openExp(null);
   if (t.id==="openPromo") return openPromo();
@@ -4236,7 +4475,7 @@ function renderStaff(L){
 // This month (and the previous one in the first days of a month); older months are already paid.
 function autoCheckList(){
   const now = new Date(), from = new Date(now.getFullYear(), now.getMonth() - (now.getDate()<=5 ? 1 : 0), 1).getTime();
-  return S.shifts.filter(sh=>sh.autoClosed && !sh.checked && sh.end && (sh.start||0)>=from && !isDemoStaff(sh)).sort((a,b)=>b.start-a.start);
+  return S.shifts.filter(sh=>sh.autoClosed && !sh.checked && sh.end && (sh.start||0)>=from && !isDemoStaff(sh) && !ymLocked(ymOf(sh.start||0))).sort((a,b)=>b.start-a.start);
 }
 function autoCheckHtml(){
   const arr = autoCheckList(); if (!arr.length) return "";
@@ -4323,20 +4562,21 @@ function monthlyAutoIn(t0, t1){
 }
 function monthlyHtml(){
   if (!S.finMonth) S.finMonth = ymOf(Date.now());
-  const ym = S.finMonth; let total = 0;
+  const ym = S.finMonth, lockedM = ymLocked(ym); let total = 0;
   const rows = MONTHLY.map(([cat,label])=>{
     const d = monthlyDoc(cat, ym), au = monthlyAuto(cat, ym), prev = monthlyDoc(cat, ymShift(ym,-1));
     if (d) total += Number(d.amount)||0; else if (au) total += au.amount;
     let extra = "";
-    if (cat==="Зарплата"){ const s = salaryByShifts(ym); if (s.hrs) extra = `<small>${d?"вписано вручную · ":"автоматически · "}по сменам: ${fmtH(s.hrs)}${s.sum?` · ${money(s.sum)}`:""}${s.noRate?` · без ставки: ${s.noRate}`:""}</small>`; }
+    if (d && d.byClose) extra = `<small>записано при закрытии месяца</small>`;
+    else if (cat==="Зарплата"){ const s = salaryByShifts(ym); if (s.hrs) extra = `<small>${d?"вписано вручную · ":"автоматически · "}по сменам: ${fmtH(s.hrs)}${s.sum?` · ${money(s.sum)}`:""}${s.noRate?` · без ставки: ${s.noRate}`:""}</small>`; }
     else if (!d && au) extra = `<small>автоматически, последняя сумма (${ymName(au.from)})</small>`;
     else if (!d && prev) extra = `<small>в прошлом месяце: ${money(prev.amount)}</small>`;
     return `<div class="mrow"><span>${label}${d&&d.note?` <small>${N(d.note)}</small>`:""}${extra}</span>
-      <b>${d ? money(d.amount) : au ? `<i>${money(au.amount)}</i>` : "—"}</b><button type="button" class="btn small" data-medit="${esc(cat)}">${d||au?"Изменить":"Внести"}</button></div>`;
+      <b>${d ? money(d.amount) : au ? `<i>${money(au.amount)}</i>` : "—"}</b>${lockedM ? "<span></span>" : `<button type="button" class="btn small" data-medit="${esc(cat)}">${d||au?"Изменить":"Внести"}</button>`}</div>`;
   }).join("");
   return `<h2 class="cat"><span>Ежемесячные расходы</span></h2>
     <div class="box mbox"><div class="mnav"><button type="button" class="btn small" data-mmon="-1" aria-label="Предыдущий месяц">‹</button><b>${ymName(ym)}</b><button type="button" class="btn small" data-mmon="1" aria-label="Следующий месяц">›</button></div>
-    ${rows}<div class="mrow mtot"><span>Итого за месяц</span><b>${money(total)}</b><span></span></div></div>`;
+    ${rows}<div class="mrow mtot"><span>Итого за месяц</span><b>${money(total)}</b><span></span></div>${lockedM ? `<p class="hint" style="margin:0">Месяц закрыт: записи менять нельзя.</p>` : ""}</div>`;
 }
 let mEdit = null;
 function openMonthly(cat){
@@ -4368,7 +4608,7 @@ $("#mDel").addEventListener("click", async ()=>{
 });
 document.addEventListener("click", e=>{
   const m = e.target.closest("[data-mmon]"); if (m && isAdmin()){ S.finMonth = ymShift(S.finMonth||ymOf(Date.now()), +m.dataset.mmon); return renderList(); }
-  const ed = e.target.closest("[data-medit]"); if (ed && isAdmin()) openMonthly(ed.dataset.medit);
+  const ed = e.target.closest("[data-medit]"); if (ed && isAdmin() && !ymLocked(S.finMonth)) openMonthly(ed.dataset.medit);
 });
 
 /* ---------- kitchen ticket printing (80 mm) ---------- */
@@ -4620,6 +4860,7 @@ Object.assign(I18N, {"Удержание с оплаты картой": ["Card p
 Object.assign(I18N, {"Стоп-лист": ["Stop list", "Tükenenler"], "Сейчас в стоп-листе": ["In the stop list now", "Şu an tükenenler"], "в стоп-листе": ["in the stop list", "tükenenlerde"], "закончилось": ["sold out", "tükendi"], "в продаже": ["available", "satışta"], "нет блюда:": ["dish out:", "tükenen yemek:"], "снова есть": ["is available again", "yeniden var"], "Снова есть": ["Available again", "Yeniden var"], "Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.": ["Tap a dish or set that has run out: in «New order» it turns grey and cannot be added. When it is available again, tap it once more.", "Tükenen yemeğe veya sete dokunun: «Yeni sipariş» ekranında gri olur ve eklenemez. Yeniden olduğunda bir kez daha dokunun."], "в стоп-листе: в «Новом заказе» оно серое": ["is in the stop list: it is grey in «New order»", "tükenenlerde: «Yeni sipariş» ekranında gri"], "В сете есть блюдо": ["The set contains the dish", "Sette şu yemek var:"], "оно закончилось. Снимите метку с этого блюда.": ["it has run out. Take the mark off that dish.", "tükendi. İşareti o yemekten kaldırın."], "Снять метку: Продажи → Стоп-лист.": ["To take the mark off: Sales → Stop list.", "İşareti kaldırmak için: Satışlar → Tükenenler."], "Не удалось сохранить. Проверьте интернет.": ["Could not save. Check the internet connection.", "Kaydedilemedi. İnternet bağlantısını kontrol edin."], "Звук новых заказов: вкл": ["New order sound: on", "Yeni sipariş sesi: açık"], "Звук новых заказов: выкл": ["New order sound: off", "Yeni sipariş sesi: kapalı"], "Коснитесь экрана, чтобы включить звук": ["Touch the screen to turn the sound on", "Sesi açmak için ekrana dokunun"], "Звук при новом заказе — только на этом устройстве": ["Sound on a new order — on this device only", "Yeni siparişte ses — yalnızca bu cihazda"], "Звук включён на этом устройстве: при новом заказе прозвучит сигнал": ["Sound is on on this device: a signal will play on a new order", "Bu cihazda ses açık: yeni siparişte sinyal çalacak"], "Звук выключен на этом устройстве": ["Sound is off on this device", "Bu cihazda ses kapalı"], "Новые заказы:": ["New orders:", "Yeni siparişler:"]});
 Object.assign(I18N, {"Укажите цену закупки за единицу": ["Enter the purchase price per unit", "Birim alış fiyatını girin"], "приход списком": ["bulk receipt", "toplu giriş"], "Убрано из заказа, уже приготовлено": ["Removed from the order, already cooked", "Siparişten çıkarıldı, zaten pişirilmişti"], "блюдо": ["dish", "yemek"], "блюда": ["dishes", "yemek"], "блюд": ["dishes", "yemek"]});
 Object.assign(I18N, {"Снять стоп-лист на завтра?": ["Take dishes off the stop list for tomorrow?", "Yarın için tükenenlerden çıkarılsın mı?"], "Отметьте блюда, которые завтра снова будут: метка снимется. Неотмеченные останутся в стоп-листе.": ["Tick the dishes that will be available tomorrow: their mark is taken off. The rest stay in the stop list.", "Yarın yeniden olacak yemekleri işaretleyin: işaretleri kalkar. İşaretlenmeyenler tükenenlerde kalır."], "Отметить все": ["Tick all", "Tümünü işaretle"], "Забрали из кассы, ₺": ["Taken from the till, ₺", "Kasadan alınan, ₺"], "Оставили на размен, ₺": ["Left as float, ₺", "Bozuk para olarak bırakılan, ₺"], "Сколько денег забрали из кассы и сколько оставили на завтра. Достаточно вписать одно: второе посчитается. Завтра «Размен утром» подставится сам.": ["How much money was taken from the till and how much was left for tomorrow. Enter one of them: the other is worked out. Tomorrow «Morning float» is filled in by itself.", "Kasadan ne kadar para alındı ve yarına ne kadar bırakıldı. Birini yazmanız yeterli: diğeri hesaplanır. Yarın «Sabah bozuk para» kendiliğinden gelir."], "Рабочий день длится до 06:00 утра: всё, что продано после полуночи, входит в этот день.": ["The working day lasts until 06:00 in the morning: everything sold after midnight belongs to this day.", "İş günü sabah 06:00'ya kadar sürer: gece yarısından sonra satılan her şey bu güne dahildir."], "Забрали и оставили на размен вместе — столько, сколько в кассе:": ["Taken plus left as float must equal what is in the till:", "Alınan ve bırakılan bozuk para toplamı kasadaki tutara eşit olmalı:"], "Снято со стоп-листа:": ["Taken off the stop list:", "Tükenenlerden çıkarılan:"], "Забрали из кассы": ["Taken from the till", "Kasadan alınan"], "Оставили на размен": ["Left as float", "Bozuk para olarak bırakılan"], "Переводы на счёт": ["Bank transfers", "Banka havaleleri"], "Переводом за день, заказов:": ["By transfer for the day, orders:", "Günlük havale, sipariş:"], "сверьте с выпиской банка": ["check against the bank statement", "banka ekstresiyle karşılaştırın"], "Забрали из кассы за период (дней:": ["Taken from the till in the period (days:", "Dönemde kasadan alınan (gün:"], "отмечено": ["marked", "işaret:"]});
+Object.assign(I18N, {"Закрыть месяц": ["Close month", "Ayı kapat"], "Открыть месяц снова": ["Open the month again", "Ayı yeniden aç"], "Год": ["Year", "Yıl"], "квартал": ["quarter", "çeyrek"], "Вперёд": ["Forward", "İleri"], "Последний закрытый месяц": ["Last closed month", "Son kapatılan ay"], "Месяц закрыт": ["Month closed", "Ay kapatıldı"], "Месяц открыт": ["Month opened", "Ay açıldı"], "Цифры — из итога месяца, записи этого месяца менять нельзя.": ["Figures come from the month summary; records of this month cannot be changed.", "Rakamlar ay özetinden alınır, bu ayın kayıtları değiştirilemez."], "записано при закрытии месяца": ["recorded when the month was closed", "ay kapatılırken kaydedildi"], "Месяц закрыт: записи менять нельзя.": ["Month closed: records cannot be changed.", "Ay kapatıldı: kayıtlar değiştirilemez."], "На конец месяца на складе было продуктов на": ["At the end of the month the stock was worth", "Ay sonunda depodaki ürünlerin değeri:"], "Часы и оплата по сменам": ["Hours and pay by shifts", "Vardiyalara göre saat ve ücret"], "По ставкам работников. В расходы идёт сумма «Зарплата» из ежемесячных расходов.": ["At the workers' hourly rates. Expenses include the «Salaries» amount from the monthly costs.", "Çalışanların saat ücretlerine göre. Giderlere aylık giderlerdeki «Maaş» tutarı yazılır."], "По месяцам": ["By month", "Aylara göre"], "Месяц": ["Month", "Ay"], "не закрыт": ["not closed", "kapatılmadı"], "ещё не закончился. Закрыть месяц можно с 1-го числа следующего месяца, после 06:00.": ["has not ended yet. A month can be closed from the 1st of the next month, after 06:00.", "henüz bitmedi. Ay, sonraki ayın 1'inden itibaren saat 06:00'dan sonra kapatılabilir."], "Закрытые месяцы": ["Closed months", "Kapatılan aylar"], "закрыл(а)": ["closed by", "kapatan:"], "Открыть снова": ["Open again", "Yeniden aç"], "Записей ещё нет — закрывать нечего.": ["No records yet — nothing to close.", "Henüz kayıt yok — kapatılacak bir şey yok."], "Месяцы закрываются по порядку, начиная с первого месяца с записями.": ["Months are closed in order, starting with the first month that has records.", "Aylar sırayla kapatılır; kayıtları olan ilk aydan başlanır."], "Открытых заказов, смен и запросов нет": ["No open orders, shifts or requests", "Açık sipariş, vardiya veya talep yok"], "Смены закрылись сами, не проверены": ["Shifts closed automatically, not checked", "Kendiliğinden kapanan vardiyalar, kontrol edilmedi"], "Если работник ушёл раньше, исправьте конец смены в «Сотрудники» до закрытия месяца: от этого зависит зарплата.": ["If a worker left earlier, correct the end of the shift in «Staff» before closing the month: the salary depends on it.", "Çalışan daha erken çıktıysa, ayı kapatmadan önce «Personel» bölümünde vardiyanın bitişini düzeltin: maaş buna bağlıdır."], "Закройте или отмените их в «Продажи».": ["Close or cancel them in «Sales».", "«Satışlar» bölümünde kapatın veya iptal edin."], "Закройте её в «Сотрудники»: нажмите на смену и укажите конец.": ["Close it in «Staff»: tap the shift and enter its end.", "«Personel» bölümünde kapatın: vardiyaya dokunup bitişini girin."], "Коммунальные платежи за месяц не внесены": ["Utilities for the month are not entered", "Ayın faturaları girilmedi"], "Если они были, внесите их в «Ежемесячные расходы» до закрытия месяца.": ["If there were any, enter them in «Monthly costs» before closing the month.", "Varsa, ayı kapatmadan önce «Aylık giderler» bölümüne girin."], "Итог месяца": ["Month summary", "Ay özeti"], "На складе на конец месяца": ["Stock at the end of the month", "Ay sonunda depo"], "станет записью": ["will become a record", "kayıt olarak yazılacak"], "После закрытия записи этого месяца (продажи, заказы, склад, расходы, смены) изменить нельзя. Финансы за месяц, квартал и год считаются по итогу месяца. Ничего не удаляется.": ["After closing, the records of this month (sales, orders, stock, expenses, shifts) cannot be changed. Finance for the month, quarter and year is taken from the month summary. Nothing is deleted.", "Kapatıldıktan sonra bu ayın kayıtları (satışlar, siparişler, depo, giderler, vardiyalar) değiştirilemez. Ay, çeyrek ve yıl finansı ay özetinden hesaplanır. Hiçbir şey silinmez."], "Записи этого месяца больше нельзя будет изменить. Открыть месяц снова можно кнопкой «Открыть снова».": ["Records of this month will no longer be editable. The month can be opened again with «Open again».", "Bu ayın kayıtları artık değiştirilemeyecek. Ay «Yeniden aç» düğmesiyle tekrar açılabilir."], "Итог месяца удалится, записи месяца снова можно будет менять. Потом закройте месяц ещё раз.": ["The month summary will be removed and its records can be changed again. Then close the month once more.", "Ay özeti silinir, ayın kayıtları yeniden değiştirilebilir. Sonra ayı tekrar kapatın."], "Записи этого месяца менять нельзя. Если нужно исправить, админ открывает месяц снова: «Финансы» → «Закрыть месяц» → «Открыть снова».": ["Records of this month cannot be changed. To correct something, the admin opens the month again: «Finance» → «Close month» → «Open again».", "Bu ayın kayıtları değiştirilemez. Düzeltmek gerekirse yönetici ayı yeniden açar: «Finans» → «Ayı kapat» → «Yeniden aç»."], "в прошлом месяце": ["last month", "geçen ay"], "Нужен интернет: закрытие месяца записывается в базу": ["Internet needed: closing the month is written to the database", "İnternet gerekli: ay kapanışı veritabanına yazılır"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
