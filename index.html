@@ -1106,7 +1106,7 @@ function renderControls(){
       <p class="hint" style="margin:0 0 10px">Для блюд, которые не продали: еда персонала, брак, дегустация. Нажимайте на блюда и сеты, потом «Списать…» — продукты спишутся по техкартам, в выручку ничего не попадёт.</p>`;
   } else if (S.view==="menu"){
     const nn = S.menu.filter(d=>d.needsWork).length + S.sets.filter(x=>x.needsWork).length;
-    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button></div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
+    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button><button class="btn" id="pubMenu">Обновить меню на сайте</button></div>${pubNote()}` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
@@ -5219,11 +5219,9 @@ function startSubs(){
   syncSub("staff", list => { S.staff = list; S.loaded.staff = true; restoreMe(); applyRole(); render(); });
   syncStart();
 }
-/* ---------- client menu: a copy for the online-order app (JaM), without recipes, packaging and notes ---------- */
-// pubmenu/{id} = the dish or set as the customer sees it. Any connected device keeps the copy in step with «Меню»,
-// but only from data confirmed by the server, so a device that was offline never puts back old prices.
-const PUB = {menu:null, sets:null, pub:null, warned:false};
-const canon = o => Array.isArray(o) ? "[" + o.map(canon).join(",") + "]" : o && typeof o==="object" ? "{" + Object.keys(o).sort().map(k=>JSON.stringify(k)+":"+canon(o[k])).join(",") + "}" : JSON.stringify(o);
+/* ---------- menu for the online-order site: copied only when the admin presses «Обновить меню на сайте» ---------- */
+// pubmenu/{id} = the dish or set as the customer sees it, without recipes, packaging and notes.
+// settings/pubmenu remembers when it was copied and a fingerprint, so «Меню» can say whether the site is behind.
 function pubOf(kind, x){
   const cat = kind==="set" ? "Сеты" : (x.category || ""), ci = DISH_CATS.indexOf(cat), t = I18N[cat] || [];
   const d = {kind, name:x.name||"", name_en:x.name_en||"", name_tr:x.name_tr||"", category:cat, cat_en:t[0]||cat, cat_tr:t[1]||cat,
@@ -5231,23 +5229,45 @@ function pubOf(kind, x){
   if (kind==="set") d.items = (x.items||[]).map(i=>({dishId:i.dishId, qty:Number(i.qty)||0}));
   return d;
 }
-function pubSync(){
-  if (!PUB.menu || !PUB.sets || !PUB.pub) return;
-  const want = {}, have = {};
-  PUB.menu.forEach(x=>{ want[x.id] = pubOf("dish", x); });
-  PUB.sets.forEach(x=>{ want[x.id] = pubOf("set", x); });
-  PUB.pub.forEach(x=>{ const {id, ...d} = x; have[id] = d; });
-  const fail = e => { console.warn("pubmenu", e && e.code); if (!PUB.warned && isAdmin()){ PUB.warned = true; toast("Меню для онлайн-заказов не обновилось: нет доступа к базе"); } };
-  for (const [id, d] of Object.entries(want)) if (!have[id] || canon(have[id])!==canon(d)) FS.doc("pubmenu/" + id).set(d).catch(fail);
-  for (const id of Object.keys(have)) if (!want[id]) FS.doc("pubmenu/" + id).delete().catch(fail);
+function pubWant(){
+  const w = {};
+  S.menu.forEach(x=>{ w[x.id] = pubOf("dish", x); });
+  S.sets.forEach(x=>{ w[x.id] = pubOf("set", x); });
+  return w;
 }
-function startPubMenu(){
-  const on = (col, key) => FS.collection(col).onSnapshot({includeMetadataChanges:true}, s => {
-    if (s.metadata.fromCache) return;   // wait for the server's copy
-    PUB[key] = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); pubSync();
-  }, e => console.warn("pubmenu", col, e && e.code));
-  on("menu", "menu"); on("sets", "sets"); on("pubmenu", "pub");
+function pubHash(w){
+  const str = Object.keys(w).sort().map(id=>id+canon(w[id])).join("|");
+  let h = 5381; for (let i=0; i<str.length; i++) h = (h*33 ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
+function pubNote(){
+  const c = S.settings.find(x=>x.id==="pubmenu");
+  if (!c) return `<p class="hint" style="margin:0 0 10px">Меню на сайт ещё не копировалось.</p>`;
+  const same = c.hash===pubHash(pubWant());
+  return `<p class="hint" style="margin:0 0 10px">На сайте меню от ${esc(new Date(c.ts).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}))}${same ? " — совпадает с этим меню." : " — <b>в меню есть изменения, которых нет на сайте.</b>"}</p>`;
+}
+async function pubMenu(){
+  if (!isAdmin() || !FS) return;
+  if (!navigator.onLine){ toast("Нет интернета. Меню на сайт можно скопировать только онлайн."); return; }
+  const btn = $("#pubMenu"); if (btn){ btn.disabled = true; btn.textContent = "Копирую…"; }
+  try {
+    const want = pubWant(), have = {};
+    (await FS.collection("pubmenu").get({source:"server"})).docs.forEach(d=>{ have[d.id] = d.data(); });
+    const ops = [];
+    for (const [id, d] of Object.entries(want)) if (!have[id] || canon(have[id])!==canon(d)) ops.push(["set", id, d]);
+    for (const id of Object.keys(have)) if (!want[id]) ops.push(["del", id]);
+    for (let i=0; i<ops.length; i+=400){
+      const b = FS.batch();
+      ops.slice(i, i+400).forEach(([k, id, d])=>{ const r = FS.doc("pubmenu/" + id); if (k==="set") b.set(r, d); else b.delete(r); });
+      await b.commit();
+    }
+    const rec = {id:"pubmenu", ts:Date.now(), by:S.me ? S.me.name : "", hash:pubHash(want), count:Object.keys(want).length};
+    await FS.doc("settings/pubmenu").set(rec); upsertLocal(S.settings, rec);
+    toast(ops.length ? `Меню на сайте обновлено: изменений ${ops.length}` : "Меню на сайте уже совпадает");
+  } catch(e){ console.error(e); toast("Не удалось скопировать меню на сайт: " + ((e && e.code) || "ошибка")); }
+  render(true);
+}
+document.addEventListener("click", e=>{ if (e.target.closest("#pubMenu")) guarded(pubMenu); });
 /* ---------- devices: list, main devices, approval, disconnect ---------- */
 const DEV_ID = (()=>{ let id = lsGet("sushi.dev"); if (!/^d[a-z0-9]{8,}$/.test(id)){ id = uid("d"); lsSet("sushi.dev", id); } return id; })();
 const DEV = {me:undefined, cfg:undefined, meCache:true, cfgCache:true, started:false, going:false, seenPending:null};
@@ -5293,7 +5313,7 @@ function devStart(){
   lsSet("sushi.devoff", "");
   if (DEV.started){ applyRole(); if (S.view==="staff") render(true); return; }
   DEV.started = true;
-  S.db = makeDb(FS); startSubs(); startPubMenu();
+  S.db = makeDb(FS); startSubs();
   subscribe("devices", list => { S.devices = list; devPendingToast(); if (S.view==="staff") render(true); });
   devTouch();
 }
