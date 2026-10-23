@@ -869,6 +869,7 @@ details.fold[open]>summary{margin-bottom:8px}
   <h3 id="shTitle">Смена</h3>
   <label class="f">Сотрудник<select id="shStaff"></select></label>
   <div class="two"><label class="f">Начало<input id="shStart" type="datetime-local" required></label><label class="f">Конец<input id="shEnd" type="datetime-local"></label></div>
+  <label class="toggle"><input type="checkbox" id="shAuto"> Конец — авто (в 23:00)</label>
   <p class="hint" id="shHint">Пустой конец — смена ещё идёт.</p>
   <p class="hint" id="shInfo" hidden></p>
   <div class="dlg-actions">
@@ -4620,30 +4621,48 @@ function openShiftDlg(id, opt){
   const now = Date.now();
   $("#shStart").value = toLocalInput(sh ? sh.start : opt.mode==="on" ? now : now - 8*3600000);
   $("#shEnd").value = toLocalInput(vd ? sh.void.end : opt.mode==="off" ? now : sh ? sh.end : opt.mode==="on" ? null : now);
-  $("#shHint").textContent = trS(opt.mode==="on" ? "Конец пустой: работник на смене с указанного времени. Если он пришёл раньше, поставьте время прихода."
+  // «авто»: the end is not typed, the shift ends at 23:00 like one the worker did not close
+  $("#shAuto").checked = !vd && opt.mode!=="off" && (opt.mode==="on" || (sh ? (!sh.end || !!sh.autoClosed) : false));
+  $("#shHint").dataset.t = opt.mode==="on" ? "Если работник пришёл раньше, поставьте время прихода."
     : opt.mode==="off" ? "Конец — сейчас. Если работник ушёл раньше, поставьте время ухода."
-    : "Пустой конец — смена ещё идёт.");
+    : "Пустой конец — смена ещё идёт.";
+  shAutoUi();
   // who started or changed the shift, and on which device: helps to see a shift someone else opened
   const info = [];
   if (vd) info.push(`Аннулирована: ${sh.void.why||""}` + (sh.void.by ? ` (${sh.void.by}, ${new Date(sh.void.at||now).toLocaleString(LOC(),{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})})` : ""));
   if (sh && sh.dev) info.push(`Начата на устройстве: ${sh.dev}`);
   if (sh && sh.editedBy) info.push(`Изменена вручную: ${sh.editedBy}`);
   $("#shInfo").textContent = info.map(trS).join(" · "); $("#shInfo").hidden = !info.length;
-  ["#shStaff","#shStart","#shEnd"].forEach(k=>$(k).disabled = vd);
+  ["#shStaff","#shStart","#shAuto"].forEach(k=>$(k).disabled = vd); if (vd) $("#shEnd").disabled = true;
   $("#shDel").hidden = !sh || vd; $("#shBack").hidden = !vd; $("#shSave").hidden = vd;
   $("#shiftDlg").showModal();
 }
+function shAutoUi(){
+  const a = $("#shAuto").checked; $("#shEnd").disabled = a; if (a) $("#shEnd").value = "";
+  $("#shEnd").closest("label").style.opacity = a ? ".5" : "";
+  const h = $("#shHint").dataset.t || "";
+  $("#shHint").textContent = trS(a ? (h && h!=="Пустой конец — смена ещё идёт." ? h + " " : "") + "Авто: смена идёт и сама закроется в 23:00, как у работника, который не нажал «Закончить смену». Если 23:00 того дня уже прошло, конец будет 23:00." : h);
+}
+$("#shAuto").addEventListener("change", ()=>{ shAutoUi(); if (!$("#shAuto").checked && !$("#shEnd").value) $("#shEnd").focus(); });
 $("#shiftForm").addEventListener("submit", async e=>{
   e.preventDefault();
-  const sid = $("#shStaff").value, st = S.staff.find(x=>x.id===sid), start = fromLocalInput($("#shStart").value), end = fromLocalInput($("#shEnd").value);
+  const sid = $("#shStaff").value, st = S.staff.find(x=>x.id===sid), start = fromLocalInput($("#shStart").value), auto = $("#shAuto").checked;
+  let end = auto ? null : fromLocalInput($("#shEnd").value), autoF = {autoClosed:false};
   if (!st || !start){ need(st ? $("#shStart") : $("#shStaff"), "Укажите сотрудника и начало смены"); return; }
+  const old = editingShift ? S.shifts.find(x=>x.id===editingShift) : null;
+  if (auto && old && old.autoClosed && old.end && old.start===start){ end = old.end; autoF = {checked:true}; }   // its auto end (maybe carried on after 23:00) stays
+  else if (auto){
+    // before 23:00 of its day the shift stays open and closes itself at 23:00; after it — ends at 23:00, marked «авто» (already checked)
+    const cut = autoCloseAt(start);
+    if (cut <= start){ if (Date.now() - start > 12*3600000){ toast("Смена начата после 23:00: укажите конец вручную"); return; } }
+    else if (Date.now() >= cut){ end = cut; autoF = {autoClosed:true, autoCut:cut, autoLast:null, checked:true}; }
+  }
   if (end && end <= start){ toast("Конец смены должен быть позже начала"); return; }
   const later = Date.now() + 5*60000;
   if (start > later || (end && end > later)){ toast("Время смены не может быть позже, чем сейчас"); return; }
-  const old = editingShift ? S.shifts.find(x=>x.id===editingShift) : null;
   if (isVoid(old)) return;
   if (!end && S.shifts.some(x=>x.staffId===sid && !x.end && x.id!==old?.id)){ toast("У сотрудника уже есть открытая смена"); return; }
-  const sh = Object.assign({}, old || {id:uid("sh")}, {staffId:sid, name:st.name, start, end:end||null, autoClosed:false, editedBy:S.me.name});
+  const sh = Object.assign({}, old || {id:uid("sh")}, {staffId:sid, name:st.name, start, end:end||null, editedBy:S.me.name}, autoF);
   try { await commit((old?"Изменение смены: ":"Смена вручную: ")+st.name, [{col:"shifts", id:sh.id, after:sh}]); $("#shiftDlg").close(); applyRole(); render(); toast("Смена сохранена"); }
   catch(er){ console.error(er); toast("Не удалось сохранить."); }
 });
@@ -5021,7 +5040,10 @@ Object.assign(I18N, {"Поставить на смену": ["Put on shift", "Var
   "Этот и прошлый месяц. Часы этих смен не считаются.": ["This and last month. The hours of these shifts are not counted.", "Bu ay ve geçen ay. Bu vardiyaların saatleri sayılmaz."],
   "Конец пустой: работник на смене с указанного времени. Если он пришёл раньше, поставьте время прихода.": ["End is empty: the worker is on shift from the time shown. If they came earlier, set the time they came.", "Bitiş boş: çalışan belirtilen saatten beri vardiyada. Daha erken geldiyse geliş saatini girin."],
   "Конец — сейчас. Если работник ушёл раньше, поставьте время ухода.": ["End is now. If the worker left earlier, set the time they left.", "Bitiş şimdi. Çalışan daha erken çıktıysa çıkış saatini girin."],
-  "Пустой конец — смена ещё идёт.": ["Empty end: the shift is still going on.", "Bitiş boşsa vardiya hâlâ sürüyor."], "Новая смена": ["New shift", "Yeni vardiya"], "Смена": ["Shift", "Vardiya"], "Начало": ["Start", "Başlangıç"], "Конец": ["End", "Bitiş"],
+  "Пустой конец — смена ещё идёт.": ["Empty end: the shift is still going on.", "Bitiş boşsa vardiya hâlâ sürüyor."],
+  "Конец — авто (в 23:00)": ["End — auto (at 23:00)", "Bitiş — otomatik (23:00'te)"], "Если работник пришёл раньше, поставьте время прихода.": ["If the worker came earlier, set the time they came.", "Çalışan daha erken geldiyse geliş saatini girin."],
+  "Авто: смена идёт и сама закроется в 23:00, как у работника, который не нажал «Закончить смену». Если 23:00 того дня уже прошло, конец будет 23:00.": ["Auto: the shift goes on and closes itself at 23:00, like for a worker who did not press «End shift». If 23:00 of that day has already passed, the end will be 23:00.", "Otomatik: vardiya sürer ve «Vardiyayı bitir»e basmayan çalışanda olduğu gibi 23:00'te kendiliğinden kapanır. O günün 23:00'ü geçtiyse bitiş 23:00 olur."],
+  "Смена начата после 23:00: укажите конец вручную": ["The shift started after 23:00: enter its end by hand", "Vardiya 23:00'ten sonra başladı: bitişi elle girin"], "Новая смена": ["New shift", "Yeni vardiya"], "Смена": ["Shift", "Vardiya"], "Начало": ["Start", "Başlangıç"], "Конец": ["End", "Bitiş"],
   "Начата на устройстве": ["Started on device", "Başlatıldığı cihaz"], "Изменена вручную": ["Changed by hand", "Elle değiştirildi"],
   "Время смены не может быть позже, чем сейчас": ["Shift time cannot be later than now", "Vardiya saati şimdiden sonra olamaz"],
   "Аннулировать смену": ["Annul the shift of", "Vardiyayı iptal et:"], "Её часы не будут считаться в зарплату. Укажите причину (обязательно):": ["Its hours will not count towards pay. Enter the reason (required):", "Saatleri maaşa sayılmaz. Nedeni yazın (zorunlu):"],
