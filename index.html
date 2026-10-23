@@ -339,8 +339,13 @@ details.det .slist .srow,.srow{display:grid;grid-template-columns:1fr auto auto;
 .srow .auto{color:var(--low)}
 .srow small{display:block;font-size:.75rem;opacity:.85}
 .srow.long{border-color:var(--empty);color:var(--empty)}
+.srow.void{opacity:.75;border-style:dashed;box-sizing:border-box}
+.srow.void span{min-width:0;overflow-wrap:anywhere}
+.srow.void.wn{grid-template-columns:1fr auto}
+.srow.void .vfull{grid-column:1/-1;font-weight:600}
 .achk{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
 .achk .acts{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.sdet > .acts{display:flex;flex-wrap:wrap;gap:6px}
 .chip.me{background:var(--on-nori);color:var(--nori);border-color:var(--on-nori)}
 .chip.me b{margin:0 4px}
 button.chip{cursor:pointer}
@@ -864,11 +869,12 @@ details.fold[open]>summary{margin-bottom:8px}
   <h3 id="shTitle">Смена</h3>
   <label class="f">Сотрудник<select id="shStaff"></select></label>
   <div class="two"><label class="f">Начало<input id="shStart" type="datetime-local" required></label><label class="f">Конец<input id="shEnd" type="datetime-local"></label></div>
-  <p class="hint">Пустой конец — смена ещё идёт.</p>
+  <p class="hint" id="shHint">Пустой конец — смена ещё идёт.</p>
+  <p class="hint" id="shInfo" hidden></p>
   <div class="dlg-actions">
-    <button type="button" class="btn danger" id="shDel">Удалить</button><span class="spacer"></span>
+    <button type="button" class="btn danger" id="shDel">Аннулировать</button><button type="button" class="btn" id="shBack" hidden>Восстановить смену</button><span class="spacer"></span>
     <button type="button" class="btn" data-close>Отмена</button>
-    <button type="submit" class="btn primary">Сохранить</button>
+    <button type="submit" class="btn primary" id="shSave">Сохранить</button>
   </div>
 </form></dialog>
 <dialog id="monthDlg"><form method="dialog" id="monthForm">
@@ -1121,7 +1127,7 @@ function renderControls(){
   } else if (S.view==="staff"){
     c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${SH_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-shp="${k}" aria-pressed="${S.shPeriod===k}">${l}</button>`).join("")}</div>
       <div class="controls"><button class="btn primary" id="addStaff">+ Сотрудник</button><button class="btn" id="addShift">+ Смена вручную</button>${devIsMain()?"":`<button class="btn" id="devSignOut">Отключить это устройство</button>`}</div>
-      <p class="hint" style="margin:0 0 10px">Смена начинается и заканчивается на экране входа. Если работник не закрыл смену, программа закрывает её сама в 23:00. Если после 23:00 он что-то делает в программе, смена продлевается одним куском до 10 минут после его последнего действия (паузы до часа тоже входят в смену). Такие смены помечены «авто» и ждут проверки. Нажмите на смену, чтобы исправить время.</p>`;
+      <p class="hint" style="margin:0 0 10px">Смена начинается и заканчивается на экране входа. Если работник не закрыл смену, программа закрывает её сама в 23:00. Если после 23:00 он что-то делает в программе, смена продлевается одним куском до 10 минут после его последнего действия (паузы до часа тоже входят в смену). Такие смены помечены «авто» и ждут проверки. Нажмите на смену, чтобы исправить время. Админ может сам поставить работника на смену, снять со смены, добавить смену задним числом или аннулировать её с причиной: нажмите на работника ниже.</p>`;
   }
 }
 function waiting(){ return !S.noDb && !Object.values(S.loaded).every(Boolean); }
@@ -4289,6 +4295,8 @@ document.addEventListener("click", e=>{
 
 /* ---------- shifts / working time ---------- */
 const openShiftOf = sid => S.shifts.filter(x=>x.staffId===sid && !x.end && x.start).sort((a,b)=>a.start-b.start)[0];
+// a shift the admin annulled: kept with its reason (void: {end, breaks, why, by, at}) but with end = start, so it counts 0 hours everywhere
+const isVoid = sh => !!(sh && sh.void);
 // a shift's worked pieces: start – end without its breaks (the time away when a closed shift was continued the same day)
 function segsOf(sh){
   let segs = [[sh.start||0, Math.max(sh.start||0, sh.end||Date.now())]];
@@ -4317,7 +4325,7 @@ function payOf(st, arr){
 }
 const rateText = st => { const rs = Array.isArray(st.rates) && st.rates.length ? [...st.rates].sort((a,b)=>a.from-b.from) : [{from:0, rate:Number(st.rate)||0}];
   return rs.map(r=>(r.from ? new Date(r.from).toLocaleDateString(LOC(),{day:"numeric",month:"short",year:"numeric"}) + ": " : "") + money(Number(r.rate)||0) + "/ч").join(" → "); };
-const overlapsOther = sh => S.shifts.some(x=>x.id!==sh.id && x.staffId===sh.staffId && x.start && (x.start||0) < (sh.end||Date.now()) && (x.end||Date.now()) > (sh.start||0));
+const overlapsOther = sh => !isVoid(sh) && S.shifts.some(x=>x.id!==sh.id && !isVoid(x) && x.staffId===sh.staffId && x.start && (x.start||0) < (sh.end||Date.now()) && (x.end||Date.now()) > (sh.start||0));
 const fmtH = h => { const m = Math.round(h*60); return `${Math.floor(m/60)} ч ${String(m%60).padStart(2,"0")} мин`; };
 const hhmm = ts => new Date(ts).toLocaleTimeString(LOC(),{hour:"2-digit",minute:"2-digit"});
 const toLocalInput = ts => ts ? new Date(ts - new Date(ts).getTimezoneOffset()*60000).toISOString().slice(0,16) : "";
@@ -4338,10 +4346,17 @@ function weekNo(ts){ const d = new Date(ts); d.setHours(0,0,0,0); d.setDate(d.ge
 function weekLabel(w, from, to){ const a = Math.max(w, from||w), e = Math.min(addDays(w,6), to||Infinity), o = {day:"numeric",month:"short"};
   return `Неделя ${weekNo(w)} · ${new Date(a).toLocaleDateString(LOC(),o)}${e>a?` – ${new Date(e).toLocaleDateString(LOC(),o)}`:""}`; }
 function shRowHtml(sh){
+  if (isVoid(sh)) return shVoidRowHtml(sh, false);
   const long = !sh.end ? hoursOf(sh)>LONG_SHIFT_H : false;
   const d = new Date(sh.start).toLocaleDateString(LOC(),{day:"numeric",month:"short",weekday:"short"});
   const br = (sh.breaks||[]).filter(b=>b.to>b.from), dup = overlapsOther(sh);
   return `<button type="button" class="srow ${long||dup?"long":""}" data-editshift="${esc(sh.id)}"><span>${d}</span><span>${hhmm(sh.start)} – ${sh.end?hhmm(sh.end)+(sh.autoClosed?" авто":""):(long?"не закрыта!":"сейчас")}${sh.autoClosed && sh.autoCut && sh.end > autoCloseAt(sh.start||0) + 60000 ?"<small>продлена после 23:00</small>":""}${br.length?`<small>${br.map(b=>`перерыв ${hhmm(b.from)} – ${hhmm(b.to)}`).join(", ")}</small>`:""}${dup?"<small>повтор, часы считаются один раз</small>":""}</span><b>${fmtH(hoursOf(sh))}</b></button>`;
+}
+// an annulled shift: its times crossed out, the reason and who annulled it; 0 hours
+function shVoidRowHtml(sh, withName){
+  const d = new Date(sh.start).toLocaleDateString(LOC(),{day:"numeric",month:"short",weekday:"short"}), v = sh.void;
+  const at = v.at ? new Date(v.at).toLocaleDateString(LOC(),{day:"numeric",month:"short"}) + " " + hhmm(v.at) : "";
+  return `<button type="button" class="srow void ${withName?"wn":""}" data-editshift="${esc(sh.id)}"><span class="${withName?"vfull":""}">${withName ? N(sh.name||"") + " · " : ""}${d}</span><span><s>${hhmm(sh.start)} – ${v.end ? hhmm(v.end) : "…"}</s><small>Аннулирована: ${N(v.why||"")}${v.by||at ? ` (${esc(v.by||"")}${v.by&&at?", ":""}${at})` : ""}</small></span><b>${fmtH(0)}</b></button>`;
 }
 // finished time of one worker folds up: weeks of this month → months of this quarter → earlier quarters; each opens down to the days
 function staffWeeksHtml(x){
@@ -4405,7 +4420,7 @@ function autoEndOf(sh, now, idx){
   return {last, end: last===day && day!==(sh.start||0) ? day : last + IDLE_CLOSE};
 }
 // an auto-closed shift that a new action joins again: until 11:00, less than an hour after its last action
-const mergeableOf = (sid, now) => S.shifts.filter(x=>x.staffId===sid && x.autoClosed && x.autoCut && !x.checked && x.end
+const mergeableOf = (sid, now) => S.shifts.filter(x=>x.staffId===sid && x.autoClosed && x.autoCut && !x.checked && x.end && !ymLocked(ymOf(x.start||0))
   && now <= nightEnd(x.autoCut) && now - (x.autoLast || x.autoCut) <= MERGE_GAP).sort((a,b)=>b.end-a.end)[0];
 let autoClosing = false;
 const ACT_COLS = ["shifts","orders","sales","moves","expenses","invdrafts"];
@@ -4415,7 +4430,7 @@ async function autoCloseShifts(){
     // a later night action of the worker arrived (from another device, or after a start from an old copy):
     // the shift goes on again or its end moves later, never earlier
     let idx = null; const now = Date.now();
-    for (const sh of S.shifts.filter(x=>x.autoClosed && x.autoCut && !x.checked && x.end && now - x.end < 2*86400000)){
+    for (const sh of S.shifts.filter(x=>x.autoClosed && x.autoCut && !x.checked && x.end && now - x.end < 2*86400000 && !ymLocked(ymOf(x.start||0)))){
       const e = autoEndOf(sh, now, idx || (idx = actTimes())); if (e.end <= sh.end + 60000) continue;
       const n = Object.assign({}, sh, now < e.end ? {end:null, autoClosed:false} : {end:e.end, autoLast:e.last});
       try { await putDoc("shifts", n.id, n); upsertLocal(S.shifts, n); } catch(e){ console.error(e); }
@@ -4456,7 +4471,7 @@ async function syncStaffShifts(sid){
 const day0 = ts => { const d = new Date(ts); d.setHours(0,0,0,0); return d.getTime(); };
 // today's last closed shift that can still be continued (not past the 23:00 auto close)
 const resumableOf = sid => { const now = Date.now(), d0 = day0(now);
-  return S.shifts.filter(x=>x.staffId===sid && x.end && (x.start||0)>=d0 && now < autoCloseAt(x.start)).sort((a,b)=>b.end-a.end)[0]; };
+  return S.shifts.filter(x=>x.staffId===sid && x.end && !isVoid(x) && (x.start||0)>=d0 && now < autoCloseAt(x.start)).sort((a,b)=>b.end-a.end)[0]; };
 // "joined": already on shift (from another device) · "resumed": today's shift continues, the time away is a break · "started": new shift
 async function startShift(st){
   await syncStaffShifts(st.id);
@@ -4467,7 +4482,7 @@ async function startShift(st){
     const n = Object.assign({}, last, {end:null, autoClosed:false, breaks:[...(last.breaks||[]), {from:Math.min(last.end, now), to:now}]});
     await putDoc("shifts", n.id, n); upsertLocal(S.shifts, n); return "resumed";
   }
-  const sh = {id:uid("sh"), staffId:st.id, name:st.name, start:now, end:null};
+  const sh = {id:uid("sh"), staffId:st.id, name:st.name, start:now, end:null, dev:bkDev()};
   await putDoc("shifts", sh.id, sh); upsertLocal(S.shifts, sh); return "started";
 }
 // closes every open shift of the worker (two could be open if two devices started one offline)
@@ -4525,15 +4540,15 @@ function renderStaff(L){
   const admins = S.staff.filter(x=>roleOf(x)==="admin").sort((a,b)=>String(a.name).localeCompare(b.name,"ru"));
   const adminHtml = `<h2 class="cat"><span>Админ</span><span>${admins.length}</span></h2><div class="list">${admins.map(x=>`<button class="row" style="border-left-color:var(--accent)" data-editstaff="${esc(x.id)}"><span class="nm">${N(x.name)}${x.id===S.me?.id?" (вы)":""}<small>Без учёта смен</small></span>${x.active===false?'<span class="tag hid">отключён</span>':""}</button>`).join("")}</div>`;
   if (!list.length){ L.innerHTML = html + `<div class="empty-state">Работников ресторана пока нет. Нажмите «+ Сотрудник».</div>` + adminHtml + devListHtml() + bkStaffHtml(); return; }
-  html += autoCheckHtml();
+  html += autoCheckHtml() + voidListHtml();
   let totH = 0, totPay = 0;
   const card = x=>{
     const shs = S.shifts.filter(sh=>sh.staffId===x.id && inR(sh)).sort((a,b)=>(b.start||0)-(a.start||0));
-    const h = workedH(shs), rate = hasRate(x), pay = payOf(x, shs);
+    const h = workedH(shs), rate = hasRate(x), pay = payOf(x, shs), nSh = shs.filter(sh=>!isVoid(sh)).length;
     totH += h; totPay += pay;
     const wk = S.shPeriod==="week", rows = (wk ? [...shs].reverse() : shs).map(shRowHtml).join("");
     // one line per worker: today's shift; tap to open the details
-    const open = openShiftOf(x.id), tds = S.shifts.filter(sh=>sh.staffId===x.id && (sh.start||0)>=today0).sort((a,b)=>a.start-b.start);
+    const open = openShiftOf(x.id), tds = S.shifts.filter(sh=>sh.staffId===x.id && !isVoid(sh) && (sh.start||0)>=today0).sort((a,b)=>a.start-b.start);
     const th = workedH(tds), last = tds.reduce((a,sh)=>(sh.end||0)>(a?.end||0)?sh:a, null);
     const st = open ? `<span class="son">На смене с ${hhmm(open.start)}</span>` : last ? `Не на смене · сегодня ${hhmm(tds[0].start)} – ${hhmm(last.end)}` : "Не на смене";
     return `<details class="box sbox ${x.active===false?"off":""}" data-k="st-${esc(x.id)}"><summary class="shead">
@@ -4541,8 +4556,9 @@ function renderStaff(L){
         ${th ? `<span class="stot"><b>${fmtH(th)}</b><small>${rate?money(payOf(x, tds)):"сегодня"}</small></span>` : ""}</summary>
       <div class="sdet">
         <div class="shead"><button type="button" class="btn small" data-editstaff="${esc(x.id)}">Карточка сотрудника</button>
-          <span class="stot"><b>${fmtH(h)}</b><small>${SH_PERIODS.find(p=>p[0]===S.shPeriod)[1]} · ${shs.length} ${plural(shs.length,"смена","смены","смен")}${rate?` · ${money(pay)}`:""}</small></span></div>
+          <span class="stot"><b>${fmtH(h)}</b><small>${SH_PERIODS.find(p=>p[0]===S.shPeriod)[1]} · ${nSh} ${plural(nSh,"смена","смены","смен")}${rate?` · ${money(pay)}`:""}</small></span></div>
         ${rate ? `<p class="hint" style="margin:0">${ROLES[roleOf(x)]} · ${rateText(x)}</p>` : ""}
+        ${x.active!==false ? `<div class="acts">${open ? `<button type="button" class="btn small primary" data-shoff="${esc(x.id)}">Снять со смены</button>` : `<button type="button" class="btn small primary" data-shon="${esc(x.id)}">Поставить на смену</button>`}<button type="button" class="btn small" data-shpast="${esc(x.id)}">+ Смена задним числом</button></div>` : ""}
         ${rows ? (wk ? `<div class="slist">${rows}</div>` : `<details class="det" data-k="p-${esc(x.id)}"><summary>Смены</summary><div class="slist">${rows}</div></details>`) : ""}
         ${staffWeeksHtml(x)}</div></details>`;
   };
@@ -4574,6 +4590,18 @@ function autoCheckHtml(){
   }).join("");
   return `<details class="box" data-k="autochk"><summary class="shead"><span class="sname">Смены закрылись сами: проверьте<small>Работник не нажал «Закончить смену». Если он ушёл раньше, нажмите на смену и поставьте время ухода.</small></span><span class="stot"><b>${arr.length}</b></span></summary><div class="slist">${rows}</div></details>`;
 }
+// annulled shifts of this month and the previous one, for the admin to look back at (each opens; «Восстановить смену» there)
+function voidListHtml(){
+  const now = new Date(), from = new Date(now.getFullYear(), now.getMonth()-1, 1).getTime();
+  const arr = S.shifts.filter(sh=>isVoid(sh) && (sh.start||0)>=from && !isDemoStaff(sh)).sort((a,b)=>b.start-a.start); if (!arr.length) return "";
+  return `<details class="box" data-k="voidsh"><summary class="shead"><span class="sname">Аннулированные смены<small>Этот и прошлый месяц. Часы этих смен не считаются.</small></span><span class="stot"><b>${arr.length}</b></span></summary><div class="slist">${arr.map(sh=>shVoidRowHtml(sh, true)).join("")}</div></details>`;
+}
+document.addEventListener("click", e=>{
+  const b = e.target.closest("[data-shon],[data-shoff],[data-shpast]"); if (!b || !isAdmin()) return;
+  if (b.dataset.shon) return openShiftDlg(null, {sid:b.dataset.shon, mode:"on"});
+  if (b.dataset.shpast) return openShiftDlg(null, {sid:b.dataset.shpast, mode:"past"});
+  const sh = openShiftOf(b.dataset.shoff); if (sh) openShiftDlg(sh.id, {mode:"off"});
+});
 document.addEventListener("click", async e=>{
   const ok = e.target.closest("[data-shok]"), lt = e.target.closest("[data-shlast]"); if ((!ok && !lt) || !isAdmin()) return;
   const sh = S.shifts.find(x=>x.id===(ok||lt).dataset[ok?"shok":"shlast"]); if (!sh) return;
@@ -4582,13 +4610,27 @@ document.addEventListener("click", async e=>{
   catch(er){ console.error(er); toast("Не удалось сохранить."); }
 });
 let editingShift = null;
-function openShiftDlg(id){
-  editingShift = id; const sh = id ? S.shifts.find(x=>x.id===id) : null;
-  $("#shTitle").textContent = sh ? "Смена" : "Новая смена";
-  $("#shStaff").innerHTML = S.staff.filter(x=>(roleOf(x)!=="admin" && x.active!==false) || (sh && sh.staffId===x.id)).sort((a,b)=>String(a.name).localeCompare(b.name,"ru")).map(x=>`<option value="${esc(x.id)}" ${sh&&sh.staffId===x.id?"selected":""}>${esc(x.name)}</option>`).join("");
-  $("#shStart").value = toLocalInput(sh ? sh.start : Date.now()-8*3600000);
-  $("#shEnd").value = toLocalInput(sh ? sh.end : Date.now());
-  $("#shDel").hidden = !sh;
+// opt.mode: "on" — put the worker on shift now (start can be moved earlier), "off" — take them off shift now (end can be changed),
+// "past" — a shift added afterwards; opt.sid preselects the worker
+function openShiftDlg(id, opt){
+  opt = opt || {}; editingShift = id; const sh = id ? S.shifts.find(x=>x.id===id) : null, sid = sh ? sh.staffId : opt.sid, vd = isVoid(sh);
+  const nm = (S.staff.find(x=>x.id===sid)||{}).name || "";
+  $("#shTitle").textContent = trS(opt.mode==="on" ? "Поставить на смену" : opt.mode==="off" ? "Снять со смены" : opt.mode==="past" ? "Смена задним числом" : vd ? "Аннулированная смена" : sh ? "Смена" : "Новая смена") + (nm && opt.mode ? ": " + nm : "");
+  $("#shStaff").innerHTML = S.staff.filter(x=>(roleOf(x)!=="admin" && x.active!==false) || x.id===sid).sort((a,b)=>String(a.name).localeCompare(b.name,"ru")).map(x=>`<option value="${esc(x.id)}" ${x.id===sid?"selected":""}>${esc(x.name)}</option>`).join("");
+  const now = Date.now();
+  $("#shStart").value = toLocalInput(sh ? sh.start : opt.mode==="on" ? now : now - 8*3600000);
+  $("#shEnd").value = toLocalInput(vd ? sh.void.end : opt.mode==="off" ? now : sh ? sh.end : opt.mode==="on" ? null : now);
+  $("#shHint").textContent = trS(opt.mode==="on" ? "Конец пустой: работник на смене с указанного времени. Если он пришёл раньше, поставьте время прихода."
+    : opt.mode==="off" ? "Конец — сейчас. Если работник ушёл раньше, поставьте время ухода."
+    : "Пустой конец — смена ещё идёт.");
+  // who started or changed the shift, and on which device: helps to see a shift someone else opened
+  const info = [];
+  if (vd) info.push(`Аннулирована: ${sh.void.why||""}` + (sh.void.by ? ` (${sh.void.by}, ${new Date(sh.void.at||now).toLocaleString(LOC(),{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})})` : ""));
+  if (sh && sh.dev) info.push(`Начата на устройстве: ${sh.dev}`);
+  if (sh && sh.editedBy) info.push(`Изменена вручную: ${sh.editedBy}`);
+  $("#shInfo").textContent = info.map(trS).join(" · "); $("#shInfo").hidden = !info.length;
+  ["#shStaff","#shStart","#shEnd"].forEach(k=>$(k).disabled = vd);
+  $("#shDel").hidden = !sh || vd; $("#shBack").hidden = !vd; $("#shSave").hidden = vd;
   $("#shiftDlg").showModal();
 }
 $("#shiftForm").addEventListener("submit", async e=>{
@@ -4596,17 +4638,31 @@ $("#shiftForm").addEventListener("submit", async e=>{
   const sid = $("#shStaff").value, st = S.staff.find(x=>x.id===sid), start = fromLocalInput($("#shStart").value), end = fromLocalInput($("#shEnd").value);
   if (!st || !start){ need(st ? $("#shStart") : $("#shStaff"), "Укажите сотрудника и начало смены"); return; }
   if (end && end <= start){ toast("Конец смены должен быть позже начала"); return; }
+  const later = Date.now() + 5*60000;
+  if (start > later || (end && end > later)){ toast("Время смены не может быть позже, чем сейчас"); return; }
   const old = editingShift ? S.shifts.find(x=>x.id===editingShift) : null;
+  if (isVoid(old)) return;
   if (!end && S.shifts.some(x=>x.staffId===sid && !x.end && x.id!==old?.id)){ toast("У сотрудника уже есть открытая смена"); return; }
   const sh = Object.assign({}, old || {id:uid("sh")}, {staffId:sid, name:st.name, start, end:end||null, autoClosed:false, editedBy:S.me.name});
   try { await commit((old?"Изменение смены: ":"Смена вручную: ")+st.name, [{col:"shifts", id:sh.id, after:sh}]); $("#shiftDlg").close(); applyRole(); render(); toast("Смена сохранена"); }
   catch(er){ console.error(er); toast("Не удалось сохранить."); }
 });
+// annul: the shift stays (with the reason, who and when) but counts 0 hours; «Восстановить смену» brings its times back
 $("#shDel").addEventListener("click", async ()=>{
-  const sh = S.shifts.find(x=>x.id===editingShift); if (!sh) return;
-  if (!tConfirm(`Удалить смену ${sh.name||""}?`)) return;
-  try { await commit("Удаление смены: "+(sh.name||""), [{col:"shifts", id:sh.id, after:null}]); $("#shiftDlg").close(); render(); toast("Смена удалена"); }
-  catch(er){ console.error(er); toast("Не удалось удалить."); }
+  const sh = S.shifts.find(x=>x.id===editingShift); if (!sh || isVoid(sh)) return;
+  const ans = tPrompt(`Аннулировать смену ${sh.name||""}? Её часы не будут считаться в зарплату. Укажите причину (обязательно):`, ""); if (ans===null) return;
+  const why = ans.trim(); if (!why){ toast("Без причины смену не аннулировать"); return; }
+  const now = Date.now(), n = Object.assign({}, sh, {end:sh.start, breaks:[], autoClosed:false, checked:true,
+    void:{end:sh.end || now, breaks:sh.breaks||[], why:why.slice(0,200), by:S.me.name, at:now}});
+  try { await commit("Аннулирование смены: "+(sh.name||""), [{col:"shifts", id:sh.id, after:n}]); $("#shiftDlg").close(); applyRole(); render(); toast("Смена аннулирована"); }
+  catch(er){ console.error(er); toast("Не удалось сохранить."); }
+});
+$("#shBack").addEventListener("click", async ()=>{
+  const sh = S.shifts.find(x=>x.id===editingShift); if (!sh || !isVoid(sh)) return;
+  if (!tConfirm(`Восстановить смену ${sh.name||""}? Её часы снова будут считаться.`)) return;
+  const n = Object.assign({}, sh, {end:sh.void.end, breaks:sh.void.breaks||[], editedBy:S.me.name}); delete n.void;
+  try { await commit("Восстановление смены: "+(sh.name||""), [{col:"shifts", id:sh.id, after:n}]); $("#shiftDlg").close(); render(); toast("Смена восстановлена"); }
+  catch(er){ console.error(er); toast("Не удалось сохранить."); }
 });
 
 /* ---------- monthly fixed costs ---------- */
@@ -4960,6 +5016,20 @@ Object.assign(I18N, {"Стоп-лист": ["Stop list", "Tükenenler"], "Сей�
 Object.assign(I18N, {"Укажите цену закупки за единицу": ["Enter the purchase price per unit", "Birim alış fiyatını girin"], "приход списком": ["bulk receipt", "toplu giriş"], "Убрано из заказа, уже приготовлено": ["Removed from the order, already cooked", "Siparişten çıkarıldı, zaten pişirilmişti"], "блюдо": ["dish", "yemek"], "блюда": ["dishes", "yemek"], "блюд": ["dishes", "yemek"]});
 Object.assign(I18N, {"Снять стоп-лист на завтра?": ["Take dishes off the stop list for tomorrow?", "Yarın için tükenenlerden çıkarılsın mı?"], "Отметьте блюда, которые завтра снова будут: метка снимется. Неотмеченные останутся в стоп-листе.": ["Tick the dishes that will be available tomorrow: their mark is taken off. The rest stay in the stop list.", "Yarın yeniden olacak yemekleri işaretleyin: işaretleri kalkar. İşaretlenmeyenler tükenenlerde kalır."], "Отметить все": ["Tick all", "Tümünü işaretle"], "Забрали из кассы, ₺": ["Taken from the till, ₺", "Kasadan alınan, ₺"], "Оставили на размен, ₺": ["Left as float, ₺", "Bozuk para olarak bırakılan, ₺"], "Сколько денег забрали из кассы и сколько оставили на завтра. Достаточно вписать одно: второе посчитается. Завтра «Размен утром» подставится сам.": ["How much money was taken from the till and how much was left for tomorrow. Enter one of them: the other is worked out. Tomorrow «Morning float» is filled in by itself.", "Kasadan ne kadar para alındı ve yarına ne kadar bırakıldı. Birini yazmanız yeterli: diğeri hesaplanır. Yarın «Sabah bozuk para» kendiliğinden gelir."], "Рабочий день длится до 06:00 утра: всё, что продано после полуночи, входит в этот день.": ["The working day lasts until 06:00 in the morning: everything sold after midnight belongs to this day.", "İş günü sabah 06:00'ya kadar sürer: gece yarısından sonra satılan her şey bu güne dahildir."], "Забрали и оставили на размен вместе — столько, сколько в кассе:": ["Taken plus left as float must equal what is in the till:", "Alınan ve bırakılan bozuk para toplamı kasadaki tutara eşit olmalı:"], "Снято со стоп-листа:": ["Taken off the stop list:", "Tükenenlerden çıkarılan:"], "Забрали из кассы": ["Taken from the till", "Kasadan alınan"], "Оставили на размен": ["Left as float", "Bozuk para olarak bırakılan"], "Переводы на счёт": ["Bank transfers", "Banka havaleleri"], "Переводом за день, заказов:": ["By transfer for the day, orders:", "Günlük havale, sipariş:"], "сверьте с выпиской банка": ["check against the bank statement", "banka ekstresiyle karşılaştırın"], "Забрали из кассы за период (дней:": ["Taken from the till in the period (days:", "Dönemde kasadan alınan (gün:"], "отмечено": ["marked", "işaret:"]});
 Object.assign(I18N, {"Закрыть месяц": ["Close month", "Ayı kapat"], "Открыть месяц снова": ["Open the month again", "Ayı yeniden aç"], "Год": ["Year", "Yıl"], "квартал": ["quarter", "çeyrek"], "Вперёд": ["Forward", "İleri"], "Последний закрытый месяц": ["Last closed month", "Son kapatılan ay"], "Месяц закрыт": ["Month closed", "Ay kapatıldı"], "Месяц открыт": ["Month opened", "Ay açıldı"], "Цифры — из итога месяца, записи этого месяца менять нельзя.": ["Figures come from the month summary; records of this month cannot be changed.", "Rakamlar ay özetinden alınır, bu ayın kayıtları değiştirilemez."], "записано при закрытии месяца": ["recorded when the month was closed", "ay kapatılırken kaydedildi"], "Месяц закрыт: записи менять нельзя.": ["Month closed: records cannot be changed.", "Ay kapatıldı: kayıtlar değiştirilemez."], "На конец месяца на складе было продуктов на": ["At the end of the month the stock was worth", "Ay sonunda depodaki ürünlerin değeri:"], "Часы и оплата по сменам": ["Hours and pay by shifts", "Vardiyalara göre saat ve ücret"], "По ставкам работников. В расходы идёт сумма «Зарплата» из ежемесячных расходов.": ["At the workers' hourly rates. Expenses include the «Salaries» amount from the monthly costs.", "Çalışanların saat ücretlerine göre. Giderlere aylık giderlerdeki «Maaş» tutarı yazılır."], "По месяцам": ["By month", "Aylara göre"], "Месяц": ["Month", "Ay"], "не закрыт": ["not closed", "kapatılmadı"], "ещё не закончился. Закрыть месяц можно с 1-го числа следующего месяца, после 06:00.": ["has not ended yet. A month can be closed from the 1st of the next month, after 06:00.", "henüz bitmedi. Ay, sonraki ayın 1'inden itibaren saat 06:00'dan sonra kapatılabilir."], "Закрытые месяцы": ["Closed months", "Kapatılan aylar"], "закрыл(а)": ["closed by", "kapatan:"], "Открыть снова": ["Open again", "Yeniden aç"], "Записей ещё нет — закрывать нечего.": ["No records yet — nothing to close.", "Henüz kayıt yok — kapatılacak bir şey yok."], "Месяцы закрываются по порядку, начиная с первого месяца с записями.": ["Months are closed in order, starting with the first month that has records.", "Aylar sırayla kapatılır; kayıtları olan ilk aydan başlanır."], "Открытых заказов, смен и запросов нет": ["No open orders, shifts or requests", "Açık sipariş, vardiya veya talep yok"], "Смены закрылись сами, не проверены": ["Shifts closed automatically, not checked", "Kendiliğinden kapanan vardiyalar, kontrol edilmedi"], "Если работник ушёл раньше, исправьте конец смены в «Сотрудники» до закрытия месяца: от этого зависит зарплата.": ["If a worker left earlier, correct the end of the shift in «Staff» before closing the month: the salary depends on it.", "Çalışan daha erken çıktıysa, ayı kapatmadan önce «Personel» bölümünde vardiyanın bitişini düzeltin: maaş buna bağlıdır."], "Закройте или отмените их в «Продажи».": ["Close or cancel them in «Sales».", "«Satışlar» bölümünde kapatın veya iptal edin."], "Закройте её в «Сотрудники»: нажмите на смену и укажите конец.": ["Close it in «Staff»: tap the shift and enter its end.", "«Personel» bölümünde kapatın: vardiyaya dokunup bitişini girin."], "Коммунальные платежи за месяц не внесены": ["Utilities for the month are not entered", "Ayın faturaları girilmedi"], "Если они были, внесите их в «Ежемесячные расходы» до закрытия месяца.": ["If there were any, enter them in «Monthly costs» before closing the month.", "Varsa, ayı kapatmadan önce «Aylık giderler» bölümüne girin."], "Итог месяца": ["Month summary", "Ay özeti"], "На складе на конец месяца": ["Stock at the end of the month", "Ay sonunda depo"], "станет записью": ["will become a record", "kayıt olarak yazılacak"], "После закрытия записи этого месяца (продажи, заказы, склад, расходы, смены) изменить нельзя. Финансы за месяц, квартал и год считаются по итогу месяца. Ничего не удаляется.": ["After closing, the records of this month (sales, orders, stock, expenses, shifts) cannot be changed. Finance for the month, quarter and year is taken from the month summary. Nothing is deleted.", "Kapatıldıktan sonra bu ayın kayıtları (satışlar, siparişler, depo, giderler, vardiyalar) değiştirilemez. Ay, çeyrek ve yıl finansı ay özetinden hesaplanır. Hiçbir şey silinmez."], "Записи этого месяца больше нельзя будет изменить. Открыть месяц снова можно кнопкой «Открыть снова».": ["Records of this month will no longer be editable. The month can be opened again with «Open again».", "Bu ayın kayıtları artık değiştirilemeyecek. Ay «Yeniden aç» düğmesiyle tekrar açılabilir."], "Итог месяца удалится, записи месяца снова можно будет менять. Потом закройте месяц ещё раз.": ["The month summary will be removed and its records can be changed again. Then close the month once more.", "Ay özeti silinir, ayın kayıtları yeniden değiştirilebilir. Sonra ayı tekrar kapatın."], "Записи этого месяца менять нельзя. Если нужно исправить, админ открывает месяц снова: «Финансы» → «Закрыть месяц» → «Открыть снова».": ["Records of this month cannot be changed. To correct something, the admin opens the month again: «Finance» → «Close month» → «Open again».", "Bu ayın kayıtları değiştirilemez. Düzeltmek gerekirse yönetici ayı yeniden açar: «Finans» → «Ayı kapat» → «Yeniden aç»."], "в прошлом месяце": ["last month", "geçen ay"], "Нужен интернет: закрытие месяца записывается в базу": ["Internet needed: closing the month is written to the database", "İnternet gerekli: ay kapanışı veritabanına yazılır"]});
+Object.assign(I18N, {"Поставить на смену": ["Put on shift", "Vardiyaya al"], "Снять со смены": ["Take off shift", "Vardiyadan çıkar"], "+ Смена задним числом": ["+ Past shift", "+ Geçmiş vardiya"], "Смена задним числом": ["Past shift", "Geçmiş vardiya"],
+  "Аннулированная смена": ["Annulled shift", "İptal edilen vardiya"], "Аннулированные смены": ["Annulled shifts", "İptal edilen vardiyalar"], "Аннулирована": ["Annulled", "İptal edildi"], "Аннулировать": ["Annul", "İptal et"], "Восстановить смену": ["Restore shift", "Vardiyayı geri yükle"],
+  "Этот и прошлый месяц. Часы этих смен не считаются.": ["This and last month. The hours of these shifts are not counted.", "Bu ay ve geçen ay. Bu vardiyaların saatleri sayılmaz."],
+  "Конец пустой: работник на смене с указанного времени. Если он пришёл раньше, поставьте время прихода.": ["End is empty: the worker is on shift from the time shown. If they came earlier, set the time they came.", "Bitiş boş: çalışan belirtilen saatten beri vardiyada. Daha erken geldiyse geliş saatini girin."],
+  "Конец — сейчас. Если работник ушёл раньше, поставьте время ухода.": ["End is now. If the worker left earlier, set the time they left.", "Bitiş şimdi. Çalışan daha erken çıktıysa çıkış saatini girin."],
+  "Пустой конец — смена ещё идёт.": ["Empty end: the shift is still going on.", "Bitiş boşsa vardiya hâlâ sürüyor."], "Новая смена": ["New shift", "Yeni vardiya"], "Смена": ["Shift", "Vardiya"], "Начало": ["Start", "Başlangıç"], "Конец": ["End", "Bitiş"],
+  "Начата на устройстве": ["Started on device", "Başlatıldığı cihaz"], "Изменена вручную": ["Changed by hand", "Elle değiştirildi"],
+  "Время смены не может быть позже, чем сейчас": ["Shift time cannot be later than now", "Vardiya saati şimdiden sonra olamaz"],
+  "Аннулировать смену": ["Annul the shift of", "Vardiyayı iptal et:"], "Её часы не будут считаться в зарплату. Укажите причину (обязательно):": ["Its hours will not count towards pay. Enter the reason (required):", "Saatleri maaşa sayılmaz. Nedeni yazın (zorunlu):"],
+  "Без причины смену не аннулировать": ["A shift cannot be annulled without a reason", "Neden olmadan vardiya iptal edilemez"], "Смена аннулирована": ["Shift annulled", "Vardiya iptal edildi"], "Смена восстановлена": ["Shift restored", "Vardiya geri yüklendi"],
+  "Её часы снова будут считаться.": ["Its hours will count again.", "Saatleri yeniden sayılır."],
+  "Конец смены должен быть позже начала": ["The end of the shift must be after its start", "Vardiyanın bitişi başlangıcından sonra olmalı"], "У сотрудника уже есть открытая смена": ["This worker already has an open shift", "Bu çalışanın zaten açık bir vardiyası var"],
+  "Укажите сотрудника и начало смены": ["Choose the worker and the start of the shift", "Çalışanı ve vardiya başlangıcını seçin"], "Смена сохранена": ["Shift saved", "Vardiya kaydedildi"],
+  "Админ может сам поставить работника на смену, снять со смены, добавить смену задним числом или аннулировать её с причиной: нажмите на работника ниже.": ["The admin can put a worker on shift, take them off, add a past shift or annul a shift with a reason: tap the worker below.", "Yönetici çalışanı vardiyaya alabilir, vardiyadan çıkarabilir, geçmiş vardiya ekleyebilir veya nedenini yazarak vardiyayı iptal edebilir: aşağıda çalışana dokunun."]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
