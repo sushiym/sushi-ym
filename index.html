@@ -856,7 +856,6 @@ details.fold[open]>summary{margin-bottom:8px}
   <div class="two"><label class="f">Роль<select id="sfRole"></select></label><label class="f">PIN-код<input id="sfPin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label></div>
   <label class="f">Ставка, ₺ в час (необязательно)<input id="sfRate" inputmode="decimal" autocomplete="off" placeholder="для расчёта зарплаты"></label>
   <div id="sfRateNew" hidden><label class="f">Новая ставка действует с<input id="sfRateFrom" type="date"></label><p class="hint" id="sfRateHint" style="margin-top:0"></p></div>
-  <label class="toggle" id="sfShadowL"><input type="checkbox" id="sfShadow"> Тень админа: права работника, но без смен, часов, ставки и зарплаты</label>
   <label class="toggle"><input type="checkbox" id="sfActive" checked> Может входить в программу</label>
   <p class="hint">Админ видит и меняет всё. Работник ресторана: склад (приход с количеством и ценой, расход, списание, приготовление, просмотр карточек продуктов), заказы и продажи, техкарты без себестоимости, пересчёт на утверждение. Добавление, изменение и скрытие продуктов, история, финансы и сотрудники — только у админа. Цены закупки и себестоимость видит только админ: работник вводит цену только при приходе.</p>
   <div class="dlg-actions">
@@ -4130,7 +4129,7 @@ function openStaff(id){
   $("#sfActive").checked = st ? st.active!==false : true;
   const r0 = st ? rateAt(st, Date.now()) : 0;
   $("#sfRate").value = r0 ? String(r0).replace(".",",") : "";
-  $("#sfShadow").checked = !!st && isDemoStaff(st); sfShadowUi();
+  sfRateUi();
   $("#sfRateFrom").value = toLocalInput(Date.now()).slice(0,10); sfRateShow();
   const withSh = !!st && roleOf(st)!=="admin" && S.shifts.some(sh=>sh.staffId===st.id);
   $("#sfDel").hidden = !st || st.id===S.me?.id || (withSh && st.active===false);
@@ -4145,16 +4144,15 @@ const otherAdmins = id => activeStaff().filter(x=>roleOf(x)==="admin" && x.id!==
 // a changed rate of a worker who already has shifts asks from which day it counts: shifts before that day keep the old rate
 function sfRateShow(){
   const old = editingStaff ? S.staff.find(x=>x.id===editingStaff) : null, cur = old ? rateAt(old, Date.now()) : 0, v0 = numMoney($("#sfRate").value), v = isNaN(v0)||v0<0 ? 0 : v0;
-  const show = !!old && cur>0 && $("#sfRole").value!=="admin" && !$("#sfShadow").checked && v!==cur && S.shifts.some(sh=>sh.staffId===old.id);
+  const show = !!old && cur>0 && $("#sfRole").value!=="admin" && !(old && isDemoStaff(old)) && v!==cur && S.shifts.some(sh=>sh.staffId===old.id);
   $("#sfRateNew").hidden = !show;
   if (show) $("#sfRateHint").textContent = `Смены до этого дня считаются по старой ставке ${money(cur)}/ч, зарплата прошлых месяцев не изменится.`;
 }
 $("#sfRate").addEventListener("input", sfRateShow);
-// no rate for the admin and for the admin's shadow
-function sfShadowUi(){ const adm = $("#sfRole").value==="admin"; $("#sfShadowL").hidden = adm;
-  $("#sfRate").closest("label").hidden = adm || $("#sfShadow").checked; sfRateShow(); }
-$("#sfRole").addEventListener("change", sfShadowUi);
-$("#sfShadow").addEventListener("change", sfShadowUi);
+// no rate for the admin and for the admin's shadow (YM)
+function sfRateUi(){ const old = editingStaff ? S.staff.find(x=>x.id===editingStaff) : null;
+  $("#sfRate").closest("label").hidden = $("#sfRole").value==="admin" || (!!old && isDemoStaff(old)); sfRateShow(); }
+$("#sfRole").addEventListener("change", sfRateUi);
 $("#staffForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const old = editingStaff ? S.staff.find(x=>x.id===editingStaff) : null;
@@ -4163,10 +4161,9 @@ $("#staffForm").addEventListener("submit", async e=>{
   if ((!old || pin) && !/^\d{4,6}$/.test(pin)){ need($("#sfPin"), "PIN — от 4 до 6 цифр"); return; }
   if (old && roleOf(old)==="admin" && (role!=="admin" || !active) && !otherAdmins(old.id)){ toast("Должен остаться хотя бы один активный админ"); return; }
   const rate0 = numMoney($("#sfRate").value), rate = isNaN(rate0)||rate0<0 ? 0 : rate0;
-  const shadow = role!=="admin" && $("#sfShadow").checked;
-  if (shadow && old && !isDemoStaff(old) && S.shifts.some(sh=>sh.staffId===old.id) && !tConfirm(`Сделать «${old.name}» тенью админа? Его смены и часы перестанут считаться в зарплату и не будут видны в «Сотрудники».`)) return;
-  const st = Object.assign({}, old || {id:uid("u"), createdAt:Date.now()}, {name, role, active, rate, shadow});
-  if (shadow){ st.rate = 0; delete st.rates; }   // the shadow has no rate
+  const st = Object.assign({}, old || {id:uid("u"), createdAt:Date.now()}, {name, role, active, rate});
+  delete st.shadow;   // a mark of a version that had the «Тень админа» box: the shadow is YM by name now
+  if (role!=="admin" && isDemoStaff(st)){ st.rate = 0; delete st.rates; }   // the shadow has no rate
   else if (!$("#sfRateNew").hidden){
     const from = fromLocalInput($("#sfRateFrom").value + "T00:00"); if (!from){ need($("#sfRateFrom"), "Укажите, с какого дня действует новая ставка"); return; }
     const base = Array.isArray(old.rates) && old.rates.length ? old.rates : [{from:0, rate:Number(old.rate)||0}];
@@ -4304,9 +4301,9 @@ document.addEventListener("click", e=>{
 
 /* ---------- shifts / working time ---------- */
 // the admin's shadow (YM): logs in with worker rights, but has no shifts, hours, rate or pay.
-// Marked in the staff card (shadow); a record without the mark counts as the shadow when it is named «YM». Takes a worker, S.me or a shift.
+// It is the worker named «YM». Takes a worker, S.me or a shift (by its worker's current name).
 const isDemoStaff = x => { if (!x) return false; const st = S.staff.find(s=>s.id===(x.staffId||x.id)) || x;
-  return st.shadow!=null ? !!st.shadow : String(st.name||x.name||"").trim().toUpperCase()==="YM"; };
+  return String(st.name||x.name||"").trim().toUpperCase()==="YM"; };
 const openShiftOf = sid => S.shifts.filter(x=>x.staffId===sid && !x.end && x.start).sort((a,b)=>a.start-b.start)[0];
 // a shift the admin annulled: kept with its reason (void: {end, breaks, why, by, at}) but with end = start, so it counts 0 hours everywhere
 const isVoid = sh => !!(sh && sh.void);
@@ -5000,7 +4997,7 @@ Object.assign(I18N, {"Способ приготовления": ["Cooking method
 Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Delivery", "+ Gel-al / Teslimat"], "Самовывоз": ["Pickup", "Gel-al"], "Доставка курьером": ["Courier delivery", "Kurye ile teslimat"]});
 Object.assign(I18N, {"Заказ изменили на другом устройстве": ["The order was changed on another device", "Sipariş başka bir cihazda değiştirildi"], "изменили на другом устройстве": ["was changed on another device", "başka bir cihazda değiştirildi"], "Последнее изменение:": ["Last change:", "Son değişiklik:"], "«Синхронизировать» — сохранятся и изменения с другого устройства, и ваши.": ["«Sync» keeps both the changes from the other device and yours.", "«Senkronize et»: diğer cihazdaki değişiklikler de sizinkiler de kaydedilir."], "Сохранить только мою версию": ["Save only my version", "Sadece benim halimi kaydet"], "Показать в заказе": ["Show in the order", "Siparişte göster"], "Синхронизировать": ["Sync", "Senkronize et"], "На другом устройстве:": ["On the other device:", "Diğer cihazda:"], "У вас:": ["On yours:", "Sizde:"], "Изменили и там, и у вас. При синхронизации останется ваш вариант:": ["Changed on both devices. Syncing keeps your version:", "İki cihazda da değiştirildi. Senkronize edince sizinki kalır:"], "Итого после синхронизации:": ["Total after syncing:", "Senkronizasyon sonrası toplam:"], "Стол": ["Table", "Masa"], "Сумма курьеру": ["Courier fee", "Kurye ücreti"], "Нет связи с сервером: не получается проверить, меняли ли этот заказ на другом устройстве. Если меняли, те изменения пропадут. Сохранить всё равно?": ["No connection to the server: cannot check whether this order was changed on another device. If it was, those changes will be lost. Save anyway?", "Sunucuya bağlantı yok: bu siparişin başka bir cihazda değiştirilip değiştirilmediği kontrol edilemiyor. Değiştirildiyse o değişiklikler kaybolur. Yine de kaydedilsin mi?"], "Проверьте заказ и нажмите «Сохранить заказ»": ["Check the order and tap «Save order»", "Siparişi kontrol edip «Siparişi kaydet»e dokunun"], "Заказ обновлён с другого устройства": ["The order was updated from another device", "Sipariş başka bir cihazdan güncellendi"], "обновлён с другого устройства": ["was updated from another device", "başka bir cihazdan güncellendi"], "Изменили и там, и у вас. Останется ваш вариант:": ["Changed on both devices. Your version stays:", "İki cihazda da değiştirildi. Sizinki kalır:"]});
 Object.assign(I18N, {"Продолжить смену и войти": ["Continue shift and log in", "Vardiyaya devam et ve gir"], "Сегодня уже была смена": ["Already had a shift today", "Bugün zaten vardiya vardı"], "Вы уже на смене с": ["You are already on shift since", "Zaten vardiyadasınız, başlangıç"], "Смена продолжена в": ["Shift continued at", "Vardiyaya devam edildi:"], "Смена начата в": ["Shift started at", "Vardiya başladı:"], "Здравствуйте": ["Hello", "Merhaba"], "перерыв": ["break", "mola"], "повтор, часы считаются один раз": ["duplicate, hours counted once", "tekrar, saatler bir kez sayılır"], "Открытой смены нет": ["No open shift", "Açık vardiya yok"], "Смена закрыта": ["Shift closed", "Vardiya kapandı"], "смена закрыта": ["shift closed", "vardiya kapandı"], "До свидания": ["Goodbye", "Hoşça kalın"]});
-Object.assign(I18N, {"Тень админа: права работника, но без смен, часов, ставки и зарплаты": ["Admin's shadow: worker rights, but no shifts, hours, rate or pay", "Yönetici gölgesi: çalışan yetkileri, ama vardiya, saat, ücret ve maaş yok"], "У тени админа нет смен": ["The admin's shadow has no shifts", "Yönetici gölgesinin vardiyası yok"], "Сделать": ["Make", "Yap"], "тенью админа? Его смены и часы перестанут считаться в зарплату и не будут видны в «Сотрудники».": ["the admin's shadow? Their shifts and hours will no longer count towards pay and will not be shown in «Staff».", "yönetici gölgesi yapılsın mı? Vardiyaları ve saatleri artık maaşa sayılmayacak ve «Personel» bölümünde görünmeyecek."]});
+Object.assign(I18N, {"У тени админа нет смен": ["The admin's shadow has no shifts", "Yönetici gölgesinin vardiyası yok"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Курьер по заказу с доставкой записывается сам. Здесь — курьер вручную, например за покупками.": ["The courier for a delivery order is recorded automatically. Here you add a courier by hand, e.g. sent for purchases.", "Teslimat siparişinin kuryesi otomatik yazılır. Burada kurye elle eklenir, örneğin alışverişe gönderildiğinde."], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"]});
 Object.assign(I18N, {"Укажите имя клиента": ["Enter the customer's name", "Müşterinin adını girin"], "Укажите телефон клиента": ["Enter the customer's phone", "Müşterinin telefonunu girin"], "Обязательно": ["Required", "Zorunlu"], "Не заполнено:": ["Not filled in:", "Doldurulmadı:"], "Вы админ — сохранить без этого?": ["You are the admin — save without it?", "Yöneticisiniz — bunsuz kaydedilsin mi?"], "Причина не указана. Вы админ — отменить заказ без причины?": ["No reason given. You are the admin — cancel the order without a reason?", "Sebep yazılmadı. Yöneticisiniz — sipariş sebepsiz iptal edilsin mi?"]});
