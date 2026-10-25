@@ -4016,9 +4016,12 @@ const activeStaff = () => S.staff.filter(x=>x.active!==false);
 const ADMIN_IDLE = 5*60*1000, WORKER_IDLE = 12*60*60*1000;
 let lastAct = Date.now(), gateRole = "worker", gatePerson = null, pinFails = 0, pinLockUntil = 0;
 
-function setMe(st){
-  S.me = st ? {id:st.id, name:st.name, role:roleOf(st)} : null;
-  if (st){ lsSet("sklad.who", st.name); setTimeout(devTouch, 0); try{ localStorage.setItem("sushi.me", JSON.stringify({id:st.id, ts:Date.now()})); }catch(e){} }
+// via: the admin's shadow (YM) who entered this worker's account with its own PIN — no shift, and every record is signed «Name (YM)»
+const meName = (st, via) => via ? `${st.name} (${via.name})` : st.name;
+function setMe(st, via){
+  S.me = st ? {id:st.id, name:meName(st, via), role:roleOf(st)} : null;
+  if (S.me && via) S.me.via = via.id;
+  if (st){ lsSet("sklad.who", S.me.name); setTimeout(devTouch, 0); try{ localStorage.setItem("sushi.me", JSON.stringify({id:st.id, via:S.me.via, ts:Date.now()})); }catch(e){} }
   else { lsSet("sklad.who", ""); try{ localStorage.removeItem("sushi.me"); }catch(e){} }
   document.querySelectorAll("dialog[open]").forEach(d=>d.close());
   S.cart = []; S.invDraft = {}; S.invAt = {};
@@ -4026,12 +4029,14 @@ function setMe(st){
   applyRole(); render(true); window.scrollTo({top:0});
 }
 function restoreMe(){
-  if (S.me) { const st = S.staff.find(x=>x.id===S.me.id && x.active!==false); if (!st) setMe(null); else if (roleOf(st)!==S.me.role || st.name!==S.me.name) setMe(st); return; }
+  if (S.me) { const st = S.staff.find(x=>x.id===S.me.id && x.active!==false), via = S.me.via && shadowBy(S.me.via);
+    if (!st || (S.me.via && (!via || roleOf(st)==="admin"))) setMe(null); else if (roleOf(st)!==S.me.role || meName(st, via)!==S.me.name) setMe(st, via); return; }
   let saved = null; try{ saved = JSON.parse(localStorage.getItem("sushi.me")||"null"); }catch(e){}
   if (!saved) return;
-  const st = S.staff.find(x=>x.id===saved.id && x.active!==false);
+  const st = S.staff.find(x=>x.id===saved.id && x.active!==false), via = saved.via ? shadowBy(saved.via) : null;
+  if (saved.via && (!via || roleOf(st)==="admin")) return;
   const idle = st && roleOf(st)==="admin" ? ADMIN_IDLE : WORKER_IDLE;
-  if (st && Date.now()-(saved.ts||0) < idle){ lastAct = Date.now(); setMe(st); }
+  if (st && Date.now()-(saved.ts||0) < idle){ lastAct = Date.now(); setMe(st, via); }
 }
 function touchAct(){ lastAct = Date.now(); if (S.me){ try{ localStorage.setItem("sushi.me", JSON.stringify({id:S.me.id, ts:lastAct})); }catch(e){} } }
 ["click","keydown","touchstart"].forEach(ev=>document.addEventListener(ev, ()=>{ if (Date.now()-lastAct > 15000) touchAct(); else lastAct = Date.now(); shiftSeen(); }, {passive:true, capture:true}));
@@ -4095,6 +4100,12 @@ document.addEventListener("submit", async e=>{
     if (!/^\d{4,6}$/.test(pin)){ err.textContent = "Введите PIN из 4–6 цифр"; return; }
     const st = activeStaff().find(x=>x.id===gatePerson);
     if (!st){ err.textContent = "Сначала выберите своё имя"; return; }
+    const via = await pinHash(st.id, pin) === st.pinHash ? null : await shadowPin(st, pin);
+    if (via){
+      pinFails = 0; lastAct = Date.now();
+      if (e.submitter && e.submitter.value==="end"){ $("#gPin").value = ""; err.textContent = "Через YM смену не закончить: её закрывает сам работник или админ в «Сотрудники»"; return; }
+      gatePerson = null; setMe(st, via); toast(`Здравствуйте, ${st.name}! Смена не начинается.`); return;
+    }
     if (await pinHash(st.id, pin) === st.pinHash){
       pinFails = 0; lastAct = Date.now(); const act = (e.submitter && e.submitter.value) || "login"; let started = null;
       try {
@@ -4136,8 +4147,11 @@ function openStaff(id){
   $("#sfDel").textContent = trS(withSh ? "В бывшие работники" : "Удалить");
   $("#staffDlg").showModal(); $("#sfName").focus();
 }
-async function pinTaken(role, pin, exceptId){
-  for (const x of activeStaff().filter(x=>x.role===role && x.id!==exceptId)) if (await pinHash(x.id, pin) === x.pinHash) return true;
+// YM's PIN opens every worker's account, so it must not be the PIN of any worker, and no worker may get it
+async function pinClash(st, pin){
+  if (roleOf(st)==="admin") return false;
+  const others = activeStaff().filter(x=>x.id!==st.id && roleOf(x)!=="admin" && (isDemoStaff(st) || isDemoStaff(x)));
+  for (const x of others) if (await pinHash(x.id, pin) === x.pinHash) return true;
   return false;
 }
 const otherAdmins = id => activeStaff().filter(x=>roleOf(x)==="admin" && x.id!==id).length;
@@ -4172,6 +4186,7 @@ $("#staffForm").addEventListener("submit", async e=>{
   } else if (old && Array.isArray(old.rates) && old.rates.length && rate!==rateAt(old, Date.now())){
     st.rates = [{from:0, rate}];         // no shifts yet (or no rate before): the rate counts for all the time
   }
+  if (pin && await pinClash(st, pin)){ need($("#sfPin"), "Этот PIN уже занят — выберите другой"); return; }
   if (pin) st.pinHash = await pinHash(st.id, pin);
   try { await commit((old?"Изменение сотрудника: ":"Новый сотрудник: ")+name, [{col:"staff", id:st.id, after:st}]); $("#staffDlg").close(); if (st.id===S.me?.id) setMe(st); else render(); toast(old?"Сохранено":"Сотрудник добавлен"); }
   catch(er){ console.error(er); toast("Не удалось сохранить."); }
@@ -4304,6 +4319,13 @@ document.addEventListener("click", e=>{
 // It is the worker named «YM». Takes a worker, S.me or a shift (by its worker's current name).
 const isDemoStaff = x => { if (!x) return false; const st = S.staff.find(s=>s.id===(x.staffId||x.id)) || x;
   return String(st.name||x.name||"").trim().toUpperCase()==="YM"; };
+// the active YM by id, and YM whose PIN was typed for a worker (only a worker's account, never an admin's or YM's own)
+const shadowBy = id => activeStaff().find(x=>x.id===id && roleOf(x)!=="admin" && isDemoStaff(x));
+async function shadowPin(st, pin){
+  if (roleOf(st)==="admin" || isDemoStaff(st)) return null;
+  for (const y of activeStaff().filter(x=>roleOf(x)!=="admin" && isDemoStaff(x))) if (await pinHash(y.id, pin) === y.pinHash) return y;
+  return null;
+}
 const openShiftOf = sid => S.shifts.filter(x=>x.staffId===sid && !x.end && x.start).sort((a,b)=>a.start-b.start)[0];
 // a shift the admin annulled: kept with its reason (void: {end, breaks, why, by, at}) but with end = start, so it counts 0 hours everywhere
 const isVoid = sh => !!(sh && sh.void);
@@ -4461,7 +4483,7 @@ setInterval(()=>{ autoCloseShifts().then(()=>{ if (S.view==="staff") renderList(
 // Only these fields are written, so a shift closed on another device meanwhile is not opened again by an old copy of it.
 let seenAt = 0;
 function shiftSeen(){
-  if (!S.me || S.me.role==="admin" || isDemoStaff(S.me) || !FS || !S.db) return;
+  if (!S.me || S.me.role==="admin" || isDemoStaff(S.me) || S.me.via || !FS || !S.db) return;
   const now = Date.now(); let sh = openShiftOf(S.me.id), reopen = false;
   if (!sh){ sh = mergeableOf(S.me.id, now); if (!sh) return; reopen = true; }
   else if (now - seenAt < (now >= autoCloseAt(sh.start) - 15*60000 ? 2*60000 : 15*60000)) return;
@@ -4522,7 +4544,7 @@ function gateShiftHtml(){
        <button class="btn" type="submit" value="login">Только войти</button>`;
 }
 function whoShiftHtml(){
-  if (!S.me || S.me.role==="admin" || isDemoStaff(S.me)) return "";
+  if (!S.me || S.me.role==="admin" || isDemoStaff(S.me) || S.me.via) return "";
   const sh = openShiftOf(S.me.id);
   return sh ? `<span class="chip">на смене с ${hhmm(sh.start)}</span><button class="chip" type="button" id="endShiftBtn">Закончить смену</button>`
             : `<button class="chip" type="button" id="startShiftBtn">Начать смену</button>`;
@@ -4998,6 +5020,8 @@ Object.assign(I18N, {"+ Самовывоз / Доставка": ["+ Pickup / Del
 Object.assign(I18N, {"Заказ изменили на другом устройстве": ["The order was changed on another device", "Sipariş başka bir cihazda değiştirildi"], "изменили на другом устройстве": ["was changed on another device", "başka bir cihazda değiştirildi"], "Последнее изменение:": ["Last change:", "Son değişiklik:"], "«Синхронизировать» — сохранятся и изменения с другого устройства, и ваши.": ["«Sync» keeps both the changes from the other device and yours.", "«Senkronize et»: diğer cihazdaki değişiklikler de sizinkiler de kaydedilir."], "Сохранить только мою версию": ["Save only my version", "Sadece benim halimi kaydet"], "Показать в заказе": ["Show in the order", "Siparişte göster"], "Синхронизировать": ["Sync", "Senkronize et"], "На другом устройстве:": ["On the other device:", "Diğer cihazda:"], "У вас:": ["On yours:", "Sizde:"], "Изменили и там, и у вас. При синхронизации останется ваш вариант:": ["Changed on both devices. Syncing keeps your version:", "İki cihazda da değiştirildi. Senkronize edince sizinki kalır:"], "Итого после синхронизации:": ["Total after syncing:", "Senkronizasyon sonrası toplam:"], "Стол": ["Table", "Masa"], "Сумма курьеру": ["Courier fee", "Kurye ücreti"], "Нет связи с сервером: не получается проверить, меняли ли этот заказ на другом устройстве. Если меняли, те изменения пропадут. Сохранить всё равно?": ["No connection to the server: cannot check whether this order was changed on another device. If it was, those changes will be lost. Save anyway?", "Sunucuya bağlantı yok: bu siparişin başka bir cihazda değiştirilip değiştirilmediği kontrol edilemiyor. Değiştirildiyse o değişiklikler kaybolur. Yine de kaydedilsin mi?"], "Проверьте заказ и нажмите «Сохранить заказ»": ["Check the order and tap «Save order»", "Siparişi kontrol edip «Siparişi kaydet»e dokunun"], "Заказ обновлён с другого устройства": ["The order was updated from another device", "Sipariş başka bir cihazdan güncellendi"], "обновлён с другого устройства": ["was updated from another device", "başka bir cihazdan güncellendi"], "Изменили и там, и у вас. Останется ваш вариант:": ["Changed on both devices. Your version stays:", "İki cihazda da değiştirildi. Sizinki kalır:"]});
 Object.assign(I18N, {"Продолжить смену и войти": ["Continue shift and log in", "Vardiyaya devam et ve gir"], "Сегодня уже была смена": ["Already had a shift today", "Bugün zaten vardiya vardı"], "Вы уже на смене с": ["You are already on shift since", "Zaten vardiyadasınız, başlangıç"], "Смена продолжена в": ["Shift continued at", "Vardiyaya devam edildi:"], "Смена начата в": ["Shift started at", "Vardiya başladı:"], "Здравствуйте": ["Hello", "Merhaba"], "перерыв": ["break", "mola"], "повтор, часы считаются один раз": ["duplicate, hours counted once", "tekrar, saatler bir kez sayılır"], "Открытой смены нет": ["No open shift", "Açık vardiya yok"], "Смена закрыта": ["Shift closed", "Vardiya kapandı"], "смена закрыта": ["shift closed", "vardiya kapandı"], "До свидания": ["Goodbye", "Hoşça kalın"]});
 Object.assign(I18N, {"У тени админа нет смен": ["The admin's shadow has no shifts", "Yönetici gölgesinin vardiyası yok"]});
+Object.assign(I18N, {"Смена не начинается.": ["No shift is started.", "Vardiya başlamaz."], "Этот PIN уже занят — выберите другой": ["This PIN is already taken — choose another", "Bu PIN zaten kullanılıyor — başka birini seçin"],
+  "Через YM смену не закончить: её закрывает сам работник или админ в «Сотрудники»": ["A shift cannot be ended via YM: the worker ends it, or the admin in «Staff»", "YM ile vardiya bitirilemez: çalışanın kendisi ya da yönetici «Personel» bölümünde bitirir"]});
 Object.assign(I18N, {"Эта неделя": ["This week", "Bu hafta"], "Неделя": ["Week", "Hafta"], "Квартал": ["Quarter", "Çeyrek"], "На смене с": ["On shift since", "Vardiyada, başlangıç"], "Не на смене": ["Not on shift", "Vardiyada değil"], "сегодня": ["today", "bugün"], "Карточка сотрудника": ["Staff card", "Çalışan kartı"], "сейчас": ["now", "şimdi"]});
 Object.assign(I18N, {"Сумма курьеру, ₺": ["Courier fee, ₺", "Kurye ücreti, ₺"], "Прибавится к итогу заказа и сама запишется в «Кассовые расходы».": ["Added to the order total and recorded automatically in «Cash expenses».", "Sipariş toplamına eklenir ve otomatik olarak «Kasa giderleri»ne yazılır."], "Имя курьера": ["Courier name", "Kurye adı"], "Курьер по заказу с доставкой записывается сам. Здесь — курьер вручную, например за покупками.": ["The courier for a delivery order is recorded automatically. Here you add a courier by hand, e.g. sent for purchases.", "Teslimat siparişinin kuryesi otomatik yazılır. Burada kurye elle eklenir, örneğin alışverişe gönderildiğinde."], "из заказа, меняется в заказе": ["from the order, change it in the order", "siparişten, siparişte değiştirilir"]});
 Object.assign(I18N, {"Укажите имя клиента": ["Enter the customer's name", "Müşterinin adını girin"], "Укажите телефон клиента": ["Enter the customer's phone", "Müşterinin telefonunu girin"], "Обязательно": ["Required", "Zorunlu"], "Не заполнено:": ["Not filled in:", "Doldurulmadı:"], "Вы админ — сохранить без этого?": ["You are the admin — save without it?", "Yöneticisiniz — bunsuz kaydedilsin mi?"], "Причина не указана. Вы админ — отменить заказ без причины?": ["No reason given. You are the admin — cancel the order without a reason?", "Sebep yazılmadı. Yöneticisiniz — sipariş sebepsiz iptal edilsin mi?"]});
