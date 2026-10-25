@@ -338,6 +338,8 @@ details.wbox details.wbox .srow{gap:6px;padding:6px 6px}
 details.det .slist .srow,.srow{display:grid;grid-template-columns:1fr auto auto;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-s);padding:6px 10px;text-align:left;font-size:.9rem;font-variant-numeric:tabular-nums;width:100%}
 .srow .auto{color:var(--low)}
 .srow small{display:block;font-size:.75rem;opacity:.85}
+.srow b{text-align:right}
+.mysum b{white-space:nowrap}
 .srow.long{border-color:var(--empty);color:var(--empty)}
 .srow.void{opacity:.75;border-style:dashed;box-sizing:border-box}
 .srow.void span{min-width:0;overflow-wrap:anywhere}
@@ -473,6 +475,7 @@ details.fold[open]>summary{margin-bottom:8px}
   <button role="tab" data-view="hist" aria-selected="false">История</button>
   <button role="tab" data-view="menu" aria-selected="false">Меню</button>
   <button role="tab" data-view="stock" aria-selected="false">Склад</button>
+  <button role="tab" data-view="myshifts" aria-selected="false">Рабочие смены</button>
   <button role="tab" data-view="staff" aria-selected="false">Сотрудники</button>
   <button role="tab" data-view="fin" aria-selected="false">Финансы</button>
 </div></nav>
@@ -1123,6 +1126,8 @@ function renderControls(){
       <div class="controls"><input class="search" id="iq" type="search" placeholder="Найти продукт" value="${esc(S.invQ)}" aria-label="Поиск продукта"></div>`;
   } else if (S.view==="cash"){
     renderCashControls(c);
+  } else if (S.view==="myshifts"){
+    c.innerHTML = `<p class="hint" style="margin:0 0 10px">Здесь только ваши смены: часы и заработок по дням, неделям и месяцам. Смену начинайте и заканчивайте кнопками вверху. Если время неверное, скажите админу — он исправит.</p>`;
   } else if (S.view==="fin"){
     renderFinControls(c);
   } else if (S.view==="staff"){
@@ -1144,6 +1149,7 @@ function renderList(){
   if (S.view==="cash") return renderCash(L);
   if (S.view==="fin") return renderFin(L);
   if (S.view==="staff") return renderStaff(L);
+  if (S.view==="myshifts") return renderMyShifts(L);
 }
 function grouped(list, rowFn){
   let html = "", cur = null, buf = [];
@@ -3989,11 +3995,14 @@ setInterval(()=>{ if (S.view==="orders" && S.ordView==="open" && !document.query
 const ROLES = {admin:"Админ", worker:"Работник ресторана"};
 const roleOf = st => st && st.role==="admin" ? "admin" : "worker";
 const PERM = {
-  worker: {views:["stock","orders","cash","menu","inv"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, prices:1, menuView:1, dishOff:1, stopList:1}
+  worker: {views:["stock","orders","cash","menu","inv","myshifts"], move:1, cook:1, cut:1, invDraft:1, orderStatus:1, orderServe:1, orderEdit:1, orderPay:1, orderCancel:1, prices:1, menuView:1, dishOff:1, stopList:1}
 };
-const ALL_VIEWS = ["orders","cash","hist","menu","stock","inv","staff","fin"];
+const ALL_VIEWS = ["orders","cash","hist","menu","stock","inv","staff","fin","myshifts"];
 function can(k){ if (!S.me) return false; if (S.me.role==="admin") return true; const p = PERM[S.me.role]; return !!(p && p[k]); }
-function canView(v){ if (!S.me) return false; if (S.me.role==="admin") return true; return (PERM[S.me.role]||{views:[]}).views.includes(v); }
+function canView(v){ if (!S.me) return false;
+  // «Рабочие смены»: a worker's own shifts; not for the admin (no shifts) and not for the demo login YM
+  if (v==="myshifts" && (S.me.role==="admin" || isDemoStaff(S.staff.find(x=>x.id===S.me.id) || S.me))) return false;
+  if (S.me.role==="admin") return true; return (PERM[S.me.role]||{views:[]}).views.includes(v); }
 const isAdmin = () => !!S.me && S.me.role==="admin";
 const showMoney = () => isAdmin() || can("prices");
 // purchase prices and food cost: admin only (staff only type the price in when receiving goods)
@@ -4391,7 +4400,7 @@ function shVoidRowHtml(sh, withName){
   return `<button type="button" class="srow void ${withName?"wn":""}" data-editshift="${esc(sh.id)}"><span class="${withName?"vfull":""}">${withName ? N(sh.name||"") + " · " : ""}${d}</span><span><s>${hhmm(sh.start)} – ${v.end ? hhmm(v.end) : "…"}</s><small>Аннулирована: ${N(v.why||"")}${v.by||at ? ` (${esc(v.by||"")}${v.by&&at?", ":""}${at})` : ""}</small></span><b>${fmtH(0)}</b></button>`;
 }
 // finished time of one worker folds up: weeks of this month → months of this quarter → earlier quarters; each opens down to the days
-function staffWeeksHtml(x){
+function staffWeeksHtml(x, row = shRowHtml){
   const now = Date.now(), cur = weekStart(now), rate = hasRate(x), curYM = ymOf(now), qOf = ts => { const d = new Date(ts); return d.getFullYear()+"-"+(Math.floor(d.getMonth()/3)+1); };
   const past = S.shifts.filter(sh=>sh.staffId===x.id && sh.start && sh.start < cur).sort((a,b)=>a.start-b.start);
   if (!past.length) return "";
@@ -4399,7 +4408,7 @@ function staffWeeksHtml(x){
   const box = (label, arr, inner) => { const h = workedH(arr);
     return `<details class="det wbox" data-k="${esc(x.id+"|"+label)}"><summary><span>${label}</span><b>${fmtH(h)}${rate?` · ${money(payOf(x, arr))}`:""}</b></summary><div class="slist">${inner}</div></details>`; };
   // weeks inside one month are cut at the month's edges, so a month adds up to the same hours as in Finance
-  const weeks = arr => groups(arr, weekStart).map(([w,a])=>{ const ym = ymOf(a[0].start); return box(weekLabel(w, ymStart(ym), addDays(ymStart(ymShift(ym,1)),-1)), a, a.map(shRowHtml).join("")); }).join("");
+  const weeks = arr => groups(arr, weekStart).map(([w,a])=>{ const ym = ymOf(a[0].start); return box(weekLabel(w, ymStart(ym), addDays(ymStart(ymShift(ym,1)),-1)), a, a.map(row).join("")); }).join("");
   const months = arr => groups(arr, ymOf).map(([ym,a])=>box(ymName(ym), a, weeks(a))).join("");
   const thisM = past.filter(sh=>ymOf(sh.start)===curYM), rest = past.filter(sh=>ymOf(sh.start)!==curYM);
   const thisQ = rest.filter(sh=>qOf(sh.start)===qOf(now)), older = rest.filter(sh=>qOf(sh.start)!==qOf(now));
@@ -4476,7 +4485,7 @@ async function autoCloseShifts(){
     }
   } finally { autoClosing = false; }
 }
-setInterval(()=>{ autoCloseShifts().then(()=>{ if (S.view==="staff") renderList(); applyRole(); }); }, 60000);
+setInterval(()=>{ autoCloseShifts().then(()=>{ if (S.view==="staff" || S.view==="myshifts") renderList(); applyRole(); }); }, 60000);
 // a worker who uses the program: their shift remembers it (seen), for the auto close above —
 // every 15 minutes during the day, every 2 minutes from a quarter before 23:00 (there the shift lasts 10 minutes after the last action).
 // At night an action within an hour of an auto-closed shift's last action opens that shift again: it stays one piece.
@@ -4601,6 +4610,37 @@ function renderStaff(L){
   html += `<div class="sum" style="margin-top:12px"><div><span>Итого за период</span><b>${fmtH(totH)}${totPay?` · ${money(totPay)}`:""}</b></div></div>`;
   const keep = new Set([...L.querySelectorAll("details[data-k][open]")].map(d=>d.dataset.k));
   L.innerHTML = html + adminHtml + devListHtml() + bkStaffHtml();
+  if (keep.size) L.querySelectorAll("details[data-k]").forEach(d=>{ if (keep.has(d.dataset.k)) d.open = true; });
+}
+// «Рабочие смены»: a worker sees only their own shifts — the same hours and pay as the admin sees in Сотрудники.
+// Nothing more is read from the base: the shifts are already on the device; closed months the device does not keep come from the month's record.
+function myShRowHtml(sh){
+  const d = new Date(sh.start).toLocaleDateString(LOC(),{day:"numeric",month:"short",weekday:"short"});
+  if (isVoid(sh)) return `<div class="srow void"><span>${d}</span><span><s>${hhmm(sh.start)} – ${sh.void.end ? hhmm(sh.void.end) : "…"}</s><small>Аннулирована: ${N(sh.void.why||"")}</small></span><b>${fmtH(0)}</b></div>`;
+  const st = S.staff.find(x=>x.id===sh.staffId), r = st ? rateAt(st, sh.start||0) : 0, h = hoursOf(sh);
+  const br = (sh.breaks||[]).filter(b=>b.to>b.from), dup = overlapsOther(sh);
+  return `<div class="srow"><span>${d}</span><span>${hhmm(sh.start)} – ${sh.end?hhmm(sh.end)+(sh.autoClosed?" авто":""):"сейчас"}${br.length?`<small>${br.map(b=>`перерыв ${hhmm(b.from)} – ${hhmm(b.to)}`).join(", ")}</small>`:""}${dup?"<small>повтор, часы считаются один раз</small>":""}</span><b>${fmtH(h)}${r && !dup ? `<small>${money(h*r)}</small>` : ""}</b></div>`;
+}
+function renderMyShifts(L){
+  const st = S.me && S.staff.find(x=>x.id===S.me.id);
+  if (!st){ L.innerHTML = `<div class="empty-state">Смен пока нет.</div>`; return; }
+  const now = Date.now(), d0 = day0(now), w0 = weekStart(now), ym = ymOf(now), rate = hasRate(st);
+  const mine = S.shifts.filter(sh=>sh.staffId===st.id && sh.start), from = t => mine.filter(sh=>sh.start>=t);
+  const line = (label, arr) => `<div><span>${label}</span><b>${fmtH(workedH(arr))}${rate?` · ${money(payOf(st, arr))}`:""}</b></div>`;
+  const open = openShiftOf(st.id);
+  let html = `<div class="sum mysum">
+      <div><span>${open ? `<span class="son">На смене с ${hhmm(open.start)}</span>` : "Не на смене"}</span><span class="hint">${rate ? "Ставка: " + rateText(st) : ""}</span></div>
+      ${line("Сегодня", from(d0))}${line(weekLabel(w0), from(w0))}${line(ymName(ym), from(ymStart(ym)))}</div>`;
+  const wk = from(w0).sort((a,b)=>a.start-b.start);
+  html += `<h2 class="cat"><span>Эта неделя</span><span>${fmtH(workedH(wk))}</span></h2>`
+    + (wk.length ? `<div class="slist">${wk.map(myShRowHtml).join("")}</div>` : `<p class="hint">На этой неделе смен пока нет.</p>`);
+  const past = staffWeeksHtml(st, myShRowHtml);
+  // closed months whose shifts this device does not keep (it loads only the newer ones): the month's total from its record
+  const have = new Set(mine.map(sh=>ymOf(sh.start)));
+  const recs = closedYms().filter(m=>!have.has(m)).map(m=>[m, ((monthRec(m)||{}).fin||{}).staff||{}]).map(([m,f])=>[m, f[st.id]]).filter(([m,r])=>r && Number(r.hrs)>0).reverse();
+  if (past || recs.length) html += `<h2 class="cat"><span>Раньше</span><span></span></h2><div class="slist">${past}${recs.map(([m,r])=>`<div class="srow"><span>${ymName(m)}</span><span><small>итог закрытого месяца</small></span><b>${fmtH(Number(r.hrs)||0)}${rate?`<small>${money(Number(r.pay)||0)}</small>`:""}</b></div>`).join("")}</div>`;
+  const keep = new Set([...L.querySelectorAll("details[data-k][open]")].map(d=>d.dataset.k));
+  L.innerHTML = html;
   if (keep.size) L.querySelectorAll("details[data-k]").forEach(d=>{ if (keep.has(d.dataset.k)) d.open = true; });
 }
 // shifts closed by themselves (the worker did not press «Закончить смену»): the admin confirms or corrects the end.
@@ -5087,6 +5127,8 @@ Object.assign(I18N, {"Поставить на смену": ["Put on shift", "Var
   "Конец смены должен быть позже начала": ["The end of the shift must be after its start", "Vardiyanın bitişi başlangıcından sonra olmalı"], "У сотрудника уже есть открытая смена": ["This worker already has an open shift", "Bu çalışanın zaten açık bir vardiyası var"],
   "Укажите сотрудника и начало смены": ["Choose the worker and the start of the shift", "Çalışanı ve vardiya başlangıcını seçin"], "Смена сохранена": ["Shift saved", "Vardiya kaydedildi"],
   "Админ может сам поставить работника на смену, снять со смены, добавить смену задним числом или аннулировать её с причиной: нажмите на работника ниже.": ["The admin can put a worker on shift, take them off, add a past shift or annul a shift with a reason: tap the worker below.", "Yönetici çalışanı vardiyaya alabilir, vardiyadan çıkarabilir, geçmiş vardiya ekleyebilir veya nedenini yazarak vardiyayı iptal edebilir: aşağıda çalışana dokunun."]});
+Object.assign(I18N, {"Рабочие смены": ["Work shifts", "Çalışma vardiyaları"], "Здесь только ваши смены: часы и заработок по дням, неделям и месяцам. Смену начинайте и заканчивайте кнопками вверху. Если время неверное, скажите админу — он исправит.": ["Only your own shifts are here: hours and earnings by day, week and month. Start and end your shift with the buttons at the top. If a time is wrong, tell the admin — they will correct it.", "Burada yalnızca sizin vardiyalarınız var: günlere, haftalara ve aylara göre saatler ve kazanç. Vardiyayı yukarıdaki düğmelerle başlatıp bitirin. Saat yanlışsa yöneticiye söyleyin, o düzeltir."],
+  "Смен пока нет.": ["No shifts yet.", "Henüz vardiya yok."], "Ставка": ["Rate", "Ücret"], "На этой неделе смен пока нет.": ["No shifts this week yet.", "Bu hafta henüz vardiya yok."], "Раньше": ["Earlier", "Önceki"], "итог закрытого месяца": ["total of the closed month", "kapatılan ayın toplamı"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
