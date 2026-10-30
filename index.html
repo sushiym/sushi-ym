@@ -600,6 +600,9 @@ details.fold[open]>summary{margin-bottom:8px}
   <label class="f">Название<input id="dName" required autocomplete="off"></label>
   <div class="two"><label class="f">Раздел меню<select id="dCat"></select></label><label class="f">Цена, ₺<input id="dPrice" inputmode="decimal" autocomplete="off" placeholder="0"></label></div>
   <div class="two"><label class="f">Название EN<input id="dNameEn" autocomplete="off"></label><label class="f">Название TR<input id="dNameTr" autocomplete="off"></label></div>
+  <div class="box" id="dSiteBox" style="gap:6px"><label class="f">Описание для сайта<textarea id="dSiteDesc" rows="2" maxlength="300" autocomplete="off" placeholder="Например: Лосось, сливочный сыр, огурец. 8 штук."></textarea></label>
+    <div class="two"><label class="f">Описание EN<textarea id="dSiteDescEn" rows="2" maxlength="300" autocomplete="off"></textarea></label><label class="f">Описание TR<textarea id="dSiteDescTr" rows="2" maxlength="300" autocomplete="off"></textarea></label></div>
+    <p class="hint" style="margin:0">Необязательно. Коротко для покупателя на сайте онлайн-заказов, своими словами — не техкарта и не список продуктов.</p></div>
   <label class="toggle"><input type="checkbox" id="dActive" checked> Показывать в продажах</label>
   <div class="box needbox"><label class="toggle"><input type="checkbox" id="dNeeds"> Требует доработки (помечено красным)</label>
     <label class="f">Что доработать<input id="dNote" autocomplete="off" placeholder="Например: проверить граммовки"></label></div>
@@ -637,6 +640,9 @@ details.fold[open]>summary{margin-bottom:8px}
   <h3 id="setTitle">Сет</h3>
   <div class="two"><label class="f">Название сета<input id="stName" required autocomplete="off"></label><label class="f">Цена, ₺<input id="stPrice" inputmode="decimal" autocomplete="off" placeholder="0"></label></div>
   <div class="two"><label class="f">Название EN<input id="stNameEn" autocomplete="off"></label><label class="f">Название TR<input id="stNameTr" autocomplete="off"></label></div>
+  <div class="box" id="stSiteBox" style="gap:6px"><label class="f">Описание для сайта<textarea id="stSiteDesc" rows="2" maxlength="300" autocomplete="off" placeholder="Например: Лосось, сливочный сыр, огурец. 8 штук."></textarea></label>
+    <div class="two"><label class="f">Описание EN<textarea id="stSiteDescEn" rows="2" maxlength="300" autocomplete="off"></textarea></label><label class="f">Описание TR<textarea id="stSiteDescTr" rows="2" maxlength="300" autocomplete="off"></textarea></label></div>
+    <p class="hint" style="margin:0">Необязательно. Коротко для покупателя на сайте онлайн-заказов, своими словами — не техкарта и не список продуктов.</p></div>
   <label class="toggle"><input type="checkbox" id="stActive" checked> Показывать в продажах</label>
   <div class="box needbox"><label class="toggle"><input type="checkbox" id="stNeeds"> Требует доработки (помечено красным)</label>
     <label class="f">Что доработать<input id="stNote" autocomplete="off" placeholder="Например: уточнить состав"></label></div>
@@ -1116,7 +1122,7 @@ function renderControls(){
       <p class="hint" style="margin:0 0 10px">Для блюд, которые не продали: еда персонала, брак, дегустация. Нажимайте на блюда и сеты, потом «Списать…» — продукты спишутся по техкартам, в выручку ничего не попадёт.</p>`;
   } else if (S.view==="menu"){
     const nn = S.menu.filter(d=>d.needsWork).length + S.sets.filter(x=>x.needsWork).length;
-    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button></div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
+    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button><button class="btn" id="pubMenu">Обновить меню на сайте</button></div><div id="pubNote">${pubNote()}</div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
@@ -1270,6 +1276,7 @@ function render(full){
   { const sb = document.querySelector('[data-stockview="inv"]'); if (sb && sb.textContent!==invSegTxt()) sb.textContent = invSegTxt(); }
   if (full || (S.view==="orders" && !document.activeElement?.matches?.("#repDate,#sq"))) renderControls();
   renderList();
+  { const pn = $("#pubNote"); if (pn && S.view==="menu"){ const h = pubNote(); if (pn.dataset.h!==h){ pn.innerHTML = h; pn.dataset.h = h; } } }
   if (S.view!=="inv" && !isDishOff()) $("#savebarHost").innerHTML="";
   document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected", String(b.dataset.view===(S.view==="inv" ? "stock" : S.view))));
 }
@@ -1891,6 +1898,7 @@ function openDish(id){
   $("#dishTitle").textContent = d ? "Изменить блюдо" : "Новое блюдо";
   $("#dName").value = d ? d.name : "";
   $("#dNameEn").value = d ? d.name_en||"" : ""; $("#dNameTr").value = d ? d.name_tr||"" : "";
+  $("#dSiteDesc").value = d ? d.site_desc||"" : ""; $("#dSiteDescEn").value = d ? d.site_desc_en||"" : ""; $("#dSiteDescTr").value = d ? d.site_desc_tr||"" : "";
   $("#dNeeds").checked = !!(d && d.needsWork); $("#dNote").value = d ? d.todo||"" : "";
   $("#dCat").innerHTML = dishCats().map(c=>`<option value="${esc(c)}" ${d&&d.category===c?"selected":""}>${esc(c)}</option>`).join("") + `<option value="__new">Новый раздел…</option>`;
   $("#dActive").checked = d ? d.active!==false : true;
@@ -1940,7 +1948,7 @@ $("#dishForm").addEventListener("submit", async e=>{
   if (old && old.needsWork && $("#dNeeds").checked && tConfirm("Доработка закончена? Снять красную пометку «доработать»?")) $("#dNeeds").checked = false;
   const custom = $("#dPackCustom").checked, pack = custom ? readPList($("#dPack")) : (old && old.pack) || [];
   if (pack===null) return;
-  const d = {...(old||{}), id: old ? old.id : uid("d"), method:$("#dMethod").value.trim(), name, name_en:$("#dNameEn").value.trim(), name_tr:$("#dNameTr").value.trim(), needsWork:$("#dNeeds").checked, todo:$("#dNote").value.trim(), category:$("#dCat").value, active:$("#dActive").checked, items, price: isNaN(price)?0:price, packMode: custom?"custom":"default", pack,
+  const d = {...(old||{}), id: old ? old.id : uid("d"), method:$("#dMethod").value.trim(), name, name_en:$("#dNameEn").value.trim(), name_tr:$("#dNameTr").value.trim(), site_desc:$("#dSiteDesc").value.trim(), site_desc_en:$("#dSiteDescEn").value.trim(), site_desc_tr:$("#dSiteDescTr").value.trim(), needsWork:$("#dNeeds").checked, todo:$("#dNote").value.trim(), category:$("#dCat").value, active:$("#dActive").checked, items, price: isNaN(price)?0:price, packMode: custom?"custom":"default", pack,
     order: old ? (old.order ?? 9999) : Math.max(0, ...S.menu.map(x=>x.order||0)) + 1};
   try { await commit((old?"Изменение блюда: ":"Новое блюдо: ") + name, [{col:"menu", id:d.id, after:d}]); $("#dishDlg").close(); render(); toast(old?"Блюдо сохранено":"Блюдо добавлено"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
@@ -2079,6 +2087,7 @@ function openSet(id){
   $("#setTitle").textContent = st ? "Изменить сет" : "Новый сет";
   $("#stName").value = st ? st.name : "";
   $("#stNameEn").value = st ? st.name_en||"" : ""; $("#stNameTr").value = st ? st.name_tr||"" : "";
+  $("#stSiteDesc").value = st ? st.site_desc||"" : ""; $("#stSiteDescEn").value = st ? st.site_desc_en||"" : ""; $("#stSiteDescTr").value = st ? st.site_desc_tr||"" : "";
   $("#stNeeds").checked = !!(st && st.needsWork); $("#stNote").value = st ? st.todo||"" : "";
   $("#stActive").checked = st ? st.active!==false : true;
   $("#stPrice").value = st && st.price ? String(st.price).replace(".",",") : "";
@@ -2106,7 +2115,7 @@ $("#setForm").addEventListener("submit", async e=>{
   if (old && old.needsWork && $("#stNeeds").checked && tConfirm("Доработка закончена? Снять красную пометку «доработать»?")) $("#stNeeds").checked = false;
   const custom = $("#stPackCustom").checked, pack = custom ? readPList($("#stPack")) : (old && old.pack) || [];
   if (pack===null) return;
-  const st = {id: old ? old.id : uid("s"), name, name_en:$("#stNameEn").value.trim(), name_tr:$("#stNameTr").value.trim(), needsWork:$("#stNeeds").checked, todo:$("#stNote").value.trim(), active:$("#stActive").checked, items, price: isNaN(price)?0:price, packMode: custom?"custom":"default", pack, order: old ? (old.order ?? 9999) : Math.max(0, ...S.sets.map(x=>x.order||0)) + 1};
+  const st = {id: old ? old.id : uid("s"), name, name_en:$("#stNameEn").value.trim(), name_tr:$("#stNameTr").value.trim(), site_desc:$("#stSiteDesc").value.trim(), site_desc_en:$("#stSiteDescEn").value.trim(), site_desc_tr:$("#stSiteDescTr").value.trim(), needsWork:$("#stNeeds").checked, todo:$("#stNote").value.trim(), active:$("#stActive").checked, items, price: isNaN(price)?0:price, packMode: custom?"custom":"default", pack, order: old ? (old.order ?? 9999) : Math.max(0, ...S.sets.map(x=>x.order||0)) + 1};
   try { await commit((old?"Изменение сета: ":"Новый сет: ") + name, [{col:"sets", id:st.id, after:st}]); $("#setDlg").close(); render(); toast(old?"Сет сохранён":"Сет добавлен"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
@@ -2116,6 +2125,40 @@ $("#stDel").addEventListener("click", async ()=>{
   try { await commit("Удаление сета: " + st.name, [{col:"sets", id:st.id, after:null}]); $("#setDlg").close(); render(); toast("Сет удалён"); }
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
+
+/* ---------- menu for the online-order site: copied only when the admin presses «Обновить меню на сайте» ---------- */
+// pubmenu/current = one public document {v, ts, count, json}; json = name, site description and price of each dish and set
+// (plus section and order), without recipes, set contents, packaging and notes.
+// settings/pubmenu remembers when it was copied and a fingerprint, so «Меню» can say whether the site is behind.
+function pubOf(kind, x){
+  const cat = kind==="set" ? "Сеты" : (x.category || ""), ci = DISH_CATS.indexOf(cat), t = I18N[cat] || [];
+  return {id:x.id, kind, name:x.name||"", name_en:x.name_en||"", name_tr:x.name_tr||"",
+    desc_ru:x.site_desc||"", desc_en:x.site_desc_en||"", desc_tr:x.site_desc_tr||"", price:Number(x.price)||0,
+    category:cat, cat_en:t[0]||cat, cat_tr:t[1]||cat, catOrder: kind==="set" ? -1 : (ci<0 ? 99 : ci), order:x.order ?? 9999, active:x.active!==false};
+}
+const pubList = () => [...sortedSets().map(x=>pubOf("set", x)), ...sortedDishes().map(x=>pubOf("dish", x))];
+function pubHash(list){ const str = canon(list); let h = 5381; for (let i=0; i<str.length; i++) h = (h*33 ^ str.charCodeAt(i)) >>> 0; return h.toString(36); }
+function pubNote(){
+  const c = S.settings.find(x=>x.id==="pubmenu");
+  if (!c) return `<p class="hint" style="margin:0 0 10px">Меню на сайт ещё не копировалось.</p>`;
+  const same = c.hash===pubHash(pubList());
+  return `<p class="hint" style="margin:0 0 10px">На сайте меню от ${esc(new Date(c.ts).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}))}${same ? " — совпадает с этим меню." : " — <b>в меню есть изменения, которых нет на сайте.</b>"}</p>`;
+}
+async function pubMenu(){
+  if (!isAdmin() || !FS) return;
+  if (!navigator.onLine){ toast("Нет интернета. Меню на сайт можно скопировать только онлайн."); return; }
+  const btn = $("#pubMenu"); if (btn){ btn.disabled = true; btn.textContent = "Копирую…"; }
+  try {
+    const list = pubList(), ts = Date.now(), hash = pubHash(list);
+    // a bad connection must not hold the button (and every other guarded action) forever
+    let tm; const late = new Promise((_, no) => { tm = setTimeout(() => no(Object.assign(new Error("timeout"), {code:"timeout"})), 20000); });
+    try { await Promise.race([FS.doc("pubmenu/current").set({v:1, ts, count:list.length, json:JSON.stringify(list)}), late]); } finally { clearTimeout(tm); }
+    await commit("Меню на сайте обновлено", [{col:"settings", id:"pubmenu", after:{id:"pubmenu", ts, by:S.me ? S.me.name : "", hash, count:list.length}}]);
+    toast("Меню на сайте обновлено");
+  } catch(e){ console.error(e); toast("Не удалось скопировать меню на сайт: " + ((e && e.code) || "ошибка")); }
+  render(true);
+}
+document.addEventListener("click", e=>{ if (e.target.closest("#pubMenu")) guarded(pubMenu); });
 
 /* ---------- salmon cutting ---------- */
 const SALMON_ID = "p01", FISHSET_ID = "p02", FILLET_ID = "p_salmon_fillet";
@@ -4926,8 +4969,8 @@ document.addEventListener("click", e=>{
   const o = orderById(id); if (o && o.status==="new" && can("orderStatus")) guarded(()=>setOrderStatus(id, "cooking"));
 });
 
-{ const _od = openDish; openDish = function(id){ lockForm($("#dishForm"), false); _od(id); if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr"); $("#dMethodBox").hidden = true; $("#dMethodBox").dataset.roHid = "1"; } }; }
-{ const _os = openSet; openSet = function(id){ lockForm($("#setForm"), false); _os(id); updateSetCost(); if (!isAdmin()){ $("#setTitle").textContent = "Состав сета"; lockForm($("#setForm"), true, "#stPrice,#stCost,#stPackCustom,#stNeeds,#stNameEn,#stNameTr"); } }; }
+{ const _od = openDish; openDish = function(id){ lockForm($("#dishForm"), false); _od(id); if (!isAdmin()){ $("#dishTitle").textContent = "Техкарта"; lockForm($("#dishForm"), true, "#dPrice,#dCost,#dPackCustom,#dNeeds,#dFromPrep,#dNameEn,#dNameTr,#dSiteBox"); $("#dMethodBox").hidden = true; $("#dMethodBox").dataset.roHid = "1"; } }; }
+{ const _os = openSet; openSet = function(id){ lockForm($("#setForm"), false); _os(id); updateSetCost(); if (!isAdmin()){ $("#setTitle").textContent = "Состав сета"; lockForm($("#setForm"), true, "#stPrice,#stCost,#stPackCustom,#stNeeds,#stNameEn,#stNameTr,#stSiteBox"); } }; }
 
 /* ---------- events ---------- */
 document.querySelector("nav.tabs").addEventListener("click", e => {
@@ -5129,6 +5172,8 @@ Object.assign(I18N, {"Поставить на смену": ["Put on shift", "Var
   "Админ может сам поставить работника на смену, снять со смены, добавить смену задним числом или аннулировать её с причиной: нажмите на работника ниже.": ["The admin can put a worker on shift, take them off, add a past shift or annul a shift with a reason: tap the worker below.", "Yönetici çalışanı vardiyaya alabilir, vardiyadan çıkarabilir, geçmiş vardiya ekleyebilir veya nedenini yazarak vardiyayı iptal edebilir: aşağıda çalışana dokunun."]});
 Object.assign(I18N, {"Рабочие смены": ["Work shifts", "Çalışma vardiyaları"], "Здесь только ваши смены: часы и заработок по дням, неделям и месяцам. Смену начинайте и заканчивайте кнопками вверху. Если время неверное, скажите админу — он исправит.": ["Only your own shifts are here: hours and earnings by day, week and month. Start and end your shift with the buttons at the top. If a time is wrong, tell the admin — they will correct it.", "Burada yalnızca sizin vardiyalarınız var: günlere, haftalara ve aylara göre saatler ve kazanç. Vardiyayı yukarıdaki düğmelerle başlatıp bitirin. Saat yanlışsa yöneticiye söyleyin, o düzeltir."],
   "Смен пока нет.": ["No shifts yet.", "Henüz vardiya yok."], "Ставка": ["Rate", "Ücret"], "На этой неделе смен пока нет.": ["No shifts this week yet.", "Bu hafta henüz vardiya yok."], "Раньше": ["Earlier", "Önceki"], "итог закрытого месяца": ["total of the closed month", "kapatılan ayın toplamı"]});
+Object.assign(I18N, {"Обновить меню на сайте": ["Update menu on the website", "Web sitesindeki menüyü güncelle"], "Меню на сайт ещё не копировалось.": ["The menu has not been copied to the website yet.", "Menü henüz web sitesine kopyalanmadı."], "На сайте меню от": ["The website has the menu from", "Web sitesindeki menü tarihi:"], "совпадает с этим меню": ["same as this menu", "bu menüyle aynı"], "в меню есть изменения, которых нет на сайте": ["the menu has changes that are not on the website", "menüde web sitesinde olmayan değişiklikler var"], "Нет интернета. Меню на сайт можно скопировать только онлайн.": ["No internet. The menu can be copied to the website only online.", "İnternet yok. Menü web sitesine yalnızca çevrimiçiyken kopyalanabilir."], "Копирую…": ["Copying…", "Kopyalanıyor…"], "Меню на сайте обновлено": ["The menu on the website is updated", "Web sitesindeki menü güncellendi"], "Не удалось скопировать меню на сайт": ["Could not copy the menu to the website", "Menü web sitesine kopyalanamadı"],
+  "Описание для сайта": ["Description for the website", "Web sitesi için açıklama"], "Описание EN": ["Description EN", "Açıklama EN"], "Описание TR": ["Description TR", "Açıklama TR"], "Например: Лосось, сливочный сыр, огурец. 8 штук.": ["For example: Salmon, cream cheese, cucumber. 8 pieces.", "Örnek: Somon, krem peynir, salatalık. 8 adet."], "Необязательно. Коротко для покупателя на сайте онлайн-заказов, своими словами — не техкарта и не список продуктов.": ["Optional. A short text for customers on the online-order website, in your own words — not the recipe card and not a product list.", "İsteğe bağlı. Online sipariş sitesindeki müşteri için kendi sözlerinizle kısa metin — reçete veya ürün listesi değil."]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
