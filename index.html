@@ -1011,10 +1011,12 @@ const colArr = col => (["products","recipes","moves","menu","sets","sales","orde
 const clone = o => o ? JSON.parse(JSON.stringify(o)) : null;
 async function applyOp(col, id, val){
   const key = colArr(col), rk = rawKey(key);
+  const was = key==="orders" ? S.orders.find(x=>x.id===id) : null;
   if (val == null){ await delDoc(col, id); S[rk] = S[rk].filter(x=>x.id!==id); }
   else { await putDoc(col, id, val); upsertLocal(S[rk], clone(val)); if (SYNC.upd[key]) SYNC.upd[key].set(id, Date.now()); }
   if (key==="moves") S.moves = unfoldMoves(S.mdocs);
   syncCount(key);
+  if (key==="orders" && val) webStatus(val, was);
 }
 // ops: [{col, id, after}]; after = null deletes. On error err.done lists the ops already written.
 // (Кнопок «Отменить / Вернуть» больше нет: они возвращали запись целиком и стирали правки с других устройств.)
@@ -2397,6 +2399,7 @@ function renderOrdersControls(c){
   c.innerHTML = (acts ? `<div class="actions oacts">${acts}</div>` : "") + `
     <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}${isAdmin() ? seg("rev", `На проверку${nRev?` (${nRev})`:""}`) : ""}${can("stopList") ? seg("stop", `Стоп-лист${nStop?` (${nStop})`:""}`) : ""}
       ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}${bellBtn()}</div>`;
+  if (S.ordView==="open") c.innerHTML += webBlock();
   if (S.ordView==="open" && nStop) c.innerHTML += `<div class="ostop"><b>Стоп-лист:</b> ${stops.map(x=>N(dn(x.src)) + (x.m.ts && dayKey(x.m.ts)!==todayKey() ? ` <small class="hint">(отмечено ${stopWhen(x.m)})</small>` : "")).join(", ")}</div>`;
   if (S.ordView==="stop") c.innerHTML += `<div class="controls"><input class="search" id="sq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.saleQ)}" aria-label="Поиск блюда"></div>
       <p class="hint" style="margin:0 0 10px">Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.</p>`;
@@ -5174,6 +5177,28 @@ Object.assign(I18N, {"Рабочие смены": ["Work shifts", "Çalışma va
   "Смен пока нет.": ["No shifts yet.", "Henüz vardiya yok."], "Ставка": ["Rate", "Ücret"], "На этой неделе смен пока нет.": ["No shifts this week yet.", "Bu hafta henüz vardiya yok."], "Раньше": ["Earlier", "Önceki"], "итог закрытого месяца": ["total of the closed month", "kapatılan ayın toplamı"]});
 Object.assign(I18N, {"Обновить меню на сайте": ["Update menu on the website", "Web sitesindeki menüyü güncelle"], "Меню на сайт ещё не копировалось.": ["The menu has not been copied to the website yet.", "Menü henüz web sitesine kopyalanmadı."], "На сайте меню от": ["The website has the menu from", "Web sitesindeki menü tarihi:"], "совпадает с этим меню": ["same as this menu", "bu menüyle aynı"], "в меню есть изменения, которых нет на сайте": ["the menu has changes that are not on the website", "menüde web sitesinde olmayan değişiklikler var"], "Нет интернета. Меню на сайт можно скопировать только онлайн.": ["No internet. The menu can be copied to the website only online.", "İnternet yok. Menü web sitesine yalnızca çevrimiçiyken kopyalanabilir."], "Копирую…": ["Copying…", "Kopyalanıyor…"], "Меню на сайте обновлено": ["The menu on the website is updated", "Web sitesindeki menü güncellendi"], "Не удалось скопировать меню на сайт": ["Could not copy the menu to the website", "Menü web sitesine kopyalanamadı"],
   "Описание для сайта": ["Description for the website", "Web sitesi için açıklama"], "Описание EN": ["Description EN", "Açıklama EN"], "Описание TR": ["Description TR", "Açıklama TR"], "Например: Лосось, сливочный сыр, огурец. 8 штук.": ["For example: Salmon, cream cheese, cucumber. 8 pieces.", "Örnek: Somon, krem peynir, salatalık. 8 adet."], "Необязательно. Коротко для покупателя на сайте онлайн-заказов, своими словами — не техкарта и не список продуктов.": ["Optional. A short text for customers on the online-order website, in your own words — not the recipe card and not a product list.", "İsteğe bağlı. Online sipariş sitesindeki müşteri için kendi sözlerinizle kısa metin — reçete veya ürün listesi değil."]});
+Object.assign(I18N, {"Новые заказы с сайта": ["New orders from the website", "Web sitesinden yeni siparişler"], "Новый заказ с сайта": ["New order from the website", "Web sitesinden yeni sipariş"],
+  "нет в меню — уточните у клиента": ["is not on the menu — check with the customer", "menüde yok — müşteriye sorun"], "клиент видел": ["the customer saw", "müşterinin gördüğü"], "сейчас на сайте": ["now on the website", "şu an sitede"], "в заказ пойдёт": ["the order gets", "siparişe girecek"],
+  "С сайта": ["From the website", "Web sitesinden"], "заберут к": ["pickup at", "gelip alma saati"], "как можно скорее": ["as soon as possible", "en kısa sürede"],
+  "оплата наличными при получении": ["pays in cash on receipt", "teslimde nakit ödeme"], "оплата картой при получении": ["pays by card on receipt", "teslimde kartla ödeme"], "при получении": ["on receipt", "teslimde"],
+  "Принять": ["Accept", "Kabul et"], "включил(а)": ["turned on by", "açan:"], "выключил(а)": ["turned off by", "kapatan:"],
+  "Заказы с сайта: принимаются": ["Website orders: accepted", "Web sitesi siparişleri: alınıyor"], "Заказы с сайта: не принимаются": ["Website orders: not accepted", "Web sitesi siparişleri: alınmıyor"],
+  "Заказы с сайта — позвоните клиенту и примите": ["Website orders — call the customer and accept", "Web sitesi siparişleri — müşteriyi arayıp kabul edin"],
+  "Нет интернета. Заказ с сайта можно принять только онлайн.": ["No internet. A website order can be accepted only online.", "İnternet yok. Web sitesi siparişi yalnızca çevrimiçi kabul edilebilir."],
+  "В заказе нет блюд из меню. Позвоните клиенту или отклоните заказ.": ["The order has no dishes from the menu. Call the customer or reject the order.", "Siparişte menüden yemek yok. Müşteriyi arayın veya siparişi reddedin."],
+  "Этот заказ уже принят или отклонён на другом устройстве": ["This order was already accepted or rejected on another device", "Bu sipariş başka bir cihazda zaten kabul edildi veya reddedildi"],
+  "Не удалось принять заказ": ["Could not accept the order", "Sipariş kabul edilemedi"],
+  "Не удалось сохранить заказ. Он остался в «Заказах с сайта».": ["Could not save the order. It is still in «Website orders».", "Sipariş kaydedilemedi. «Web sitesi siparişleri» içinde duruyor."],
+  "Заказ с сайта принят": ["Website order accepted", "Web sitesi siparişi kabul edildi"], "Проверьте, укажите курьера и сохраните.": ["Check it, enter the courier and save.", "Kontrol edin, kuryeyi girin ve kaydedin."],
+  "Нет интернета. Отклонить заказ с сайта можно только онлайн.": ["No internet. A website order can be rejected only online.", "İnternet yok. Web sitesi siparişi yalnızca çevrimiçi reddedilebilir."],
+  "Отклонить заказ с сайта. Причину увидит клиент (например: не доставляем в этот район; кухня уже закрыта):": ["Reject the website order. The customer will see the reason (for example: we do not deliver to this area; the kitchen is already closed):", "Web sitesi siparişini reddet. Nedeni müşteri görecek (örneğin: bu bölgeye teslimat yapmıyoruz; mutfak kapandı):"],
+  "Заказ с сайта отклонён. Клиент увидит причину.": ["Website order rejected. The customer will see the reason.", "Web sitesi siparişi reddedildi. Müşteri nedeni görecek."],
+  "Не удалось отклонить": ["Could not reject", "Reddedilemedi"],
+  "Нет интернета. Переключить приём заказов с сайта можно только онлайн.": ["No internet. Website orders can be switched on or off only online.", "İnternet yok. Web sitesi siparişleri yalnızca çevrimiçi açılıp kapatılabilir."],
+  "Включить приём заказов с сайта? Клиенты смогут отправлять заказы, они появятся здесь, в «Продажи → Открытые».": ["Start taking orders from the website? Customers will be able to send orders; they will appear here, in «Sales → Open».", "Web sitesinden sipariş alınsın mı? Müşteriler sipariş gönderebilecek, siparişler burada, «Satışlar → Açık» bölümünde görünecek."],
+  "Выключить приём заказов с сайта? Сайт попросит клиентов звонить по телефону.": ["Stop taking orders from the website? The website will ask customers to phone.", "Web sitesinden sipariş alma kapatılsın mı? Site müşterilerden telefonla aramalarını isteyecek."],
+  "Заказы с сайта принимаются": ["Website orders are being accepted", "Web sitesi siparişleri alınıyor"], "Заказы с сайта выключены": ["Website orders are switched off", "Web sitesi siparişleri kapalı"],
+  "Не удалось переключить": ["Could not switch", "Değiştirilemedi"], "Заказ с сайта": ["Website order", "Web sitesi siparişi"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
@@ -5260,6 +5285,140 @@ function makeDb(fs){
       delete: () => { r.delete().catch(writeErr); syncTomb(col, id); return Promise.resolve(); } }; }
   };
 }
+/* ---------- orders from the site (клиентское приложение) ---------- */
+// The site creates weborders/<key> (customers may only create; the Firestore rules check the fields):
+//   {v:1, st:"new", at:<server time>, type:"delivery"|"pickup", name, phone:"+90…", address, note, when:"asap"|"ЧЧ:ММ", pay:"cash"|"card",
+//    comment, lang, lines:"<JSON [{kind, id, name, price, qty}]>" (price = the price on the site), total, kvkk:{v, at, lang}}
+// The restaurant accepts it (a usual order, source «Собственный: сайт») or rejects it with a reason the customer sees.
+// The customer sees the progress in webstatus/<key> = {s: order status or "rejected", num, type, reason, ts}; the device that changed the order writes it.
+// pubmenu/orders = {on, ts, by}: the site takes orders only while on===true.
+const WEB = {list:[], seen:new Set(), shop:null, edits:null, editsAt:0, unsub:null};
+const WEB_PAY = {cash:"наличными", card:"картой"};
+function webStart(){
+  if (!FS || WEB.unsub) return;
+  WEB.unsub = FS.collection("weborders").where("st", "==", "new").onSnapshot(s => {
+    const list = s.docs.map(d => Object.assign({}, d.data(), {id:d.id, atMs: updMs(d.get("at", {serverTimestamps:"estimate"})) || Date.now()})).sort((a,b)=>a.atMs-b.atMs);
+    const fresh = list.filter(w => !WEB.seen.has(w.id) && Date.now() - w.atMs < 30*60000);
+    list.forEach(w => WEB.seen.add(w.id));
+    WEB.list = list;
+    if (list.length) webEdits();
+    if (fresh.length && can("orderEdit")){ if (bellOn()) bellPlay(); toast(fresh.length > 1 ? `Новые заказы с сайта: ${fresh.length}` : `Новый заказ с сайта: ${fresh[0].name || ""}`); }
+    if (S.view==="orders") render();
+  }, e => console.warn("weborders", e));
+  FS.doc("pubmenu/orders").onSnapshot(d => { WEB.shop = d.exists ? d.data() : {on:false}; if (S.view==="orders") render(); }, e => console.warn("pubmenu/orders", e));
+}
+// a site order nobody has taken yet: the bell rings again every minute
+setInterval(()=>{ if (WEB.list.length && can("orderEdit") && bellOn()) bellPlay(); }, 60000);
+// prices the admin set only for the site (клиентское приложение, pubphoto/index → edits); one read, kept 5 minutes
+async function webEdits(){
+  if (WEB.edits && Date.now() - WEB.editsAt < 5*60000) return WEB.edits;
+  try { const d = await FS.doc("pubphoto/index").get(); WEB.edits = d.exists ? JSON.parse(d.get("edits") || "{}") || {} : {}; WEB.editsAt = Date.now(); if (S.view==="orders") render(); }
+  catch(e){ console.warn("site prices", e); }
+  return WEB.edits || {};
+}
+const sitePrice = l => { const e = WEB.edits && WEB.edits[l.id]; return e && e.price!=null && e.price!=="" ? Number(e.price)||0 : itemPrice(l); };
+// lines of a site order, checked against the menu: src = the dish or set (null = not in the menu), saw = the price the customer saw
+function webLines(w){
+  let raw = []; try { raw = JSON.parse(w.lines || "[]"); } catch(e){}
+  return (Array.isArray(raw) ? raw : []).slice(0, 60).map(l => {
+    const kind = l && l.kind==="set" ? "set" : "dish", id = String((l && l.id) || ""), src = srcOf({kind, id});
+    const qty = Math.min(99, Math.max(1, Math.round(Number(l && l.qty) || 1)));
+    return {kind, id, src, qty, name: src ? src.name : String((l && l.name) || "?").slice(0, 80), saw: Number(l && l.price) || 0, price: src ? sitePrice({kind, id}) : 0};
+  });
+}
+function webCard(w){
+  const ls = webLines(w), pick = w.type==="pickup", warn = [];
+  for (const l of ls){
+    if (!l.src){ warn.push(`«${N(l.name)}» нет в меню — уточните у клиента`); continue; }
+    const st = stopOf(l.kind, l.id); if (st) warn.push(`«${N(dn(l.src))}» в стоп-листе`);
+    if (WEB.edits && l.saw!==l.price && showMoney()) warn.push(`«${N(dn(l.src))}»: клиент видел ${money(l.saw)}, сейчас на сайте ${money(l.price)} — в заказ пойдёт ${money(l.price)}`);
+  }
+  const sum = ls.reduce((a,l)=>a + (l.src ? l.price*l.qty : 0), 0);
+  const lines = ls.map(l=>`<div><span>${fmt(l.qty)} × ${l.src ? N(dn(l.src)) : N(l.name)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}</span><span>${showMoney() && l.src ? money(l.price*l.qty) : ""}</span></div>`).join("");
+  const meta = [`<a href="tel:${esc(w.phone||"")}">${esc(w.phone||"")}</a>`];
+  if (!pick && (w.address || w.note)) meta.push(N([w.address, w.note].filter(Boolean).join(", ")));
+  meta.push(w.when && w.when!=="asap" ? (pick ? "заберут к " : "к ") + esc(w.when) : "как можно скорее");
+  if (w.pay) meta.push("оплата " + (WEB_PAY[w.pay] || esc(w.pay)) + " при получении");
+  return `<div class="ocard s-new late">
+    <div class="ohead"><b>С сайта</b><span class="tag t-${pick ? "takeaway" : "delivery"}">${pick ? OTYPES.takeaway : OTYPES.delivery}</span><span class="owhere">${N(w.name||"")}</span><span class="otime">${minsSince(w.atMs)} мин</span></div>
+    <div class="ometa">${meta.join(" · ")}</div>
+    <div class="olines">${lines || '<span class="hint">Пустой заказ</span>'}</div>
+    ${w.comment ? `<div class="ocomment" translate="no">${esc(w.comment)}</div>` : ""}
+    ${warn.length ? `<div class="oreq">${warn.join("<br>")}</div>` : ""}
+    <div class="ofoot"><b>${showMoney() ? money(sum) : ""}</b><span class="obtns"><button class="btn small" data-webno="${esc(w.id)}">Отклонить</button><button class="btn small primary" data-webtake="${esc(w.id)}">Принять</button></span></div></div>`;
+}
+// top of «Продажи → Открытые»: the switch and the site orders waiting to be taken
+function webBlock(){
+  if (!can("orderEdit")) return "";
+  const sw = WEB.shop, on = !!(sw && sw.on===true);
+  const when = sw && sw.ts ? ` <small class="hint">${on ? "включил(а)" : "выключил(а)"} ${N(sw.by || "")}, ${esc(new Date(sw.ts).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}))}</small>` : "";
+  let html = `<div class="controls"><button class="btn small ${on ? "primary" : ""}" data-webshop aria-pressed="${on}">${on ? "🛒 Заказы с сайта: принимаются" : "🛒 Заказы с сайта: не принимаются"}</button>${when}</div>`;
+  if (WEB.list.length) html += `<h2 class="cat"><span>Заказы с сайта — позвоните клиенту и примите</span><span>${WEB.list.length}</span></h2><div class="ogrid">${WEB.list.map(webCard).join("")}</div>`;
+  return html;
+}
+async function webTake(id){
+  const w = WEB.list.find(x=>x.id===id); if (!w || !FS || !can("orderEdit")) return;
+  if (!navigator.onLine){ toast("Нет интернета. Заказ с сайта можно принять только онлайн."); return; }
+  await webEdits();
+  const ls = webLines(w).filter(l=>l.src);
+  if (!ls.length){ toast("В заказе нет блюд из меню. Позвоните клиенту или отклоните заказ."); return; }
+  const ref = FS.collection("weborders").doc(id), oid = "ow" + id, me = whoNow();
+  try { await FS.runTransaction(async t => {
+      const d = await t.get(ref);
+      if (!d.exists || d.get("st")!=="new"){ const e = new Error("taken"); e.code = "taken"; throw e; }
+      t.update(ref, {st:"taken", takenBy:me, takenAt:Date.now(), orderId:oid});
+    }); }
+  catch(e){ if (e && e.code==="taken") toast("Этот заказ уже принят или отклонён на другом устройстве"); else { console.error(e); toast("Не удалось принять заказ: " + ((e && e.code) || "ошибка")); } return; }
+  const pick = w.type==="pickup", nn = await nextOrderNum(), timed = w.when && w.when!=="asap";
+  const o = {id:oid, type: pick ? "takeaway" : "delivery", table:"", name:String(w.name||"").slice(0, 60), phone:String(w.phone||""),
+    address: pick ? "" : [w.address, w.note].filter(Boolean).join(", "), courier:"", due: !pick && timed ? w.when : "",
+    source:"Собственный: сайт",
+    comment:[`С сайта, оплата ${WEB_PAY[w.pay] || ""} при получении`, pick && timed ? `заберут к ${w.when}` : "", w.comment || ""].filter(Boolean).join(". "),
+    lines: ls.map(l=>({kind:l.kind, id:l.id, name:l.src.name, qty:l.qty, price:l.price, comment:""})),
+    status:"new", createdAt:Date.now(), who:me, num:nn.num, nday:nn.day,
+    web:{id, pay:w.pay || "", lang:w.lang || "", at:w.atMs, kvkk:w.kvkk || null}};
+  if (nn.tmp) o.numTmp = true;
+  o.total = orderTotal(o);
+  try { await commit(`Заказ с сайта №${o.num}`, [{col:"orders", id:o.id, after:o}]); }
+  catch(e){ console.error(e); ref.update({st:"new"}).catch(()=>{}); toast("Не удалось сохранить заказ. Он остался в «Заказах с сайта»."); return; }
+  toast(`Заказ с сайта принят: №${o.num}. Проверьте, укажите курьера и сохраните.`);
+  render(true); openOrder(o.id);
+}
+async function webReject(id){
+  const w = WEB.list.find(x=>x.id===id); if (!w || !FS || !can("orderEdit")) return;
+  if (!navigator.onLine){ toast("Нет интернета. Отклонить заказ с сайта можно только онлайн."); return; }
+  const reason = (tPrompt("Отклонить заказ с сайта. Причину увидит клиент (например: не доставляем в этот район; кухня уже закрыта):", "") || "").trim().slice(0, 200);
+  if (!reason) return;
+  const ref = FS.collection("weborders").doc(id), me = whoNow();
+  try { await FS.runTransaction(async t => {
+      const d = await t.get(ref);
+      if (!d.exists || d.get("st")!=="new"){ const e = new Error("taken"); e.code = "taken"; throw e; }
+      t.update(ref, {st:"rejected", reason, takenBy:me, takenAt:Date.now()});
+    });
+    await FS.doc("webstatus/" + id).set({s:"rejected", reason, type:w.type==="pickup" ? "pickup" : "delivery", ts:Date.now()});
+    toast("Заказ с сайта отклонён. Клиент увидит причину."); }
+  catch(e){ if (e && e.code==="taken") toast("Этот заказ уже принят или отклонён на другом устройстве"); else { console.error(e); toast("Не удалось отклонить: " + ((e && e.code) || "ошибка")); } }
+}
+async function webShopToggle(){
+  if (!FS || !can("orderEdit")) return;
+  const on = !(WEB.shop && WEB.shop.on===true);
+  if (!navigator.onLine){ toast("Нет интернета. Переключить приём заказов с сайта можно только онлайн."); return; }
+  if (!tConfirm(on ? "Включить приём заказов с сайта? Клиенты смогут отправлять заказы, они появятся здесь, в «Продажи → Открытые»." : "Выключить приём заказов с сайта? Сайт попросит клиентов звонить по телефону.")) return;
+  try { await FS.doc("pubmenu/orders").set({on, ts:Date.now(), by:whoNow()}); toast(on ? "Заказы с сайта принимаются" : "Заказы с сайта выключены"); }
+  catch(e){ console.error(e); toast("Не удалось переключить: " + ((e && e.code) || "ошибка")); }
+}
+// the customer's order page: the device that changed a site order tells the site its status and number (one write, only when they change)
+function webStatus(o, was){
+  if (!FS || !o || !o.web || !o.web.id) return;
+  if (was && was.status===o.status && Number(was.num)===Number(o.num)) return;
+  FS.doc("webstatus/" + o.web.id).set({s:o.status, num:Number(o.num)||0, type:o.type==="takeaway" ? "pickup" : "delivery", ts:Date.now()}).catch(writeErr);
+}
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-webtake]"); if (a){ guarded(()=>webTake(a.dataset.webtake)); return; }
+  const r = e.target.closest("[data-webno]"); if (r){ guarded(()=>webReject(r.dataset.webno)); return; }
+  if (e.target.closest("[data-webshop]")) guarded(webShopToggle);
+});
+
 /* ---------- reading: only what changed (В1) ---------- */
 // Firestore bills a listened collection in full again after every break in the connection longer than 30 minutes,
 // so listening to whole collections made every device re-read the whole history many times a day.
@@ -5478,7 +5637,7 @@ function devStart(){
   lsSet("sushi.devoff", "");
   if (DEV.started){ applyRole(); if (S.view==="staff") render(true); return; }
   DEV.started = true;
-  S.db = makeDb(FS); startSubs();
+  S.db = makeDb(FS); startSubs(); webStart();
   subscribe("devices", list => { S.devices = list; devPendingToast(); if (S.view==="staff") render(true); });
   devTouch();
 }
