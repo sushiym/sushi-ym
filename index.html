@@ -866,6 +866,7 @@ details.fold[open]>summary{margin-bottom:8px}
   <label class="f">Ставка, ₺ в час (необязательно)<input id="sfRate" inputmode="decimal" autocomplete="off" placeholder="для расчёта зарплаты"></label>
   <div id="sfRateNew" hidden><label class="f">Новая ставка действует с<input id="sfRateFrom" type="date"></label><p class="hint" id="sfRateHint" style="margin-top:0"></p></div>
   <label class="toggle"><input type="checkbox" id="sfActive" checked> Может входить в программу</label>
+  <label class="toggle" id="sfSiteWrap"><input type="checkbox" id="sfSite"> Админка сайта: может менять фото, названия и цены на сайте</label>
   <p class="hint">Админ видит и меняет всё. Работник ресторана: склад (приход с количеством и ценой, расход, списание, приготовление, просмотр карточек продуктов), заказы и продажи, техкарты без себестоимости, пересчёт на утверждение. Добавление, изменение и скрытие продуктов, история, финансы и сотрудники — только у админа. Цены закупки и себестоимость видит только админ: работник вводит цену только при приходе.</p>
   <div class="dlg-actions">
     <button type="button" class="btn danger" id="sfDel">Удалить</button><span class="spacer"></span>
@@ -1017,6 +1018,7 @@ async function applyOp(col, id, val){
   if (key==="moves") S.moves = unfoldMoves(S.mdocs);
   syncCount(key);
   if (key==="orders" && val) webStatus(val, was);
+  if (col==="settings" && String(id).startsWith("stop~")){ const [, k, ...r] = String(id).split("~"); pubStop(k, r.join("~")); }
 }
 // ops: [{col, id, after}]; after = null deletes. On error err.done lists the ops already written.
 // (Кнопок «Отменить / Вернуть» больше нет: они возвращали запись целиком и стирали правки с других устройств.)
@@ -1124,7 +1126,7 @@ function renderControls(){
       <p class="hint" style="margin:0 0 10px">Для блюд, которые не продали: еда персонала, брак, дегустация. Нажимайте на блюда и сеты, потом «Списать…» — продукты спишутся по техкартам, в выручку ничего не попадёт.</p>`;
   } else if (S.view==="menu"){
     const nn = S.menu.filter(d=>d.needsWork).length + S.sets.filter(x=>x.needsWork).length;
-    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button><button class="btn" id="pubMenu">Обновить меню на сайте</button></div><div id="pubNote">${pubNote()}</div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>`) + `
+    c.innerHTML = (isAdmin() ? `<div class="controls"><button class="btn primary" id="addDish">Новое блюдо</button><button class="btn" id="addSet">Новый сет</button><button class="btn" id="openPack">Упаковка навынос</button><button class="btn" id="openMethods">Способы приготовления</button><button class="btn" id="pubMenu">Обновить меню на сайте</button><button class="btn" id="siteAdmBtn">Админка сайта</button><button type="button" class="btn small" id="siteUrlEdit">изменить адрес сайта</button></div><div id="pubNote">${pubNote()}</div>` : `<p class="hint" style="margin:0 0 10px">Техкарты только для просмотра. Изменения вносит админ.</p>${canSite() ? `<div class="controls"><button class="btn" id="siteAdmBtn">Админка сайта</button></div>` : ""}`) + `
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
@@ -1273,6 +1275,7 @@ function renderSavebar(){
     <span><button class="btn small" id="invReset">Сбросить</button> <button class="btn primary small" id="invSave">${isAdmin()?"Сохранить инвентаризацию":"Отправить на утверждение"}</button></span></div></div>`;
 }
 function render(full){
+  if (siteAdmCheck() && S.view==="menu") full = true;
   if (S.me && !canView(S.view)){ S.view = ALL_VIEWS.find(canView) || "stock"; full = true; }
   renderChips(); renderNotice();
   { const sb = document.querySelector('[data-stockview="inv"]'); if (sb && sb.textContent!==invSegTxt()) sb.textContent = invSegTxt(); }
@@ -2154,13 +2157,75 @@ async function pubMenu(){
     const list = pubList(), ts = Date.now(), hash = pubHash(list);
     // a bad connection must not hold the button (and every other guarded action) forever
     let tm; const late = new Promise((_, no) => { tm = setTimeout(() => no(Object.assign(new Error("timeout"), {code:"timeout"})), 20000); });
-    try { await Promise.race([FS.doc("pubmenu/current").set({v:1, ts, count:list.length, json:JSON.stringify(list)}), late]); } finally { clearTimeout(tm); }
+    try { await Promise.race([FS.doc("pubmenu/current").set({v:1, ts, count:list.length, json:JSON.stringify(list)}), late]); await Promise.race([pubStopAll(), late]); } finally { clearTimeout(tm); }
     await commit("Меню на сайте обновлено", [{col:"settings", id:"pubmenu", after:{id:"pubmenu", ts, by:S.me ? S.me.name : "", hash, count:list.length}}]);
     toast("Меню на сайте обновлено");
   } catch(e){ console.error(e); toast("Не удалось скопировать меню на сайт: " + ((e && e.code) || "ошибка")); }
   render(true);
 }
 document.addEventListener("click", e=>{ if (e.target.closest("#pubMenu")) guarded(pubMenu); });
+/* ---------- «Админка сайта»: the site's admin mode in a window, the key comes from this device ---------- */
+// The site at <url>#takip turns its admin mode on only inside this window. It asks {ym:"need-key"}, we answer
+// {ym:"key", token, name} to the site's origin only; {ym:"close"} closes the window. The key is never stored.
+const SITEADM = {box:null, frame:null, origin:""};
+// right to open the site's admin: the admin always; a worker only while the admin keeps «Админка сайта» on in the staff card.
+// Read from the live S.staff (not from S.me), so taking the right away works at once, also on a device where the worker is signed in.
+function canSite(){
+  if (!S.me) return false; if (isAdmin()) return true;
+  const st = S.staff.find(x => x.id === S.me.id);
+  return !!(st && st.active !== false && st.siteAdmin === true);
+}
+// called from render(): closes the window after PIN logout or when the right was taken away;
+// returns true when the right changed, so «Меню» redraws its buttons at once (the button appears or goes away)
+function siteAdmCheck(){ const c = canSite(), ch = SITEADM.can !== undefined && SITEADM.can !== c; SITEADM.can = c;
+  if (SITEADM.box && !c){ siteAdmClose(); toast("Доступ к админке сайта закрыт"); } return ch; }
+const siteUrl = () => ((S.settings.find(x=>x.id==="site") || {}).url || "").trim();
+const siteUrlOk = u => /^https:\/\/[^\s/]+/i.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(u);
+async function siteUrlAsk(){
+  if (!isAdmin()) return null;
+  const u = (prompt(trS("Адрес сайта (https://…)"), siteUrl()) || "").trim(); if (!u) return null;
+  if (!siteUrlOk(u)){ toast("Адрес должен начинаться с https://"); return null; }
+  await commit("Адрес сайта", [{col:"settings", id:"site", after:{id:"site", url:u, ts:Date.now(), by:S.me ? S.me.name : ""}}]);
+  toast("Адрес сайта сохранён");
+  return u;
+}
+async function siteAdmOpen(){
+  if (!canSite()){ toast("Нет права «Админка сайта». Его даёт админ в разделе «Сотрудники»."); return; }
+  if (!navigator.onLine){ toast("Нужен интернет"); return; }
+  let u = siteUrl();
+  if (!u){ if (!isAdmin()){ toast("Админ ещё не указал адрес сайта"); return; } u = await siteUrlAsk(); if (!u) return; }
+  const url = new URL(u); url.hash = "takip";
+  siteAdmClose();
+  SITEADM.origin = url.origin;
+  const box = document.createElement("div");
+  box.id = "siteAdm";
+  box.style.cssText = "position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;background:var(--bg,#fff)";
+  box.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px;border-bottom:1px solid var(--line,#ddd)">
+      <b>Админка сайта</b><button type="button" class="btn small" id="siteAdmX">✕ Закрыть</button></div>
+    <iframe title="Админка сайта" referrerpolicy="no-referrer" style="flex:1;width:100%;border:0"></iframe>`;
+  document.body.appendChild(box);
+  SITEADM.box = box; SITEADM.frame = box.querySelector("iframe");
+  SITEADM.frame.src = url.href;
+}
+function siteAdmClose(){ if (SITEADM.box) SITEADM.box.remove(); SITEADM.box = SITEADM.frame = null; }
+addEventListener("message", async ev => {
+  const f = SITEADM.frame;
+  if (!f || ev.source !== f.contentWindow || ev.origin !== SITEADM.origin) return;
+  const d = ev.data || {};
+  if (d.ym === "close") return siteAdmClose();
+  if (d.ym !== "need-key") return;
+  const user = firebase.auth().currentUser;
+  if (!canSite() || !user){ siteAdmClose(); return; }
+  try {
+    const token = await user.getIdToken(true);
+    if (SITEADM.frame === f) f.contentWindow.postMessage({ym:"key", token, name:S.me.name}, SITEADM.origin);
+  } catch(e){ console.warn("site key", e); toast("Не получилось открыть админку сайта: нет связи"); }
+});
+document.addEventListener("click", e => {
+  if (e.target.closest("#siteAdmBtn")) siteAdmOpen();
+  else if (e.target.closest("#siteAdmX")) siteAdmClose();
+  else if (e.target.closest("#siteUrlEdit")) guarded(siteUrlAsk);
+});
 
 /* ---------- salmon cutting ---------- */
 const SALMON_ID = "p01", FISHSET_ID = "p02", FILLET_ID = "p_salmon_fillet";
@@ -2327,36 +2392,50 @@ function shortOf(kind, id, ctx){
 }
 /* ----- stop-list (Д5) ----- */
 // a dish or a set that ran out: its own document settings/stop~<kind>~<id> (so two devices marking different dishes never overwrite each other);
-// in «Новый заказ» it is grey and is not added until the mark is taken off. A set is out too when one of its dishes is.
+// in «Новый заказ» it is grey and is not added until the mark is taken off.
+// Only a mark put by hand counts (owner's rule: nothing goes into the stop-list by itself). A set whose dish is out stays on sale:
+// staff call the customer and offer a swap; next to such a set there is only a hint «в сете закончилось: …».
 const stopId = (kind, id) => "stop~" + kind + "~" + id;
 const stopMark = (kind, id) => S.settings.find(x=>x.id===stopId(kind, id));
-function stopOf(kind, id){
-  const m = stopMark(kind, id); if (m) return m;
-  if (kind!=="set") return null;
-  const st = setById(id);
-  for (const i of (st && st.items) || []){ const d = stopMark("dish", i.dishId); if (d) return Object.assign({}, d, {via: i.dishId}); }
-  return null;
-}
+function stopOf(kind, id){ return stopMark(kind, id) || null; }
+// dishes of a set that are in the stop-list: only a hint next to the set, the set itself can still be sold
+function setOutDishes(id){ const st = setById(id); return ((st && st.items) || []).filter(i=>stopMark("dish", i.dishId)).map(i=>dishById(i.dishId)).filter(Boolean); }
+const setOutHtml = id => { const out = setOutDishes(id); return out.length ? `в сете закончилось: ${out.map(d=>N(dn(d))).join(", ")} — предложите замену` : ""; };
 const stopList = () => S.settings.filter(x=>x.id.startsWith("stop~")).map(x=>({m:x, src: x.kind==="set" ? setById(x.ref) : dishById(x.ref)})).filter(x=>x.src);
 // since when: the time today, the date when it was marked on an earlier day
 const stopWhen = m => !m.ts ? "" : dayKey(m.ts)===todayKey() ? hhmm(m.ts) : new Date(m.ts).toLocaleDateString(LOC(),{day:"numeric",month:"short"});
-const stopTxt = m => m.via ? `нет блюда: ${dn(dishById(m.via)||{name:"?"})}` : `закончилось${m.by ? " · " + m.by : ""}${m.ts ? ", " + stopWhen(m) : ""}`;
-const stopHtml = m => m.via ? `нет блюда: ${N(dn(dishById(m.via)||{name:"?"}))}` : `закончилось${m.by ? " · " + N(m.by) : ""}${m.ts ? ", " + stopWhen(m) : ""}`;
+const stopTxt = m => `закончилось${m.by ? " · " + m.by : ""}${m.ts ? ", " + stopWhen(m) : ""}`;
+const stopHtml = m => `закончилось${m.by ? " · " + N(m.by) : ""}${m.ts ? ", " + stopWhen(m) : ""}`;
 async function toggleStop(kind, id){
   if (!can("stopList")) return;
   const src = kind==="set" ? setById(id) : dishById(id); if (!src) return;
   const m = stopOf(kind, id);
-  if (m && m.via){ toast(`В сете есть блюдо «${dn(dishById(m.via)||{name:"?"})}», оно закончилось. Снимите метку с этого блюда.`); return; }
   const on = !m, sid = stopId(kind, id);
   try {
     await commit((on ? "Стоп-лист: " : "Снова есть: ") + src.name, [{col:"settings", id:sid, after: on ? {id:sid, kind, ref:id, by:whoNow(), ts:Date.now()} : null}]);
     render(); toast(on ? `«${dn(src)}» в стоп-листе: в «Новом заказе» оно серое` : `«${dn(src)}» снова есть`);
   } catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте интернет."); }
 }
+// the online-order site hides what is in the stop-list: public document pubmenu/stop = {v, ts, "dish~<id>": ts, "set~<id>": ts, …}
+// Only marks put by hand: a set is listed only when the set itself is marked. One field per item, so two devices never overwrite each other.
+// Written by the device that put or took off the mark (from applyOp, so also «Снять стоп-лист на завтра» at day closing);
+// works offline too (Firestore sends it when the internet is back); «Обновить меню на сайте» writes it again whole.
+const pubStopKey = (kind, id) => kind + "~" + id;
+function pubStop(kind, id){
+  if (!FS || (kind!=="dish" && kind!=="set")) return;
+  const m = stopMark(kind, id);
+  FS.doc("pubmenu/stop").set({v:1, ts:Date.now(), [pubStopKey(kind, id)]: m ? (m.ts || Date.now()) : firebase.firestore.FieldValue.delete()}, {merge:true})
+    .catch(e => console.warn("pubmenu/stop", e));
+}
+function pubStopAll(){
+  const d = {v:1, ts:Date.now()};
+  for (const x of S.settings) if (x.id.startsWith("stop~") && (x.kind==="set" ? setById(x.ref) : x.kind==="dish" ? dishById(x.ref) : null)) d[pubStopKey(x.kind, x.ref)] = x.ts || Date.now();
+  return FS.doc("pubmenu/stop").set(d);
+}
 function renderStop(L){
   const q = S.saleQ.trim().toLowerCase();
   const tile = (kind, x) => { const m = stopOf(kind, x.id);
-    return `<button class="tile ${kind==="set"?"set":""} ${m?"stopped":""}" data-stop="${kind}:${esc(x.id)}" aria-pressed="${m?"true":"false"}"><span>${N(dn(x))}</span><small class="${m?"stoptxt":""}">${m ? stopHtml(m) : "в продаже"}</small></button>`; };
+    return `<button class="tile ${kind==="set"?"set":""} ${m?"stopped":""}" data-stop="${kind}:${esc(x.id)}" aria-pressed="${m?"true":"false"}"><span>${N(dn(x))}</span><small class="${m?"stoptxt":""}">${m ? stopHtml(m) : kind==="set" && setOutDishes(x.id).length ? `в продаже · <span class="neg">${setOutHtml(x.id)}</span>` : "в продаже"}</small></button>`; };
   const ok = x => x.active!==false && (!q || allNames(x).some(n=>n.toLowerCase().includes(q)));
   let html = "";
   const now = stopList().filter(x=>ok(x.src));
@@ -2402,7 +2481,7 @@ function renderOrdersControls(c){
   if (S.ordView==="open") c.innerHTML += webBlock();
   if (S.ordView==="open" && nStop) c.innerHTML += `<div class="ostop"><b>Стоп-лист:</b> ${stops.map(x=>N(dn(x.src)) + (x.m.ts && dayKey(x.m.ts)!==todayKey() ? ` <small class="hint">(отмечено ${stopWhen(x.m)})</small>` : "")).join(", ")}</div>`;
   if (S.ordView==="stop") c.innerHTML += `<div class="controls"><input class="search" id="sq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.saleQ)}" aria-label="Поиск блюда"></div>
-      <p class="hint" style="margin:0 0 10px">Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.</p>`;
+      <p class="hint" style="margin:0 0 10px">Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.</p><p class="hint" style="margin:0 0 10px">На сайте заказов то, что в стоп-листе, не показывается. Сет с закончившимся блюдом остаётся в продаже: позвоните клиенту и предложите замену.</p>`;
   const dup = isAdmin() ? dupSales() : [];
   const dn2 = isAdmin() ? dupNums() : [];
   if (dn2.length) c.innerHTML += `<div class="oreq" style="margin-top:8px"><b>Одинаковые номера заказов в один день:</b> ${dn2.map(d=>`№${esc(d.num)} (${dmy(d.day)}), заказов: ${d.n}`).join("; ")}</div>`;
@@ -3334,7 +3413,7 @@ function renderODPick(){
   const q = OD.q.trim().toLowerCase(), ctx = stopCtx();
   const tile = (kind, x) => { const sh = shortOf(kind, x.id, ctx); const price = Number(x.price)||0, stp = stopOf(kind, x.id);
     if (stp) return `<button type="button" class="tile ${kind==="set"?"set":""} stopped" data-oadd="${kind}:${esc(x.id)}" aria-disabled="true"><span>${N(dn(x))}</span><small class="stoptxt">${stopHtml(stp)}</small></button>`;
-    return `<button type="button" class="tile ${kind==="set"?"set":""} ${x.needsWork?"needs":""}" data-oadd="${kind}:${esc(x.id)}"><span>${N(dn(x))}</span><small>${price?money(price):"без цены"}${sh.length?` · <span class="neg">нет: ${esc(sh.slice(0,2).join(", "))}${sh.length>2?"…":""}</span>`:""}</small></button>`; };
+    return `<button type="button" class="tile ${kind==="set"?"set":""} ${x.needsWork?"needs":""}" data-oadd="${kind}:${esc(x.id)}"><span>${N(dn(x))}</span><small>${price?money(price):"без цены"}${sh.length?` · <span class="neg">нет: ${esc(sh.slice(0,2).join(", "))}${sh.length>2?"…":""}</span>`:""}${kind==="set" && setOutDishes(x.id).length ? ` · <span class="neg">${setOutHtml(x.id)}</span>` : ""}</small></button>`; };
   const sets = sortedSets().filter(x=>x.active!==false && (!q || allNames(x).some(n=>n.toLowerCase().includes(q))));
   const dishes = sortedDishes().filter(d=>d.active!==false && (!q || allNames(d).some(n=>n.toLowerCase().includes(q))));
   let html = sets.length ? `<h2 class="cat"><span>Сеты</span></h2><div class="tiles">${sets.map(x=>tile("set",x)).join("")}</div>` : "";
@@ -4193,6 +4272,7 @@ function openStaff(id){
   $("#sfRole").innerHTML = Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${(st?roleOf(st):"worker")===k?"selected":""}>${v}</option>`).join("");
   $("#sfPin").value = ""; $("#sfPin").placeholder = st ? "оставьте пустым, чтобы не менять" : "4–6 цифр";
   $("#sfActive").checked = st ? st.active!==false : true;
+  $("#sfSite").checked = !!(st && st.siteAdmin===true);
   const r0 = st ? rateAt(st, Date.now()) : 0;
   $("#sfRate").value = r0 ? String(r0).replace(".",",") : "";
   sfRateUi();
@@ -4220,7 +4300,8 @@ function sfRateShow(){
 $("#sfRate").addEventListener("input", sfRateShow);
 // no rate for the admin and for the admin's shadow (YM)
 function sfRateUi(){ const old = editingStaff ? S.staff.find(x=>x.id===editingStaff) : null;
-  $("#sfRate").closest("label").hidden = $("#sfRole").value==="admin" || (!!old && isDemoStaff(old)); sfRateShow(); }
+  $("#sfRate").closest("label").hidden = $("#sfRole").value==="admin" || (!!old && isDemoStaff(old)); sfRateShow();
+  $("#sfSiteWrap").hidden = $("#sfRole").value==="admin"; }   // the admin always has «Админка сайта»
 $("#sfRole").addEventListener("change", sfRateUi);
 $("#staffForm").addEventListener("submit", async e=>{
   e.preventDefault();
@@ -4231,6 +4312,9 @@ $("#staffForm").addEventListener("submit", async e=>{
   if (old && roleOf(old)==="admin" && (role!=="admin" || !active) && !otherAdmins(old.id)){ toast("Должен остаться хотя бы один активный админ"); return; }
   const rate0 = numMoney($("#sfRate").value), rate = isNaN(rate0)||rate0<0 ? 0 : rate0;
   const st = Object.assign({}, old || {id:uid("u"), createdAt:Date.now()}, {name, role, active, rate});
+  const site = role!=="admin" && $("#sfSite").checked;
+  if (site !== (old ? old.siteAdmin===true : false)) Object.assign(st, {siteAdminTs:Date.now(), siteAdminBy:S.me ? S.me.name : ""});
+  st.siteAdmin = site;
   delete st.shadow;   // a mark of a version that had the «Тень админа» box: the shadow is YM by name now
   if (role!=="admin" && isDemoStaff(st)){ st.rate = 0; delete st.rates; }   // the shadow has no rate
   else if (!$("#sfRateNew").hidden){
@@ -4639,7 +4723,7 @@ function renderStaff(L){
     const th = workedH(tds), last = tds.reduce((a,sh)=>(sh.end||0)>(a?.end||0)?sh:a, null);
     const st = open ? `<span class="son">На смене с ${hhmm(open.start)}</span>` : last ? `Не на смене · сегодня ${hhmm(tds[0].start)} – ${hhmm(last.end)}` : "Не на смене";
     return `<details class="box sbox ${x.active===false?"off":""}" data-k="st-${esc(x.id)}"><summary class="shead">
-        <span class="sname">${N(x.name)}${x.id===S.me?.id?" (вы)":""}<small>${st}</small></span>
+        <span class="sname">${N(x.name)}${x.id===S.me?.id?" (вы)":""}${x.siteAdmin===true ? ' <span class="tag prod">🌐 сайт</span>' : ""}<small>${st}</small></span>
         ${th ? `<span class="stot"><b>${fmtH(th)}</b><small>${rate?money(payOf(x, tds)):"сегодня"}</small></span>` : ""}</summary>
       <div class="sdet">
         <div class="shead"><button type="button" class="btn small" data-editstaff="${esc(x.id)}">Карточка сотрудника</button>
@@ -5152,6 +5236,15 @@ Object.assign(I18N, {"Себестоимость и списания счита�
 Object.assign(I18N, {"Перейти к дню": ["Go to day", "Güne git"], "Показано:": ["Shown:", "Gösterilen:"], "всего:": ["total:", "toplam:"], "Показать ещё": ["Show more", "Daha fazla göster"], "Исправить расход": ["Edit expense", "Gideri düzelt"], "Исправить или удалить": ["Edit or delete", "Düzelt veya sil"]});
 Object.assign(I18N, {"Нал + карта": ["Cash + card", "Nakit + kart"], "Наличными, ₺": ["In cash, ₺", "Nakit, ₺"], "Картой, ₺": ["By card, ₺", "Kartla, ₺"], "наличными": ["in cash", "nakit"], "картой": ["by card", "kartla"], "Клиент дал наличными, ₺": ["Customer gave in cash, ₺", "Müşterinin verdiği nakit, ₺"], "без сдачи — пусто": ["no change — leave empty", "para üstü yoksa boş"], "Не хватает": ["Short by", "Eksik"], "Сдача": ["Change", "Para üstü"], "сдача": ["change", "para üstü"], "Наличными меньше, чем «К оплате». Если всё наличными — выберите «Наличные».": ["The cash part must be less than the amount due. If it is all cash, choose «Cash».", "Nakit kısım ödenecek tutardan az olmalı. Hepsi nakitse «Nakit» seçin."], "Сколько клиент платит наличными? Остальное — картой.": ["How much does the customer pay in cash? The rest is by card.", "Müşteri ne kadar nakit ödüyor? Kalanı kartla."], "Введите сумму числом": ["Enter the amount as a number", "Tutarı sayı olarak girin"], "Клиент дал меньше, чем нужно наличными": ["The customer gave less than the cash due", "Müşterinin verdiği nakit yetersiz"], "Оплачено частями (нал + карта)": ["Paid in parts (cash + card)", "Parçalı ödeme (nakit + kart)"], "Такой заказ входит и в «Наличные», и в «Карта» — своей частью.": ["Such an order counts in both «Cash» and «Card», each with its own part.", "Böyle bir sipariş hem «Nakit» hem «Kart» satırına kendi payıyla girer."], "Закрытие дня": ["Day closing", "Gün sonu"], "Закрыть день": ["Close the day", "Günü kapat"], "Закрыть заново": ["Close again", "Yeniden kapat"], "День не закрыт: наличные и терминал не сверены.": ["The day is not closed: cash and card terminal are not checked.", "Gün kapatılmadı: nakit ve kart terminali kontrol edilmedi."], "Проверьте, всё ли закрыто": ["Check that everything is closed", "Her şeyin kapalı olduğunu kontrol edin"], "Открытые заказы": ["Open orders", "Açık siparişler"], "Открытых заказов нет": ["No open orders", "Açık sipariş yok"], "Показать открытые заказы": ["Show open orders", "Açık siparişleri göster"], "Смена не закрыта": ["Shifts not closed", "Kapatılmamış vardiya"], "Все смены закрыты": ["All shifts are closed", "Tüm vardiyalar kapalı"], "(вы)": ["(you)", "(siz)"], "смена с": ["shift since", "vardiya başlangıcı"], "Каждый закрывает свою смену на экране входа, когда уходит.": ["Everyone closes their own shift on the login screen when leaving.", "Herkes çıkarken kendi vardiyasını giriş ekranında kapatır."], "Запросы на отмену или списание заказа": ["Requests to cancel or write off an order", "Sipariş iptal veya zayi talepleri"], "Ответьте в «Продажи» → «Запросы на отмену».": ["Answer them in «Sales» → «Cancel requests».", "«Satışlar» → «İptal talepleri» bölümünde yanıtlayın."], "Ждут решения админа. Закрыть день можно.": ["Waiting for the admin's decision. You can still close the day.", "Yönetici kararını bekliyor. Günü yine de kapatabilirsiniz."], "Пересчёты ждут утверждения": ["Recounts waiting for approval", "Onay bekleyen sayımlar"], "Утвердите в разделе «Склад» → «Инвентаризация».": ["Approve them in «Stock» → «Stock count».", "«Depo» → «Sayım» bölümünde onaylayın."], "Ждут админа. Закрыть день можно.": ["Waiting for the admin. You can still close the day.", "Yöneticiyi bekliyor. Günü yine de kapatabilirsiniz."], "«Продажи» → «На проверку».": ["«Sales» → «To review».", "«Satışlar» → «Kontrol edilecek»."], "День уже закрыт": ["The day is already closed", "Gün zaten kapatıldı"], "Если закрыть ещё раз, запись заменится": ["If you close it again, the record will be replaced", "Tekrar kapatırsanız kayıt değiştirilir"], "(админ увидит обе)": ["(the admin will see both)", "(yönetici ikisini de görür)"], "Наличные в кассе": ["Cash in the till", "Kasadaki nakit"], "Пересчитайте все деньги в кассе вместе с разменом.": ["Count all the money in the till, including the float.", "Kasadaki tüm parayı bozuk para dahil sayın."], "Пересчитайте все деньги в кассе вместе с разменом и впишите сумму. Сколько должно быть, программа не показывает: разницу увидит админ.": ["Count all the money in the till, including the float, and enter the sum. The program does not show how much there should be: the admin will see the difference.", "Kasadaki tüm parayı bozuk para dahil sayın ve toplamı yazın. Program ne kadar olması gerektiğini göstermez: farkı yönetici görür."], "Размен утром, ₺": ["Morning float, ₺", "Sabah bozuk para, ₺"], "Размен утром": ["Morning float", "Sabah bozuk para"], "размен утром": ["morning float", "sabah bozuk para"], "Сейчас в кассе, всего ₺": ["In the till now, total ₺", "Şu an kasada, toplam ₺"], "Терминал карт": ["Card terminal", "Kart terminali"], "Итог по терминалу за день, ₺": ["Terminal total for the day, ₺", "Günlük terminal toplamı, ₺"], "Сумма из отчёта терминала за день. Если по карте сегодня не платили — оставьте пусто.": ["The total from the terminal's day report. If nobody paid by card today, leave it empty.", "Terminalin gün sonu raporundaki toplam. Bugün kartla ödeme yoksa boş bırakın."], "Например: почему не сходится": ["E.g.: why it does not match", "Ör.: neden tutmuyor"], "Закрывает": ["Closing by", "Kapatan"], "Должно быть в кассе": ["Should be in the till", "Kasada olması gereken"], "Разница": ["Difference", "Fark"], "сходится": ["matches", "tutuyor"], "недостача": ["shortage", "eksik"], "излишек": ["surplus", "fazla"], "По карте в программе": ["By card in the program", "Programda kartla"], "Впишите, сколько всего денег в кассе (можно 0)": ["Enter how much money is in the till in total (0 is fine)", "Kasada toplam ne kadar para olduğunu yazın (0 olabilir)"], "Введите размен числом или оставьте пусто": ["Enter the float as a number or leave it empty", "Bozuk parayı sayı olarak girin veya boş bırakın"], "Введите сумму числом или оставьте пусто": ["Enter the amount as a number or leave it empty", "Tutarı sayı olarak girin veya boş bırakın"], "Открытых заказов": ["Open orders", "Açık sipariş"], "Их деньги не войдут в этот день. Всё равно закрыть день?": ["Their money will not count in this day. Close the day anyway?", "Bunların parası bu güne girmez. Günü yine de kapatalım mı?"], "День закрыт. Спасибо! Итоги увидит админ.": ["The day is closed. Thank you! The admin will see the totals.", "Gün kapatıldı. Teşekkürler! Sonuçları yönetici görecek."], "День закрыт": ["The day is closed", "Gün kapatıldı"], "наличные": ["cash", "nakit"], "кассовые расходы": ["cash expenses", "kasa giderleri"], "Насчитали в кассе": ["Counted in the till", "Kasada sayılan"], "Карты": ["Cards", "Kartlar"], "карты": ["cards", "kartlar"], "По терминалу": ["By terminal", "Terminale göre"], "не введено": ["not entered", "girilmedi"], "После закрытия дня суммы изменились: сейчас в кассе должно быть": ["The amounts changed after the day was closed: the till should now hold", "Gün kapatıldıktan sonra tutarlar değişti: şimdi kasada olması gereken"], "по карте": ["by card", "kartla"], "Например, закрыли ещё заказ или исправили кассовый расход.": ["For example, another order was closed or a cash expense was corrected.", "Örneğin bir sipariş daha kapatıldı veya bir kasa gideri düzeltildi."], "Закрывали раньше": ["Closed earlier", "Daha önce kapatan"], "Закрытие дня за период": ["Day closings in the period", "Dönemdeki gün sonları"], "дней": ["days", "gün"], "В прибыль не входит, для сведения.": ["Not included in profit, for information.", "Kâra dahil değildir, bilgi içindir."]});
 Object.assign(I18N, {"Удержание с оплаты картой": ["Card payment deduction", "Kartlı ödeme kesintisi"], "КДВ и комиссия банка. В «Финансах» вычитается из суммы, которую клиенты заплатили картой.": ["VAT (KDV) and the bank commission. In «Finance» it is taken off the amount customers paid by card.", "KDV ve banka komisyonu. «Finans» bölümünde müşterilerin kartla ödediği tutardan düşülür."], "Удерживается, % от оплаты картой": ["Deducted, % of card payments", "Kesinti, kartlı ödemenin %'si"], "КДВ 10% + комиссия банка. Точную комиссию видно в выписке банка: сравните итог терминала за день с суммой, которая пришла на счёт. 0 — не вычитать.": ["VAT (KDV) 10% + bank commission. The exact commission is in the bank statement: compare the terminal's day total with the amount that reached the account. 0 — do not deduct.", "KDV %10 + banka komisyonu. Kesin komisyon banka ekstresinde görünür: terminalin gün toplamını hesaba geçen tutarla karşılaştırın. 0 — düşme."], "Удержание с карт": ["Card deduction", "Kart kesintisi"], "С оплаты картой вычитается": ["Deducted from card payments:", "Kartlı ödemelerden düşülen:"], "(КДВ и комиссия банка).": ["(VAT (KDV) and bank commission).", "(KDV ve banka komisyonu)."], "Удержание с оплат картой": ["Card payment deductions", "Kartlı ödeme kesintileri"], "КДВ и комиссия банка": ["VAT (KDV) and bank commission", "KDV ve banka komisyonu"], "оплачено картой": ["paid by card", "kartla ödenen"], "удержание": ["deduction", "kesinti"], "Введите процент от 0 до 100": ["Enter a percentage from 0 to 100", "0 ile 100 arasında bir yüzde girin"]});
+Object.assign(I18N, {"в сете закончилось:": ["out in this set:", "sette tükendi:"], "— предложите замену": ["— offer a swap", "— değişiklik önerin"], "(позвоните клиенту)": ["(call the customer)", "(müşteriyi arayın)"],
+  "На сайте заказов то, что в стоп-листе, не показывается. Сет с закончившимся блюдом остаётся в продаже: позвоните клиенту и предложите замену.": ["The order site does not show what is in the stop list. A set with a sold-out dish stays on sale: call the customer and offer a swap.", "Sipariş sitesinde tükenenler gösterilmez. İçinde tükenen yemek olan set satışta kalır: müşteriyi arayıp değişiklik önerin."],
+  "Админка сайта: может менять фото, названия и цены на сайте": ["Site admin: may change photos, names and prices on the site", "Site yönetimi: sitedeki fotoğrafları, adları ve fiyatları değiştirebilir"],
+  "Админка сайта": ["Site admin", "Site yönetimi"], "изменить адрес сайта": ["change site address", "site adresini değiştir"], "Адрес сайта (https://…)": ["Site address (https://…)", "Site adresi (https://…)"],
+  "Адрес сайта сохранён": ["Site address saved", "Site adresi kaydedildi"], "Адрес должен начинаться с https://": ["The address must start with https://", "Adres https:// ile başlamalı"],
+  "Нет права «Админка сайта». Его даёт админ в разделе «Сотрудники».": ["No «Site admin» right. The admin gives it in «Staff».", "«Site yönetimi» yetkiniz yok. Yönetici «Personel» bölümünde verir."],
+  "Админ ещё не указал адрес сайта": ["The admin has not set the site address yet", "Yönetici site adresini henüz girmedi"], "Нужен интернет": ["Internet needed", "İnternet gerekli"],
+  "Доступ к админке сайта закрыт": ["Site admin access closed", "Site yönetimi erişimi kapandı"], "Не получилось открыть админку сайта: нет связи": ["Could not open the site admin: no connection", "Site yönetimi açılamadı: bağlantı yok"],
+  "✕ Закрыть": ["✕ Close", "✕ Kapat"], "🌐 сайт": ["🌐 site", "🌐 site"]});
 Object.assign(I18N, {"Стоп-лист": ["Stop list", "Tükenenler"], "Сейчас в стоп-листе": ["In the stop list now", "Şu an tükenenler"], "в стоп-листе": ["in the stop list", "tükenenlerde"], "закончилось": ["sold out", "tükendi"], "в продаже": ["available", "satışta"], "нет блюда:": ["dish out:", "tükenen yemek:"], "снова есть": ["is available again", "yeniden var"], "Снова есть": ["Available again", "Yeniden var"], "Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.": ["Tap a dish or set that has run out: in «New order» it turns grey and cannot be added. When it is available again, tap it once more.", "Tükenen yemeğe veya sete dokunun: «Yeni sipariş» ekranında gri olur ve eklenemez. Yeniden olduğunda bir kez daha dokunun."], "в стоп-листе: в «Новом заказе» оно серое": ["is in the stop list: it is grey in «New order»", "tükenenlerde: «Yeni sipariş» ekranında gri"], "В сете есть блюдо": ["The set contains the dish", "Sette şu yemek var:"], "оно закончилось. Снимите метку с этого блюда.": ["it has run out. Take the mark off that dish.", "tükendi. İşareti o yemekten kaldırın."], "Снять метку: Продажи → Стоп-лист.": ["To take the mark off: Sales → Stop list.", "İşareti kaldırmak için: Satışlar → Tükenenler."], "Не удалось сохранить. Проверьте интернет.": ["Could not save. Check the internet connection.", "Kaydedilemedi. İnternet bağlantısını kontrol edin."], "Звук новых заказов: вкл": ["New order sound: on", "Yeni sipariş sesi: açık"], "Звук новых заказов: выкл": ["New order sound: off", "Yeni sipariş sesi: kapalı"], "Коснитесь экрана, чтобы включить звук": ["Touch the screen to turn the sound on", "Sesi açmak için ekrana dokunun"], "Звук при новом заказе — только на этом устройстве": ["Sound on a new order — on this device only", "Yeni siparişte ses — yalnızca bu cihazda"], "Звук включён на этом устройстве: при новом заказе прозвучит сигнал": ["Sound is on on this device: a signal will play on a new order", "Bu cihazda ses açık: yeni siparişte sinyal çalacak"], "Звук выключен на этом устройстве": ["Sound is off on this device", "Bu cihazda ses kapalı"], "Новые заказы:": ["New orders:", "Yeni siparişler:"]});
 Object.assign(I18N, {"Укажите цену закупки за единицу": ["Enter the purchase price per unit", "Birim alış fiyatını girin"], "приход списком": ["bulk receipt", "toplu giriş"], "Убрано из заказа, уже приготовлено": ["Removed from the order, already cooked", "Siparişten çıkarıldı, zaten pişirilmişti"], "блюдо": ["dish", "yemek"], "блюда": ["dishes", "yemek"], "блюд": ["dishes", "yemek"]});
 Object.assign(I18N, {"Снять стоп-лист на завтра?": ["Take dishes off the stop list for tomorrow?", "Yarın için tükenenlerden çıkarılsın mı?"], "Отметьте блюда, которые завтра снова будут: метка снимется. Неотмеченные останутся в стоп-листе.": ["Tick the dishes that will be available tomorrow: their mark is taken off. The rest stay in the stop list.", "Yarın yeniden olacak yemekleri işaretleyin: işaretleri kalkar. İşaretlenmeyenler tükenenlerde kalır."], "Отметить все": ["Tick all", "Tümünü işaretle"], "Забрали из кассы, ₺": ["Taken from the till, ₺", "Kasadan alınan, ₺"], "Оставили на размен, ₺": ["Left as float, ₺", "Bozuk para olarak bırakılan, ₺"], "Сколько денег забрали из кассы и сколько оставили на завтра. Достаточно вписать одно: второе посчитается. Завтра «Размен утром» подставится сам.": ["How much money was taken from the till and how much was left for tomorrow. Enter one of them: the other is worked out. Tomorrow «Morning float» is filled in by itself.", "Kasadan ne kadar para alındı ve yarına ne kadar bırakıldı. Birini yazmanız yeterli: diğeri hesaplanır. Yarın «Sabah bozuk para» kendiliğinden gelir."], "Рабочий день длится до 06:00 утра: всё, что продано после полуночи, входит в этот день.": ["The working day lasts until 06:00 in the morning: everything sold after midnight belongs to this day.", "İş günü sabah 06:00'ya kadar sürer: gece yarısından sonra satılan her şey bu güne dahildir."], "Забрали и оставили на размен вместе — столько, сколько в кассе:": ["Taken plus left as float must equal what is in the till:", "Alınan ve bırakılan bozuk para toplamı kasadaki tutara eşit olmalı:"], "Снято со стоп-листа:": ["Taken off the stop list:", "Tükenenlerden çıkarılan:"], "Забрали из кассы": ["Taken from the till", "Kasadan alınan"], "Оставили на размен": ["Left as float", "Bozuk para olarak bırakılan"], "Переводы на счёт": ["Bank transfers", "Banka havaleleri"], "Переводом за день, заказов:": ["By transfer for the day, orders:", "Günlük havale, sipariş:"], "сверьте с выпиской банка": ["check against the bank statement", "banka ekstresiyle karşılaştırın"], "Забрали из кассы за период (дней:": ["Taken from the till in the period (days:", "Dönemde kasadan alınan (gün:"], "отмечено": ["marked", "işaret:"]});
@@ -5331,6 +5424,7 @@ function webCard(w){
   for (const l of ls){
     if (!l.src){ warn.push(`«${N(l.name)}» нет в меню — уточните у клиента`); continue; }
     const st = stopOf(l.kind, l.id); if (st) warn.push(`«${N(dn(l.src))}» в стоп-листе`);
+    else if (l.kind==="set" && setOutDishes(l.id).length) warn.push(`«${N(dn(l.src))}»: ${setOutHtml(l.id)} (позвоните клиенту)`);
     if (WEB.edits && l.saw!==l.price && showMoney()) warn.push(`«${N(dn(l.src))}»: клиент видел ${money(l.saw)}, сейчас на сайте ${money(l.price)} — в заказ пойдёт ${money(l.price)}`);
   }
   const sum = ls.reduce((a,l)=>a + (l.src ? l.price*l.qty : 0), 0);
