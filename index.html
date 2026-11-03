@@ -804,6 +804,16 @@ details.fold[open]>summary{margin-bottom:8px}
   </div>
 </form></dialog>
 
+<dialog id="webHrsDlg"><form method="dialog" id="webHrsForm">
+  <h3>Часы приёма заказов с сайта</h3>
+  <p class="hint">Сайт сам принимает заказы только в эти часы (время Турции). Выключатель закрывает приём в любой момент.</p>
+  <div class="two"><label class="f">Начало приёма<input type="time" id="webHrsOpen"></label><label class="f">Конец приёма<input type="time" id="webHrsClose"></label></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
 <dialog id="expDlg"><form method="dialog" id="expForm">
   <h3 id="expTitle">Расход</h3>
   <p class="hint">Расходы не со склада: аренда, зарплата, коммуналка, комиссии агрегаторов. Учитываются в разделе «Финансы».</p>
@@ -5292,6 +5302,14 @@ Object.assign(I18N, {"Новые заказы с сайта": ["New orders from 
   "Выключить приём заказов с сайта? Сайт попросит клиентов звонить по телефону.": ["Stop taking orders from the website? The website will ask customers to phone.", "Web sitesinden sipariş alma kapatılsın mı? Site müşterilerden telefonla aramalarını isteyecek."],
   "Заказы с сайта принимаются": ["Website orders are being accepted", "Web sitesi siparişleri alınıyor"], "Заказы с сайта выключены": ["Website orders are switched off", "Web sitesi siparişleri kapalı"],
   "Не удалось переключить": ["Could not switch", "Değiştirilemedi"], "Заказ с сайта": ["Website order", "Web sitesi siparişi"]});
+Object.assign(I18N, {"Часы приёма заказов с сайта": ["Website order hours", "Web sitesi sipariş saatleri"], "Часы приёма": ["Order hours", "Sipariş saatleri"],
+  "(до": ["(until", "(bitiş"], "следующего дня)": ["the next day)", "ertesi gün)"],
+  "Сайт сам принимает заказы только в эти часы (время Турции). Выключатель закрывает приём в любой момент.": ["The website takes orders only during these hours (Turkish time). The switch stops orders at any moment.", "Web sitesi siparişleri yalnızca bu saatlerde alır (Türkiye saati). Düğme sipariş almayı her an kapatır."],
+  "Начало приёма": ["Orders from", "Sipariş başlangıcı"], "Конец приёма": ["Orders until", "Sipariş bitişi"],
+  "Укажите время в формате ЧЧ:ММ": ["Enter the time as HH:MM", "Saati SS:DD biçiminde girin"], "Начало и конец приёма не могут совпадать": ["The start and the end cannot be the same", "Başlangıç ve bitiş aynı olamaz"],
+  "Нет интернета. Часы приёма заказов с сайта можно изменить только онлайн.": ["No internet. Website order hours can be changed only online.", "İnternet yok. Web sitesi sipariş saatleri yalnızca çevrimiçi değiştirilebilir."],
+  "Приём будет идти через полночь, до": ["Orders will be taken past midnight, until", "Siparişler gece yarısından sonra da alınacak, bitiş:"], "следующего дня. Верно?": ["the next day. Is that right?", "ertesi gün. Doğru mu?"],
+  "Не удалось сохранить часы приёма": ["Could not save the order hours", "Sipariş saatleri kaydedilemedi"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
@@ -5384,7 +5402,8 @@ function makeDb(fs){
 //    comment, lang, lines:"<JSON [{kind, id, name, price, qty}]>" (price = the price on the site), total, kvkk:{v, at, lang}}
 // The restaurant accepts it (a usual order, source «Собственный: сайт») or rejects it with a reason the customer sees.
 // The customer sees the progress in webstatus/<key> = {s: order status or "rejected", num, type, reason, ts}; the device that changed the order writes it.
-// pubmenu/orders = {on, ts, by}: the site takes orders only while on===true.
+// pubmenu/orders = {on, ts, by, open, close, hts, hby}: the site takes orders only while on===true,
+// and only between open and close ("ЧЧ:ММ", Turkish time; close earlier than open = past midnight; none or wrong = 12:00–22:30).
 const WEB = {list:[], seen:new Set(), shop:null, edits:null, editsAt:0, unsub:null};
 const WEB_PAY = {cash:"наличными", card:"картой"};
 function webStart(){
@@ -5446,7 +5465,9 @@ function webBlock(){
   if (!can("orderEdit")) return "";
   const sw = WEB.shop, on = !!(sw && sw.on===true);
   const when = sw && sw.ts ? ` <small class="hint">${on ? "включил(а)" : "выключил(а)"} ${N(sw.by || "")}, ${esc(new Date(sw.ts).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}))}</small>` : "";
-  let html = `<div class="controls"><button class="btn small ${on ? "primary" : ""}" data-webshop aria-pressed="${on}">${on ? "🛒 Заказы с сайта: принимаются" : "🛒 Заказы с сайта: не принимаются"}</button>${when}</div>`;
+  const h = webHours();
+  let html = `<div class="controls"><button class="btn small ${on ? "primary" : ""}" data-webshop aria-pressed="${on}">${on ? "🛒 Заказы с сайта: принимаются" : "🛒 Заказы с сайта: не принимаются"}</button><button class="btn small" data-webhrs>🕐 Часы приёма: ${webHoursTxt(h.open, h.close)}</button>${when}</div>
+    <p class="hint" style="margin:-4px 0 8px;font-size:12px">Сайт сам принимает заказы только в эти часы (время Турции). Выключатель закрывает приём в любой момент.</p>`;
   if (WEB.list.length) html += `<h2 class="cat"><span>Заказы с сайта — позвоните клиенту и примите</span><span>${WEB.list.length}</span></h2><div class="ogrid">${WEB.list.map(webCard).join("")}</div>`;
   return html;
 }
@@ -5498,8 +5519,34 @@ async function webShopToggle(){
   const on = !(WEB.shop && WEB.shop.on===true);
   if (!navigator.onLine){ toast("Нет интернета. Переключить приём заказов с сайта можно только онлайн."); return; }
   if (!tConfirm(on ? "Включить приём заказов с сайта? Клиенты смогут отправлять заказы, они появятся здесь, в «Продажи → Открытые»." : "Выключить приём заказов с сайта? Сайт попросит клиентов звонить по телефону.")) return;
-  try { await FS.doc("pubmenu/orders").set({on, ts:Date.now(), by:whoNow()}); toast(on ? "Заказы с сайта принимаются" : "Заказы с сайта выключены"); }
+  try { await FS.doc("pubmenu/orders").set({on, ts:Date.now(), by:whoNow()}, {merge:true}); toast(on ? "Заказы с сайта принимаются" : "Заказы с сайта выключены"); }
   catch(e){ console.error(e); toast("Не удалось переключить: " + ((e && e.code) || "ошибка")); }
+}
+// the hours the site takes orders (pubmenu/orders open/close); the site uses 12:00–22:30 when they are missing or wrong
+const WEB_HRS = {open:"12:00", close:"22:30"}, HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+function webHours(){
+  const sw = WEB.shop || {}, o = String(sw.open || ""), c = String(sw.close || "");
+  return HHMM.test(o) && HHMM.test(c) && o!==c ? {open:o, close:c} : {open:WEB_HRS.open, close:WEB_HRS.close};
+}
+const webHoursTxt = (o, c) => `${o}–${c}` + (c < o ? ` (до ${c} следующего дня)` : "");
+function openWebHours(){
+  if (!FS || !can("orderEdit")) return;
+  const h = webHours(); $("#webHrsOpen").value = h.open; $("#webHrsClose").value = h.close;
+  needClear($("#webHrsOpen")); needClear($("#webHrsClose"));
+  $("#webHrsDlg").showModal(); $("#webHrsOpen").focus();
+}
+$("#webHrsForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(webHoursSave); });
+async function webHoursSave(){
+  if (!FS || !can("orderEdit")) return;
+  const open = String($("#webHrsOpen").value || "").slice(0, 5), close = String($("#webHrsClose").value || "").slice(0, 5);
+  if (!HHMM.test(open)){ need($("#webHrsOpen"), "Укажите время в формате ЧЧ:ММ"); return; }
+  if (!HHMM.test(close)){ need($("#webHrsClose"), "Укажите время в формате ЧЧ:ММ"); return; }
+  if (open===close){ need($("#webHrsClose"), "Начало и конец приёма не могут совпадать"); return; }
+  if (!navigator.onLine){ toast("Нет интернета. Часы приёма заказов с сайта можно изменить только онлайн."); return; }
+  if (close < open && !tConfirm(`Приём будет идти через полночь, до ${close} следующего дня. Верно?`)) return;
+  try { await FS.doc("pubmenu/orders").set({open, close, hts:Date.now(), hby:whoNow()}, {merge:true});
+    $("#webHrsDlg").close(); toast(`Часы приёма заказов с сайта: ${webHoursTxt(open, close)}`); }
+  catch(err){ console.error(err); toast("Не удалось сохранить часы приёма: " + ((err && err.code) || "ошибка")); }
 }
 // the customer's order page: the device that changed a site order tells the site its status and number (one write, only when they change)
 function webStatus(o, was){
@@ -5511,6 +5558,7 @@ document.addEventListener("click", e => {
   const a = e.target.closest("[data-webtake]"); if (a){ guarded(()=>webTake(a.dataset.webtake)); return; }
   const r = e.target.closest("[data-webno]"); if (r){ guarded(()=>webReject(r.dataset.webno)); return; }
   if (e.target.closest("[data-webshop]")) guarded(webShopToggle);
+  if (e.target.closest("[data-webhrs]")) openWebHours();
 });
 
 /* ---------- reading: only what changed (В1) ---------- */
