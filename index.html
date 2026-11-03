@@ -431,6 +431,8 @@ button.chip{cursor:pointer}
 .frow .neg{color:var(--empty)}
 .fmon .fhead,.fmon .frow{grid-template-columns:minmax(0,1fr) 104px 104px 46px}
 .fmon .frow span:not(:first-child){white-space:nowrap}
+.frc .fhead,.frc .frow{grid-template-columns:minmax(0,1fr) 104px 104px 104px} .frc .frow span:not(:first-child){white-space:nowrap}
+.rckpis{margin-bottom:8px} .rcsum{margin-bottom:6px}
 details.det div.unsold{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:4px 12px;padding:6px 0 0 12px}
 details.finun{margin-top:10px}
 details.fold{margin:14px 0 0}
@@ -448,6 +450,7 @@ details.fold[open]>summary{margin-bottom:8px}
 .fstale .frow small{color:inherit;opacity:.85}
 .stalekey{display:inline-block;border-radius:4px;padding:0 6px;font-size:.8rem;white-space:nowrap}
 @media (max-width:480px){.fhead,.frow{grid-template-columns:minmax(0,1fr) 34px 78px 78px;gap:6px;font-size:.86rem}}
+@media (max-width:480px){.frc .fhead,.frc .frow{grid-template-columns:minmax(0,1fr) 82px 82px 82px;gap:4px;font-size:.8rem;padding-left:8px;padding-right:8px}}
 </style>
 </head>
 <body>
@@ -2827,6 +2830,7 @@ function renderFin(L){
       <div class="kpi"><small>Себестоимость продаж</small><b>${money(cogs)}</b><small>${pct(cogs,revenue)} от выручки</small></div>
       <div class="kpi"><small>Расходы и потери</small><b>${money(writeOff+manualOut+invLoss+expTotal+cardCut)}</b></div>
       <div class="kpi finnet ${net<0?"minus":"plus"}"><small>Чистая прибыль</small><b>${money(net)}</b><small>${pct(net,revenue)} от выручки</small></div></div>
+    ${rcHtml(F, t0, t1)}
     ${monthlyHtml()}
     ${finMonthsHtml(t0, t1)}
     <h2 class="cat"><span>Доходы и расходы</span></h2>
@@ -2876,6 +2880,74 @@ function renderFin(L){
     ? `<div class="list">${oexps.map(x=>`<button type="button" class="hist" data-exp="${esc(x.id)}" title="Исправить или удалить"><span><span class="tag off">${esc(x.category||"Прочее")}</span> ${N(x.note||"")}</span><b>${money(x.amount)}</b><span class="meta">${new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long"})}${x.who?", "+esc(x.who):""}${x.editedBy?` · исправил(а) ${esc(x.editedBy)}`:""}</span></button>`).join("")}</div>`
     : `<p class="hint">Аренда, зарплата, коммуналка и другие расходы не со склада. Внесите их кнопкой «+ Расход», чтобы видеть настоящую чистую прибыль.</p>`);
   L.innerHTML = html;
+}
+/* ----- Себестоимость ресторана: what keeping the restaurant cost over the period of Финансы, in all and per day ----- */
+// Products and losses, card fees, cash and other expenses come as Финансы count them (finData). Rent, utilities and salary
+// of a month are spread over its days: the period gets its share (7 days of a 30-day month = 7/30), not the whole month on the 1st.
+// Salary of a month without a saved amount = its shifts in the period × rates; utilities not entered yet = the last bill (≈).
+const RC_MON = ["Аренда","Коммунальные услуги","Зарплата"];
+function rcDataStart(){
+  let m = Infinity; const put = ts => { if (ts > 0 && ts < m) m = ts; };
+  S.sales.forEach(x=>put(x.ts)); S.moves.forEach(x=>put(x.ts)); S.shifts.forEach(x=>put(x.start));
+  S.expenses.forEach(x=>put(x.monthly ? monTs(x) : x.ts)); closedYms().forEach(ym=>put(ymBeg(ym)));
+  return m===Infinity ? 0 : dayStart(dayKey(m));
+}
+function rcCalc(F, t0, t1){
+  const endT = dayStart(dayNext(todayKey())), ds = rcDataStart();
+  const a = Math.max(t0, ds || t0), b = Math.min(t1, endT), days = b > a ? Math.max(1, Math.round((b-a)/864e5)) : 0;
+  const R = {a, b, days, clipped: a > t0, lines:{}, est:[], none:[], revenue:F.revenue, buyIn:F.buyIn};
+  const add = (k, v) => { if (Math.abs(v) >= 0.005) R.lines[k] = (R.lines[k]||0) + v; };
+  // what Финансы counted for the monthly costs (whole months on the 1st), to take it out
+  const inR = ts => (ts||0)>=t0 && (ts||0)<t1, fMon = {};
+  S.expenses.filter(x=>x.monthly && RC_MON.includes(x.category) && inR(monTs(x))).forEach(x=>{ fMon[x.category] = (fMon[x.category]||0) + (Number(x.amount)||0); });
+  monthlyAutoIn(t0, t1).forEach(x=>{ fMon[x.category] = (fMon[x.category]||0) + (Number(x.amount)||0); });
+  // the monthly costs spread over the days of the period
+  const pay = {};
+  if (days) for (let ym = ymOf(a); ymBeg(ym) < b; ym = ymShift(ym, 1)){
+    const m0 = ymBeg(ym), m1 = ymEnd(ym), k = Math.max(0, Math.min(b, m1) - Math.max(a, m0)) / (m1 - m0); if (!(k > 0)) continue;
+    for (const cat of RC_MON){
+      const d = monthlyDoc(cat, ym);
+      if (d){ add(cat, (Number(d.amount)||0)*k); continue; }
+      if (cat==="Аренда"){ const r = lastRent(ym); if (r && Number(r.amount)>0) add(cat, Number(r.amount)*k); else R.none.push(cat); }
+      else if (cat==="Коммунальные услуги"){ const l = S.expenses.filter(x=>x.monthly && x.category===cat && x.month && x.month < ym && Number(x.amount)>0).sort((x,y)=>x.month<y.month?1:-1)[0];
+        if (l){ add(cat, Number(l.amount)*k); R.est.push(ym); } else R.none.push(cat); }
+      else pay[ym] = true;   // salary: by the shifts below
+    }
+  }
+  // salary of the months without a saved amount: shifts that started in the period (calendar month, as salaryByShifts)
+  for (const st of S.staff.filter(x=>roleOf(x)!=="admin" && !isDemoStaff(x))){
+    const shs = S.shifts.filter(sh=>sh.staffId===st.id && (sh.start||0)>=a && (sh.start||0)<b && pay[ymOf(sh.start)]);
+    if (shs.length) add("Зарплата", payOf(st, shs));
+  }
+  add("Продукты", F.cogs);
+  add("Списания и потери", F.writeOff + F.manualOut + F.invLoss);
+  add("Удержание с оплат картой", F.cardCut);
+  add("Кассовые расходы", F.cash.total||0);
+  for (const [cat, v] of Object.entries(F.expByCat)) add(cat, v - (fMon[cat]||0));
+  R.none = [...new Set(R.none)].filter(c=>!R.lines[c]);
+  R.total = Object.values(R.lines).reduce((x,y)=>x+y, 0);
+  return R;
+}
+const RC_ORDER = ["Продукты","Зарплата","Аренда","Коммунальные услуги","Кассовые расходы","Удержание с оплат картой","Списания и потери"];
+const RC_HINT = {"Продукты":"проданное по техкартам, по цене закупки", "Зарплата":"смены × ставки или сумма за месяц", "Аренда":"месячная сумма, поделённая по дням",
+  "Коммунальные услуги":"месячная сумма, поделённая по дням", "Списания и потери":"порча, брак, расход вручную, недостача"};
+function rcHtml(F, t0, t1){
+  const R = rcCalc(F, t0, t1), r0 = n => money(Math.round(n));
+  if (!R.days) return "";
+  const lines = Object.entries(R.lines).filter(([,v])=>Math.abs(v)>=0.5).sort((x,y)=>{ const i = RC_ORDER.indexOf(x[0]), j = RC_ORDER.indexOf(y[0]); return (i<0?99:i)-(j<0?99:j) || y[1]-x[1]; });
+  const dayC = R.total/R.days, dayR = R.revenue/R.days, diff = R.revenue - R.total;
+  const row = (k, v) => `<div><span>${esc(k)}${RC_HINT[k]?` <small class="hint">${esc(RC_HINT[k])}</small>`:""}${k==="Коммунальные услуги"&&R.est.length?` <small class="hint">${esc("≈ по последнему счёту")}</small>`:""}</span><b>${r0(v)}</b></div>`;
+  const per = [["День",1],["Неделя",7],["Месяц",30],["Квартал",91]].map(([l,n])=>`<div class="frow"><span>${esc(l)}</span><span>${r0(dayC*n)}</span><span>${r0(dayR*n)}</span><span class="${dayR-dayC<0?"neg":""}">${r0((dayR-dayC)*n)}</span></div>`).join("");
+  const dt = ts => new Date(dayKey(ts)+"T12:00").toLocaleDateString(LOC(),{day:"numeric", month:"short"});
+  return `<h2 class="cat"><span>Себестоимость ресторана</span><span>${r0(R.total)}</span></h2>
+    <div class="kpis rckpis">
+      <div class="kpi"><small>Затраты за период</small><b>${r0(R.total)}</b><small>${esc("в среднем за день")} ${r0(dayC)}</small></div>
+      <div class="kpi"><small>Выручка за период</small><b>${r0(R.revenue)}</b><small>${esc("в среднем за день")} ${r0(dayR)}</small></div>
+      <div class="kpi finnet ${diff<0?"minus":"plus"}"><small>Выручка − затраты</small><b>${r0(diff)}</b><small>${esc("доля затрат в выручке:")} ${pct(R.total, R.revenue)}</small></div></div>
+    <div class="sum finsum rcsum">${lines.map(([k,v])=>row(k,v)).join("")}${row("Всего затрат", R.total).replace("<div>", '<div class="total">')}</div>
+    <p class="hint">${esc(dot(`Дней в периоде: ${R.days} (${dt(R.a)} — ${dt(R.b-1)})${R.clipped?`; учёт ведётся с ${dt(R.a)}`:""}`))}${R.none.length?" "+esc(dot(`Не внесено: ${R.none.map(c=>c==="Коммунальные услуги"?"коммуналка":c.toLowerCase()).join(", ")} — внесите в «Ежемесячные расходы»`)):""}</p>
+    <div class="ftable frc"><div class="fhead"><span>${esc("В среднем за")}</span><span>${esc("Затраты")}</span><span>${esc("Выручка")}</span><span>${esc("Разница")}</span></div>${per}</div>
+    <p class="hint">${esc("Средняя за день × 7 (неделя), × 30 (месяц), × 91 (квартал).")} ${esc(`Закуплено продуктов за период: ${money(R.buyIn)} — в затраты идёт не закупка, а то, что продано, списано или недосчитано.`)} ${esc("Аренда, коммуналка и зарплата здесь поделены по дням, поэтому разница может отличаться от «Чистой прибыли» ниже.")}</p>`;
 }
 // quarter and year: one row per month (a closed month from its record)
 function finMonthsHtml(t0, t1){
@@ -5292,6 +5364,16 @@ Object.assign(I18N, {"Новые заказы с сайта": ["New orders from 
   "Выключить приём заказов с сайта? Сайт попросит клиентов звонить по телефону.": ["Stop taking orders from the website? The website will ask customers to phone.", "Web sitesinden sipariş alma kapatılsın mı? Site müşterilerden telefonla aramalarını isteyecek."],
   "Заказы с сайта принимаются": ["Website orders are being accepted", "Web sitesi siparişleri alınıyor"], "Заказы с сайта выключены": ["Website orders are switched off", "Web sitesi siparişleri kapalı"],
   "Не удалось переключить": ["Could not switch", "Değiştirilemedi"], "Заказ с сайта": ["Website order", "Web sitesi siparişi"]});
+Object.assign(I18N, {"Себестоимость ресторана": ["Restaurant running costs", "Restoran maliyeti"], "Затраты за период": ["Costs for the period", "Dönemin giderleri"], "Выручка за период": ["Revenue for the period", "Dönemin cirosu"],
+  "в среднем за день": ["average per day", "günlük ortalama"], "Выручка − затраты": ["Revenue − costs", "Ciro − giderler"], "доля затрат в выручке:": ["costs as a share of revenue:", "giderlerin cirodaki payı:"],
+  "проданное по техкартам, по цене закупки": ["sold, by recipe cards, at purchase price", "tarif kartlarına göre satılan, alış fiyatıyla"], "смены × ставки или сумма за месяц": ["shifts × rates, or the amount entered for the month", "vardiya × ücret veya ay için girilen tutar"],
+  "месячная сумма, поделённая по дням": ["the monthly amount split by days", "aylık tutar günlere bölünmüş"], "порча, брак, расход вручную, недостача": ["spoilage, defects, manual use, shortage", "bozulma, kusur, elle çıkış, eksik"],
+  "≈ по последнему счёту": ["≈ by the last bill", "≈ son faturaya göre"], "Списания и потери": ["Write-offs and losses", "Fireler ve kayıplar"], "Всего затрат": ["Total costs", "Toplam gider"],
+  "Дней в периоде": ["Days in the period", "Dönemdeki gün sayısı"], "учёт ведётся с": ["records start on", "kayıt başlangıcı:"], "Не внесено": ["Not entered", "Girilmedi"], "коммуналка": ["utilities", "faturalar"], "аренда": ["rent", "kira"],
+  "внесите в «Ежемесячные расходы»": ["enter it in «Monthly costs»", "«Aylık giderler» bölümüne girin"], "В среднем за": ["Average per", "Ortalama"], "Затраты": ["Costs", "Giderler"], "День": ["Day", "Gün"],
+  "Средняя за день × 7 (неделя), × 30 (месяц), × 91 (квартал).": ["Average per day × 7 (week), × 30 (month), × 91 (quarter).", "Günlük ortalama × 7 (hafta), × 30 (ay), × 91 (çeyrek)."],
+  "в затраты идёт не закупка, а то, что продано, списано или недосчитано.": ["costs include not the purchases but what was sold, written off or found short.", "giderlere alımlar değil, satılan, fire verilen veya eksik çıkan girer."],
+  "Аренда, коммуналка и зарплата здесь поделены по дням, поэтому разница может отличаться от «Чистой прибыли» ниже.": ["Rent, utilities and salaries are split by days here, so the difference may not match «Net profit» below.", "Kira, faturalar ve maaşlar burada günlere bölünür, bu yüzden fark aşağıdaki «Net kâr»dan farklı olabilir."]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
