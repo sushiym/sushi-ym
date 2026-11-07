@@ -875,6 +875,7 @@ details.fold[open]>summary{margin-bottom:8px}
   <div class="two"><label class="f">Роль<select id="sfRole"></select></label><label class="f">PIN-код<input id="sfPin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label></div>
   <label class="f">Ставка, ₺ в час (необязательно)<input id="sfRate" inputmode="decimal" autocomplete="off" placeholder="для расчёта зарплаты"></label>
   <div id="sfRateNew" hidden><label class="f">Новая ставка действует с<input id="sfRateFrom" type="date"></label><p class="hint" id="sfRateHint" style="margin-top:0"></p></div>
+  <label class="f">Инфо (видит только админ)<textarea id="sfInfo" rows="1" maxlength="1000" autocomplete="off" placeholder="Адрес, телефон, приметы — что угодно" style="resize:vertical;line-height:1.35"></textarea></label>
   <label class="toggle"><input type="checkbox" id="sfActive" checked> Может входить в программу</label>
   <label class="toggle" id="sfSiteWrap"><input type="checkbox" id="sfSite"> Админка сайта: может менять фото, названия и цены на сайте</label>
   <p class="hint">Админ видит и меняет всё. Работник ресторана: склад (приход с количеством и ценой, расход, списание, приготовление, просмотр карточек продуктов), заказы и продажи, техкарты без себестоимости, пересчёт на утверждение. Добавление, изменение и скрытие продуктов, история, финансы и сотрудники — только у админа. Цены закупки и себестоимость видит только админ: работник вводит цену только при приходе.</p>
@@ -4282,6 +4283,7 @@ function openStaff(id){
   $("#sfRole").innerHTML = Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${(st?roleOf(st):"worker")===k?"selected":""}>${v}</option>`).join("");
   $("#sfPin").value = ""; $("#sfPin").placeholder = st ? "оставьте пустым, чтобы не менять" : "4–6 цифр";
   $("#sfActive").checked = st ? st.active!==false : true;
+  $("#sfInfo").value = st && typeof st.info==="string" ? st.info : "";
   $("#sfSite").checked = !!(st && st.siteAdmin===true);
   const r0 = st ? rateAt(st, Date.now()) : 0;
   $("#sfRate").value = r0 ? String(r0).replace(".",",") : "";
@@ -4290,7 +4292,7 @@ function openStaff(id){
   const withSh = !!st && roleOf(st)!=="admin" && S.shifts.some(sh=>sh.staffId===st.id);
   $("#sfDel").hidden = !st || st.id===S.me?.id || (withSh && st.active===false);
   $("#sfDel").textContent = trS(withSh ? "В бывшие работники" : "Удалить");
-  $("#staffDlg").showModal(); $("#sfName").focus();
+  $("#staffDlg").showModal(); sfInfoFit(); $("#sfName").focus();
 }
 // YM's PIN opens every worker's account, so it must not be the PIN of any worker, and no worker may get it
 async function pinClash(st, pin){
@@ -4308,6 +4310,9 @@ function sfRateShow(){
   if (show) $("#sfRateHint").textContent = `Смены до этого дня считаются по старой ставке ${money(cur)}/ч, зарплата прошлых месяцев не изменится.`;
 }
 $("#sfRate").addEventListener("input", sfRateShow);
+// «Инфо»: free text of the admin about the person (address, phone, notes); one line that grows with the text
+function sfInfoFit(){ const t = $("#sfInfo"); t.style.height = "auto"; if (t.scrollHeight) t.style.height = Math.min(t.scrollHeight + 2, 240) + "px"; }
+$("#sfInfo").addEventListener("input", sfInfoFit);
 // no rate for the admin and for the admin's shadow (YM)
 function sfRateUi(){ const old = editingStaff ? S.staff.find(x=>x.id===editingStaff) : null;
   $("#sfRate").closest("label").hidden = $("#sfRole").value==="admin" || (!!old && isDemoStaff(old)); sfRateShow();
@@ -4325,6 +4330,7 @@ $("#staffForm").addEventListener("submit", async e=>{
   const site = role!=="admin" && $("#sfSite").checked;
   if (site !== (old ? old.siteAdmin===true : false)) Object.assign(st, {siteAdminTs:Date.now(), siteAdminBy:S.me ? S.me.name : ""});
   st.siteAdmin = site;
+  const info = $("#sfInfo").value.trim(); if (info) st.info = info; else delete st.info;
   delete st.shadow;   // a mark of a version that had the «Тень админа» box: the shadow is YM by name now
   if (role!=="admin" && isDemoStaff(st)){ st.rate = 0; delete st.rates; }   // the shadow has no rate
   else if (!$("#sfRateNew").hidden){
@@ -5248,6 +5254,8 @@ Object.assign(I18N, {"Нал + карта": ["Cash + card", "Nakit + kart"], "Н
 Object.assign(I18N, {"Удержание с оплаты картой": ["Card payment deduction", "Kartlı ödeme kesintisi"], "КДВ и комиссия банка. В «Финансах» вычитается из суммы, которую клиенты заплатили картой.": ["VAT (KDV) and the bank commission. In «Finance» it is taken off the amount customers paid by card.", "KDV ve banka komisyonu. «Finans» bölümünde müşterilerin kartla ödediği tutardan düşülür."], "Удерживается, % от оплаты картой": ["Deducted, % of card payments", "Kesinti, kartlı ödemenin %'si"], "КДВ 10% + комиссия банка. Точную комиссию видно в выписке банка: сравните итог терминала за день с суммой, которая пришла на счёт. 0 — не вычитать.": ["VAT (KDV) 10% + bank commission. The exact commission is in the bank statement: compare the terminal's day total with the amount that reached the account. 0 — do not deduct.", "KDV %10 + banka komisyonu. Kesin komisyon banka ekstresinde görünür: terminalin gün toplamını hesaba geçen tutarla karşılaştırın. 0 — düşme."], "Удержание с карт": ["Card deduction", "Kart kesintisi"], "С оплаты картой вычитается": ["Deducted from card payments:", "Kartlı ödemelerden düşülen:"], "(КДВ и комиссия банка).": ["(VAT (KDV) and bank commission).", "(KDV ve banka komisyonu)."], "Удержание с оплат картой": ["Card payment deductions", "Kartlı ödeme kesintileri"], "КДВ и комиссия банка": ["VAT (KDV) and bank commission", "KDV ve banka komisyonu"], "оплачено картой": ["paid by card", "kartla ödenen"], "удержание": ["deduction", "kesinti"], "Введите процент от 0 до 100": ["Enter a percentage from 0 to 100", "0 ile 100 arasında bir yüzde girin"]});
 Object.assign(I18N, {"в сете закончилось:": ["out in this set:", "sette tükendi:"], "— предложите замену": ["— offer a swap", "— değişiklik önerin"], "(позвоните клиенту)": ["(call the customer)", "(müşteriyi arayın)"],
   "На сайте заказов то, что в стоп-листе, не показывается. Сет с закончившимся блюдом остаётся в продаже: позвоните клиенту и предложите замену.": ["The order site does not show what is in the stop list. A set with a sold-out dish stays on sale: call the customer and offer a swap.", "Sipariş sitesinde tükenenler gösterilmez. İçinde tükenen yemek olan set satışta kalır: müşteriyi arayıp değişiklik önerin."],
+  "Инфо (видит только админ)": ["Info (only the admin sees it)", "Bilgi (sadece yönetici görür)"],
+  "Адрес, телефон, приметы — что угодно": ["Address, phone, notes — anything", "Adres, telefon, notlar — ne isterseniz"],
   "Админка сайта: может менять фото, названия и цены на сайте": ["Site admin: may change photos, names and prices on the site", "Site yönetimi: sitedeki fotoğrafları, adları ve fiyatları değiştirebilir"],
   "Админка сайта": ["Site admin", "Site yönetimi"], "изменить адрес сайта": ["change site address", "site adresini değiştir"], "Адрес сайта (https://…)": ["Site address (https://…)", "Site adresi (https://…)"],
   "Адрес сайта сохранён": ["Site address saved", "Site adresi kaydedildi"], "Адрес должен начинаться с https://": ["The address must start with https://", "Adres https:// ile başlamalı"],
