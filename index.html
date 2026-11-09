@@ -137,6 +137,7 @@ h2.cat{font-size:.95rem;font-weight:600;color:var(--muted);margin:20px 0 6px;dis
 .tag.out{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 .tag.off{background:var(--empty-bg);color:var(--empty)}
 .tag.inv{background:var(--line);color:var(--ink)}
+.tag.mrg{background:var(--line);color:var(--ink)}
 .tag.hid{background:var(--line);color:var(--muted)}
 .tag.prod{background:var(--low-bg);color:var(--low)}
 .tag.use{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
@@ -526,6 +527,7 @@ details.fold[open]>summary{margin-bottom:8px}
   <div class="two"><label class="f">Название EN<input id="pNameEn" autocomplete="off"></label><label class="f">Название TR<input id="pNameTr" autocomplete="off"></label></div>
   <label class="f">Раздел<select id="pCat"></select></label>
   <label class="f">Описание<textarea id="pDesc" rows="2" autocomplete="off" placeholder="Например: поставщик, как хранить, как выглядит"></textarea></label>
+  <label class="f"><span>Другие названия <small class="hint">(через запятую)</small></span><input id="pAliases" autocomplete="off" placeholder="Например: тостовый сыр, cheddar dilim"><small class="hint">«Приход списком» и чеки находят продукт и по этим названиям.</small></label>
   <div class="two">
     <label class="f">Единица<select id="pUnit"></select></label>
     <label class="f">Мин. остаток<input id="pMin" inputmode="decimal" autocomplete="off"></label>
@@ -550,9 +552,25 @@ details.fold[open]>summary{margin-bottom:8px}
       <button type="button" class="btn small" id="rAdd" style="align-self:flex-start">+ Добавить продукт</button>
     </div>
   </div>
+  <button type="button" class="btn small" id="pMerge" hidden style="align-self:flex-start">Объединить с другим продуктом…</button>
+  <div class="notice" id="pMerged" hidden><div id="pMergedTxt"></div><button type="button" class="btn small" id="pUnmerge" style="margin-top:6px">Отменить объединение</button></div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
+<dialog id="mergeDlg"><form method="dialog" id="mergeForm">
+  <h3>Объединить продукты</h3>
+  <div id="mgFrom" class="prev"></div>
+  <p class="hint">Эта строка исчезнет со склада. Её остаток, место в техкартах блюд, рецептах заготовок и упаковке перейдут в выбранный продукт, а её название станет его «другим названием»: приход по чекам с этим названием попадёт туда же. Старые записи в «Истории» не меняются.</p>
+  <label class="f">Оставить вместо неё<select id="mgTo"></select></label>
+  <label class="f" id="mgKWrap" hidden><span>Единицы разные. Сколько это в единице выбранного продукта?</span><span class="inline"><span id="mgKFrom"></span><input id="mgK" inputmode="decimal" autocomplete="off" aria-label="Сколько это в единице выбранного продукта"><span id="mgKTo"></span></span></label>
+  <div class="f" id="mgCostBox" hidden><span>Цена закупки после объединения</span><div id="mgCost" style="display:flex;flex-direction:column;gap:4px"></div></div>
+  <div id="mgPrev" class="prev"></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary" id="mgSave" disabled>Объединить</button>
   </div>
 </form></dialog>
 
@@ -919,7 +937,7 @@ details.fold[open]>summary{margin-bottom:8px}
 const CATS = ["Рыба и морепродукты","Мясо и птица","Молочные и яйца","Овощи и фрукты","Бакалея","Соусы и приправы","Заготовки","Десерты","Напитки","Упаковка","Прочее"];
 const tracked = p => !!p && p.track!==false;
 const UNITS = ["кг","г","л","мл","шт","лист","упак.","порц."];
-const TYPES = {in:{label:"Приход",sign:1},out:{label:"Расход",sign:-1},off:{label:"Списание",sign:-1},inv:{label:"Инвентаризация",sign:1},prod:{label:"Приготовлено",sign:1},use:{label:"В заготовку",sign:-1},sale:{label:"Продажа",sign:-1},cut:{label:"Разделка",sign:1}};
+const TYPES = {in:{label:"Приход",sign:1},out:{label:"Расход",sign:-1},off:{label:"Списание",sign:-1},inv:{label:"Инвентаризация",sign:1},prod:{label:"Приготовлено",sign:1},use:{label:"В заготовку",sign:-1},sale:{label:"Продажа",sign:-1},cut:{label:"Разделка",sign:1},mrg:{label:"Объединение",sign:1}};
 const SUBUNIT = {"кг":["г",1000], "л":["мл",1000]};
 const HINTS = {in:"Товар пришёл от поставщика или с рынка.",out:"Только то, чего нет в техкартах: еда персонала, проба, отдали соседям. Продукты для блюд списываются сами при закрытии заказа, для заготовок есть «Приготовить».",off:"Испорчено, просрочено, брак — потери."};
 
@@ -1374,7 +1392,10 @@ let bulkRows = [];
 const bulkKey = v => String(v||"").trim().toLowerCase().replace(/ё/g,"е").replace(/\s+/g," ");
 function bulkParse(text){
   const byName = new Map();
-  for (const p of S.products) for (const n of [p.name, p.name_en, p.name_tr]) if (n && !byName.has(bulkKey(n))) byName.set(bulkKey(n), p);
+  // a merged product's names lead to the product it was merged into (they are its aliases); own names win over aliases
+  const live = S.products.filter(p=>!p.mergedInto);
+  for (const p of live) for (const n of [p.name, p.name_en, p.name_tr]) if (n && !byName.has(bulkKey(n))) byName.set(bulkKey(n), p);
+  for (const p of live) for (const n of aliasesOf(p)) if (!byName.has(bulkKey(n))) byName.set(bulkKey(n), p);
   const rows = [], fresh = new Map();
   for (const raw of String(text||"").split(/\r?\n/)){
     const line = raw.trim(); if (!line) continue;
@@ -1418,7 +1439,7 @@ document.addEventListener("click", e=>{
 $("#bulkCheck").addEventListener("click", ()=>{ bulkRows = bulkParse($("#bulkText").value); bulkRender(); });
 function productListText(){
   const cost = p => Number(p.cost)>0 ? String(Math.round(p.cost*100)/100).replace(".",",") : "";
-  return `SUSHI YM — продукты склада (${S.products.length}): раздел | продукт | единица | цена закупки\n\n` + sortedProducts().map(p=>[p.category||"", p.name, p.unit, cost(p)].join(" | ") + (p.active===false ? " | скрыт" : "")).join("\n");
+  return `SUSHI YM — продукты склада (${S.products.length}): раздел | продукт | единица | цена закупки\n\n` + sortedProducts().filter(p=>!p.mergedInto).map(p=>[p.category||"", p.name, p.unit, cost(p)].join(" | ") + (p.active===false ? " | скрыт" : "") + (aliasesOf(p).length ? " | другие названия: " + aliasesOf(p).join("; ") : "")).join("\n");
 }
 $("#bulkCopy").addEventListener("click", async ()=>{
   if (!isAdmin()) return;
@@ -1484,6 +1505,10 @@ function openProd(id){
   $("#prodTitle").textContent = p ? "Изменить продукт" : "Новый продукт";
   $("#pName").value = p ? p.name : "";
   $("#pNameEn").value = p ? p.name_en||"" : ""; $("#pNameTr").value = p ? p.name_tr||"" : ""; $("#pDesc").value = p ? p.desc||"" : "";
+  $("#pAliases").value = aliasesOf(p).join(", ");
+  { const to = p && p.mergedInto ? byId(p.mergedInto) : null;
+    $("#pMerge").hidden = !p || !!p.mergedInto; $("#pMerged").hidden = !p || !p.mergedInto;
+    if (p && p.mergedInto) $("#pMergedTxt").innerHTML = `Объединён с ${to ? N(dn(to)) : "удалённым продуктом"}${p.mergedAt ? " · " + new Date(p.mergedAt).toLocaleDateString(LOC(),{day:"numeric",month:"long",year:"numeric"}) : ""}`; }
   $("#pCat").innerHTML = allCats().map(c=>`<option value="${esc(c)}" ${p&&p.category===c?"selected":""}>${esc(c)}</option>`).join("") + `<option value="__new">Новый раздел…</option>`;
   $("#pUnit").innerHTML = (p && p.unit && !UNITS.includes(p.unit) ? [...UNITS, p.unit] : UNITS).map(u=>`<option value="${esc(u)}" ${p&&p.unit===u?"selected":""}>${esc(u)}</option>`).join("");
   $("#pMin").value = p ? String(p.min??"").replace(".",",") : "";
@@ -1527,6 +1552,9 @@ $("#prodForm").addEventListener("submit", async e => {
   { const c = numMoney($("#pCost").value); if (old && !$("#pCostWrap").hidden && old.unit===$("#pUnit").value && c!==Number(old.cost) && priceJump(old.cost, c) && !tConfirm(priceJumpMsg(old, c))){ $("#pCost").focus(); return; } }
   const p = {id: old ? old.id : uid("p"), name, name_en:$("#pNameEn").value.trim(), name_tr:$("#pNameTr").value.trim(), desc:$("#pDesc").value.trim(), category:$("#pCat").value, unit:$("#pUnit").value, min: isNaN(min)?0:min, active:$("#pActive").checked, track: !$("#pNoTrack").checked, yieldPct: isNaN(yv) ? 100 : yv, cost: (()=>{ const c = numMoney($("#pCost").value); return isNaN(c)||c<0 ? (old && old.cost) || 0 : c; })(),
     order: old ? (old.order ?? 9999) : Math.max(0, ...S.products.map(x=>x.order||0)) + 1};
+  { const al = [...new Set($("#pAliases").value.split(/[,;\n]/).map(x=>x.trim().replace(/\s+/g," ")).filter(Boolean))].filter(a=>!allNames({name:p.name, name_en:p.name_en, name_tr:p.name_tr}).some(n=>bulkKey(n)===bulkKey(a)));
+    if (al.length) p.aliases = al; }
+  if (old && old.mergedInto) Object.assign(p, {mergedInto:old.mergedInto, mergedAt:old.mergedAt, mergeBk:old.mergeBk});
   // unit change
   let conv = null;
   if (old && old.unit!==p.unit){
@@ -1561,6 +1589,139 @@ $("#prodForm").addEventListener("submit", async e => {
     $("#prodDlg").close(); render(); toast(old?"Продукт изменён":"Продукт добавлен");
   } catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте, что у вас есть права на изменение."); }
 });
+
+/* ---------- merge two products ---------- */
+// Two rows that are the same thing (e.g. «Сыр ломтики (тостовый)» from a receipt and «Сыр чеддер» from the techcards). The kept product gets
+// the other one's stock (two «Объединение» moves, not counted in Finance), its place in recipes, dishes, sets and packaging norms
+// (qty × k when the units differ) and its names as «Другие названия», so «Приход списком» finds it by them. The other one is hidden with
+// mergedInto; its old moves stay under it, so История and closed months do not change. Every changed document is copied to backups first,
+// and «Отменить объединение» (in the hidden product's dialog) puts them back.
+const r5 = x => Math.round((Number(x)||0)*100000)/100000;
+let mergeFrom = null;
+function mgSwap(list, from, to, k){
+  if (!Array.isArray(list) || !list.some(i=>i && i.productId===from)) return null;
+  const out = [];
+  for (const i of list){
+    const it = Object.assign({}, i); if (it.productId===from){ it.productId = to; it.qty = r5((Number(it.qty)||0)*k); }
+    const ex = it.productId===to ? out.find(x=>x.productId===to) : null;
+    if (ex) ex.qty = r5((Number(ex.qty)||0) + (Number(it.qty)||0)); else out.push(it);
+  }
+  return out;
+}
+const mgLastIn = pid => S.moves.reduce((t, m)=>m.productId===pid && m.type==="in" && Number(m.price)>0 ? Math.max(t, m.ts||0) : t, 0);
+function mgPlan(from, to, k, costFrom){
+  const ops = [], docs = [], where = {recipes:[], menu:[], sets:[], pack:false};
+  const put = (col, x, after) => { docs.push({col, doc:clone(x)}); ops.push({col, id:x.id, after}); };
+  for (const r of S.recipes){ const it = mgSwap(r.items, from.id, to.id, k); if (it){ put("recipes", r, Object.assign({}, r, {items:it})); where.recipes.push(byId(r.productId||r.id) || {name:"?"}); } }
+  for (const d of S.menu){ const it = mgSwap(d.items, from.id, to.id, k), pk = mgSwap(d.pack, from.id, to.id, k);
+    if (it || pk){ put("menu", d, Object.assign({}, d, it ? {items:it} : {}, pk ? {pack:pk} : {})); where.menu.push(d); } }
+  for (const x of S.sets){ const pk = mgSwap(x.pack, from.id, to.id, k); if (pk){ put("sets", x, Object.assign({}, x, {pack:pk})); where.sets.push(x); } }
+  const pc = S.settings.find(x=>x.id==="pack");
+  if (pc){ const a = mgSwap(pc.perOrder, from.id, to.id, k), b = mgSwap(pc.perItem, from.id, to.id, k);
+    if (a || b){ put("settings", pc, Object.assign({}, pc, a ? {perOrder:a} : {}, b ? {perItem:b} : {})); where.pack = true; } }
+  const ts = Date.now(), bkId = "bk_merge_" + ts, who = whoNow();
+  const own = new Set(allNames({name:to.name, name_en:to.name_en, name_tr:to.name_tr}).map(bulkKey)), al = [...aliasesOf(to)];
+  for (const n of [from.name, from.name_en, from.name_tr, ...aliasesOf(from)]) if (n && !own.has(bulkKey(n)) && !al.some(a=>bulkKey(a)===bulkKey(n))) al.push(n);
+  const toAfter = Object.assign({}, to, {aliases:al});
+  if (costFrom && Number(from.cost)>0) toAfter.cost = Math.round(Number(from.cost)/k*100)/100;
+  const st = tracked(from) ? r3x(stockMap()[from.id]||0) : 0, moves = [];
+  if (st!==0){
+    moves.push({id:uid("m"), productId:from.id, unit:from.unit, type:"mrg", delta:-st, note:`Объединение: перенесено в «${to.name}»`, who, ts});
+    moves.push({id:uid("m"), productId:to.id, unit:to.unit, type:"mrg", delta:r3x(st*k), note:`Объединение: из «${from.name}», ${fmt(st)} ${from.unit}`, who, ts:ts+1});
+  }
+  docs.unshift({col:"products", doc:clone(from)}, {col:"products", doc:clone(to)});
+  ops.unshift({col:"products", id:from.id, after:Object.assign({}, from, {active:false, mergedInto:to.id, mergedAt:ts, mergeBk:bkId})}, {col:"products", id:to.id, after:toAfter});
+  for (const m of moves) ops.push({col:"moves", id:m.id, after:m});
+  const bk = {id:bkId, ts, kind:"merge", label:`Перед объединением: «${from.name}» → «${to.name}»`, from:from.id, to:to.id, k, docs, moves:moves.map(m=>m.id), by:who};
+  return {ops, bk, where, st, moves, toAfter};
+}
+const r3x = x => Math.round((Number(x)||0)*1000)/1000;
+function mgBlock(from, to){
+  if (recipeOf(from.id)) return "У этого продукта есть рецепт (заготовка) — такие не объединяются.";
+  if (to && (recipeOf(to.id)||{items:[]}).items.some(i=>i.productId===from.id)) return "Выбранный продукт готовится из этого — объединить нельзя.";
+  if (S.invdrafts.some(d=>d.status!=="done" && d.items && from.id in d.items)) return "Этот продукт есть в пересчёте на утверждении. Сначала утвердите или отклоните пересчёт.";
+  return "";
+}
+function mgK(){ const from = mergeFrom, to = byId($("#mgTo").value); if (!from || !to) return NaN; return from.unit===to.unit ? 1 : num($("#mgK").value); }
+function mgRender(){
+  const from = mergeFrom, to = byId($("#mgTo").value), k = mgK(), prev = $("#mgPrev"), stAll = stockMap();
+  $("#mgKWrap").hidden = !to || to.unit===from.unit;
+  if (to){ $("#mgKFrom").textContent = `1 ${from.unit} =`; $("#mgKTo").textContent = to.unit; }
+  const blk = mgBlock(from, to);
+  const okK = k>0;
+  $("#mgCostBox").hidden = !to || !okK || !(Number(from.cost)>0) || !!blk;
+  if (to && okK && Number(from.cost)>0){
+    const pick = $("#mgCost").dataset.for===to.id+"|"+k ? $("#mgCost").querySelector("input:checked")?.value : (mgLastIn(from.id) > mgLastIn(to.id) || !(Number(to.cost)>0) ? "from" : "to");
+    const c = Math.round(Number(from.cost)/k*100)/100;
+    $("#mgCost").innerHTML = `<label class="toggle"><input type="radio" name="mgc" value="to" ${pick!=="from"?"checked":""}> <span>${N(dn(to))}: ${Number(to.cost)>0 ? money(to.cost) : "нет цены"} / ${esc(to.unit)}${mgLastIn(to.id) ? ` <small class="hint">(приход ${new Date(mgLastIn(to.id)).toLocaleDateString(LOC(),{day:"numeric",month:"short"})})</small>` : ""}</span></label>`
+      + `<label class="toggle"><input type="radio" name="mgc" value="from" ${pick==="from"?"checked":""}> <span>${N(dn(from))}: ${money(from.cost)} / ${esc(from.unit)}${from.unit!==to.unit ? ` = ${money(c)} / ${esc(to.unit)}` : ""}${mgLastIn(from.id) ? ` <small class="hint">(приход ${new Date(mgLastIn(from.id)).toLocaleDateString(LOC(),{day:"numeric",month:"short"})})</small>` : ""}</span></label>`;
+    $("#mgCost").dataset.for = to.id+"|"+k;
+  }
+  let h = "";
+  if (blk) h = `<p class="neg" style="margin:0">${esc(blk)}</p>`;
+  else if (to && !okK) h = `<p class="hint" style="margin:0">Укажите, сколько ${esc(to.unit)} в 1 ${esc(from.unit)}.</p>`;
+  else if (to){
+    const pl = mgPlan(from, to, k, false), w = pl.where, sa = stAll[to.id]||0;
+    const line = (a, b) => `<div><span>${a}</span><b>${b}</b></div>`;
+    if (tracked(from) && pl.st!==0) h += line(`Перейдёт в ${N(dn(to))}`, `${pl.st*k>0?"+":""}${fmt(r3x(pl.st*k))} ${esc(to.unit)}`) + line(`${N(dn(to))}: остаток станет`, `${fmt(sa)} → ${fmt(r3x(sa+pl.st*k))} ${esc(to.unit)}`);
+    else h += line("Остаток", "переносить нечего");
+    if (w.menu.length) h += `<p class="hint" style="margin:6px 0 0">Техкарты блюд (${w.menu.length}): ${w.menu.map(x=>N(dn(x))).join(", ")}</p>`;
+    if (w.recipes.length) h += `<p class="hint" style="margin:6px 0 0">Рецепты заготовок (${w.recipes.length}): ${w.recipes.map(x=>N(dn(x))).join(", ")}</p>`;
+    if (w.sets.length) h += `<p class="hint" style="margin:6px 0 0">Упаковка сетов (${w.sets.length}): ${w.sets.map(x=>N(dn(x))).join(", ")}</p>`;
+    if (w.pack) h += `<p class="hint" style="margin:6px 0 0">Нормы упаковки</p>`;
+    if (!w.menu.length && !w.recipes.length && !w.sets.length && !w.pack) h += `<p class="hint" style="margin:6px 0 0">В техкартах и рецептах не используется.</p>`;
+    if (from.unit!==to.unit && (w.menu.length || w.recipes.length || w.sets.length || w.pack)) h += `<p class="hint" style="margin:6px 0 0">Количество в них пересчитается: 1 ${esc(from.unit)} = ${fmt(k)} ${esc(to.unit)}.</p>`;
+    h += `<p class="hint" style="margin:6px 0 0">Другие названия ${N(dn(to))}: ${pl.toAfter.aliases.map(N).join(", ")}</p>`;
+  }
+  prev.innerHTML = h;
+  $("#mgSave").disabled = !to || !okK || !!blk;
+}
+function openMerge(id){
+  const from = byId(id); if (!from || !isAdmin()) return; mergeFrom = from;
+  const st = stockMap()[from.id]||0;
+  $("#mgFrom").innerHTML = `<div><span>Убрать</span><b>${N(dn(from))}</b></div><div><span>Единица</span><b>${esc(from.unit)}</b></div>` + (tracked(from) ? `<div><span>На складе</span><b>${fmt(st)} ${esc(from.unit)}</b></div>` : "");
+  let o = `<option value="">Выберите продукт</option>`, cur = null;
+  for (const p of sortedProducts().filter(p=>p.id!==from.id && !p.mergedInto && p.active!==false)){
+    if (p.category!==cur){ if (cur!==null) o += "</optgroup>"; o += `<optgroup label="${esc(p.category)}">`; cur = p.category; }
+    o += `<option value="${esc(p.id)}">${esc(dn(p))} (${esc(p.unit)})</option>`;
+  }
+  $("#mgTo").innerHTML = o + (cur!==null ? "</optgroup>" : "");
+  $("#mgK").value = ""; $("#mgCost").dataset.for = ""; $("#mgCost").innerHTML = "";
+  mgRender(); $("#mergeDlg").showModal(); $("#mgTo").focus();
+}
+$("#pMerge").addEventListener("click", ()=>{ const id = editingId; if (!id || !isAdmin()) return; $("#prodDlg").close(); openMerge(id); });
+$("#mgTo").addEventListener("change", mgRender);
+$("#mgK").addEventListener("input", mgRender);
+$("#mergeForm").addEventListener("submit", e=>{ e.preventDefault(); guarded(async ()=>{
+  const from = mergeFrom && byId(mergeFrom.id), to = byId($("#mgTo").value), k = mgK();
+  if (!isAdmin() || !from || !to || !(k>0) || mgBlock(from, to)) return;
+  const costFrom = !$("#mgCostBox").hidden && $("#mgCost").querySelector("input:checked")?.value==="from";
+  const pl = mgPlan(from, to, k, costFrom);
+  if (!window.confirm(trS("Объединить продукты?") + "\n\n" + trS("Убрать") + ": " + from.name + "\n" + trS("Оставить") + ": " + to.name + "\n\n" + trS("Первый исчезнет со склада, всё перейдёт во второй. Отменить можно: «Показать скрытые и без учёта» → этот продукт → «Изменить продукт» → «Отменить объединение»."))) return;
+  try { await putDoc("backups", pl.bk.id, pl.bk); }
+  catch(err){ console.error(err); toast("Не удалось сохранить копию — ничего не изменено."); return; }
+  try { await commit(`Объединение: ${from.name} → ${to.name}`, pl.ops); $("#mergeDlg").close(); render(); toast(trS("Объединено") + `: ${from.name} → ${to.name}`); }
+  catch(err){ console.error(err); render(); if (err.code!=="month-closed") toast("Не удалось сохранить. Проверьте интернет и попробуйте ещё раз."); }
+}); });
+// undo: the documents from the backup come back as they were before the merge (later edits of those techcards are lost — the confirm says so);
+// the kept product keeps its later price and only loses the names it got; the two «Объединение» moves are deleted
+$("#pUnmerge").addEventListener("click", ()=>guarded(async ()=>{
+  const p = editingId && byId(editingId); if (!isAdmin() || !p || !p.mergedInto) return;
+  if (!navigator.onLine){ toast("Нет интернета. Отменить объединение можно только онлайн."); return; }
+  let bk = null;
+  try { const s = await srvGet(FS.doc("backups/" + p.mergeBk)); bk = s.exists ? s.data() : null; } catch(err){ console.error(err); }
+  if (!bk || !Array.isArray(bk.docs)){ toast("Копия перед объединением не найдена — отменить нельзя."); return; }
+  const to = byId(bk.to), other = bk.docs.filter(x=>x.col!=="products").map(x=>x.col==="settings" ? "Нормы упаковки" : x.col==="recipes" ? dn(byId(x.doc.productId||x.doc.id)||x.doc) : dn(x.doc));
+  if (!window.confirm(trS(`Отменить объединение?\n\nВернётся на склад со своим остатком`) + `: ${p.name}\n` + trS("Сейчас объединён с") + `: ${to ? to.name : "?"}` + (other.length ? "\n\n" + trS("Эти техкарты вернутся к виду до объединения, их правки после объединения пропадут:") + " " + other.join(", ") : ""))) return;
+  const ops = [];
+  for (const x of bk.docs){
+    if (x.col==="products" && x.doc.id===bk.to){ if (!to) continue; const a = Object.assign({}, to); if (Array.isArray(x.doc.aliases)) a.aliases = x.doc.aliases; else delete a.aliases; ops.push({col:"products", id:to.id, after:a}); }
+    else ops.push({col:x.col, id:x.doc.id, after:x.doc});
+  }
+  for (const id of bk.moves||[]) if (S.mdocs.some(d=>d.id===id)) ops.push({col:"moves", id, after:null});
+  try { await commit(`Отмена объединения: ${p.name}`, ops); $("#prodDlg").close(); render(); toast("Объединение отменено"); }
+  catch(err){ console.error(err); render(); if (err.code!=="month-closed") toast("Не удалось сохранить. Проверьте интернет и попробуйте ещё раз."); }
+}));
 
 /* ---------- product card ---------- */
 let cardId = null;
@@ -1769,7 +1930,9 @@ function dishCats(){ const s = new Set(DISH_CATS); S.menu.forEach(d=>d.category 
 const setsWithDish = id => S.sets.filter(st=>(st.items||[]).some(i=>i.dishId===id));
 const lineName = l => l.kind==="set" ? ((setById(l.id)||{}).name || "Удалённый сет") : ((dishById(l.id)||{}).name || "Удалённое блюдо");
 const dn = x => (x && (x["name_"+LANG] || x.name)) || "";
-const allNames = x => [x.name, x.name_en, x.name_tr].filter(Boolean);
+const allNames = x => [x.name, x.name_en, x.name_tr, ...aliasesOf(x)].filter(Boolean);
+// «Другие названия» of a product (from a receipt, a merged product): «Приход списком» and the search find it by them
+const aliasesOf = p => Array.isArray(p && p.aliases) ? p.aliases.filter(Boolean) : [];
 const plural = (n, a, b, c) => { const m10=n%10, m100=n%100; return (m10===1&&m100!==11) ? a : (m10>=2&&m10<=4&&(m100<10||m100>=20)) ? b : c; };
 
 function expandCart(cart){
@@ -5319,6 +5482,53 @@ Object.assign(I18N, {"Часы приёма заказов с сайта": ["Web
   "Нет интернета. Часы приёма заказов с сайта можно изменить только онлайн.": ["No internet. Website order hours can be changed only online.", "İnternet yok. Web sitesi sipariş saatleri yalnızca çevrimiçi değiştirilebilir."],
   "Приём будет идти через полночь, до": ["Orders will be taken past midnight, until", "Siparişler gece yarısından sonra da alınacak, bitiş:"], "следующего дня. Верно?": ["the next day. Is that right?", "ertesi gün. Doğru mu?"],
   "Не удалось сохранить часы приёма": ["Could not save the order hours", "Sipariş saatleri kaydedilemedi"]});
+Object.assign(I18N, {"Другие названия": ["Other names", "Diğer adlar"],
+  "(через запятую)": ["(separated by commas)", "(virgülle ayırın)"],
+  "Например: тостовый сыр, cheddar dilim": ["For example: toast cheese, cheddar dilim", "Örneğin: tost peyniri, cheddar dilim"],
+  "«Приход списком» и чеки находят продукт и по этим названиям.": ["«Bulk receipt» and receipts also find the product by these names.", "«Toplu giriş» ve fişler ürünü bu adlarla da bulur."],
+  "Объединить с другим продуктом…": ["Merge with another product…", "Başka bir ürünle birleştir…"],
+  "Отменить объединение": ["Undo the merge", "Birleştirmeyi geri al"],
+  "Объединить продукты": ["Merge products", "Ürünleri birleştir"],
+  "Эта строка исчезнет со склада. Её остаток, место в техкартах блюд, рецептах заготовок и упаковке перейдут в выбранный продукт, а её название станет его «другим названием»: приход по чекам с этим названием попадёт туда же. Старые записи в «Истории» не меняются.": ["This row will disappear from the stock. Its stock level and its place in dish recipes, prep recipes and packaging move to the chosen product, and its name becomes that product's «other name»: receipts with this name go there too. Old records in «History» do not change.", "Bu satır depodan kalkacak. Stok miktarı ve yemek reçetelerindeki, hazırlık reçetelerindeki ve ambalajdaki yeri seçilen ürüne geçer; adı o ürünün «diğer adı» olur: bu adla gelen fişler de oraya gider. «Geçmiş»teki eski kayıtlar değişmez."],
+  "Оставить вместо неё": ["Keep instead of it", "Yerine kalacak ürün"],
+  "Единицы разные. Сколько это в единице выбранного продукта?": ["The units differ. How much is it in the chosen product's unit?", "Birimler farklı. Seçilen ürünün biriminde ne kadar eder?"],
+  "Сколько это в единице выбранного продукта": ["How much is it in the chosen product's unit", "Seçilen ürünün biriminde ne kadar eder"],
+  "Цена закупки после объединения": ["Purchase price after the merge", "Birleştirmeden sonra alış fiyatı"],
+  "Объединить": ["Merge", "Birleştir"],
+  "Объединён с": ["Merged into", "Birleştirildiği ürün:"],
+  "удалённым продуктом": ["a deleted product", "silinmiş ürün"],
+  "Объединение": ["Merge", "Birleştirme"],
+  "Убрать": ["Remove", "Kaldırılacak"],
+  "Оставить": ["Keep", "Kalacak"],
+  "У этого продукта есть рецепт (заготовка) — такие не объединяются.": ["This product has a recipe (a prep) — such products are not merged.", "Bu ürünün reçetesi var (hazırlık) — bunlar birleştirilmez."],
+  "Выбранный продукт готовится из этого — объединить нельзя.": ["The chosen product is made from this one — they cannot be merged.", "Seçilen ürün bundan yapılıyor — birleştirilemez."],
+  "Этот продукт есть в пересчёте на утверждении. Сначала утвердите или отклоните пересчёт.": ["This product is in a count waiting for approval. Approve or reject the count first.", "Bu ürün onay bekleyen bir sayımda var. Önce sayımı onaylayın veya reddedin."],
+  "Укажите, сколько": ["Enter how many", "Kaç"],
+  "в 1": ["in 1", "= 1"],
+  "Перейдёт в": ["Moves to", "Aktarılacak:"],
+  "остаток станет": ["stock will be", "stok olacak"],
+  "Остаток": ["Stock", "Stok"],
+  "переносить нечего": ["nothing to move", "taşınacak bir şey yok"],
+  "Техкарты блюд": ["Dish recipes", "Yemek reçeteleri"],
+  "Упаковка сетов": ["Set packaging", "Set ambalajı"],
+  "В техкартах и рецептах не используется.": ["Not used in dish or prep recipes.", "Yemek ve hazırlık reçetelerinde kullanılmıyor."],
+  "Количество в них пересчитается:": ["The amounts in them will be converted:", "İçlerindeki miktarlar çevrilecek:"],
+  "Объединить продукты?": ["Merge the products?", "Ürünler birleştirilsin mi?"],
+  "Первый исчезнет со склада, всё перейдёт во второй. Отменить можно: «Показать скрытые и без учёта» → этот продукт → «Изменить продукт» → «Отменить объединение».": ["The first one disappears from the stock, everything moves to the second. To undo: «Show hidden and untracked» → this product → «Edit product» → «Undo the merge».", "Birincisi depodan kalkar, her şey ikincisine geçer. Geri almak için: «Gizli ve takipsizleri göster» → bu ürün → «Ürünü düzenle» → «Birleştirmeyi geri al»."],
+  "Объединено": ["Merged", "Birleştirildi"],
+  "Нет интернета. Отменить объединение можно только онлайн.": ["No internet. A merge can be undone only online.", "İnternet yok. Birleştirme yalnızca çevrimiçi geri alınabilir."],
+  "Копия перед объединением не найдена — отменить нельзя.": ["The copy made before the merge was not found — it cannot be undone.", "Birleştirmeden önceki kopya bulunamadı — geri alınamaz."],
+  "Отменить объединение?": ["Undo the merge?", "Birleştirme geri alınsın mı?"],
+  "Вернётся на склад со своим остатком": ["Comes back to the stock with its own stock level", "Kendi stok miktarıyla depoya döner"],
+  "Сейчас объединён с": ["Now merged into", "Şu an birleştirildiği ürün:"],
+  "Эти техкарты вернутся к виду до объединения, их правки после объединения пропадут:": ["These recipes go back to how they were before the merge; changes made to them after it will be lost:", "Bu reçeteler birleştirmeden önceki hâline döner; sonradan yapılan değişiklikler kaybolur:"],
+  "Объединение отменено": ["Merge undone", "Birleştirme geri alındı"],
+  "Не удалось сохранить. Проверьте интернет и попробуйте ещё раз.": ["Could not save. Check the internet and try again.", "Kaydedilemedi. İnterneti kontrol edip tekrar deneyin."],
+  "Объединение: перенесено в": ["Merge: moved to", "Birleştirme: aktarıldı →"],
+  "Объединение: из": ["Merge: from", "Birleştirme: kaynak"],
+  "приход": ["receipt", "giriş"],
+  "Объединение:": ["Merge:", "Birleştirme:"],
+  "Отмена объединения:": ["Merge undone:", "Birleştirme geri alındı:"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
