@@ -2847,7 +2847,7 @@ function renderFinControls(c){
   c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${FIN_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-finp="${k}" aria-pressed="${S.finPeriod===k}">${l}</button>`).join("")}</div>
     ${S.finPeriod==="quarter" || S.finPeriod==="year" ? `<div class="mnav finq"><button type="button" class="btn small" data-finoff="-1" aria-label="Назад">‹</button><b>${esc(finQName())}</b><button type="button" class="btn small" data-finoff="1" aria-label="Вперёд" ${(Number(S.finOff)||0)>=0?"disabled":""}>›</button></div>` : ""}
     ${isC ? `<div class="controls"><label class="f" style="flex:1 1 140px">С<input type="date" id="finFrom" class="search" value="${esc(S.finFrom||"")}"></label><label class="f" style="flex:1 1 140px">По<input type="date" id="finTo" class="search" value="${esc(S.finTo||todayKey())}"></label></div>` : ""}
-    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button><button class="btn" id="openOff">Расход и списание</button><button class="btn" id="openCardFee">Удержание с карт</button><button class="btn" id="openMonClose">Закрыть месяц</button></div>
+    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button><button class="btn" id="openOff">Расход и списание</button><button class="btn" id="openCardFee">Удержание с карт</button><button class="btn" id="openMonClose">Закрыть месяц</button><button class="btn" id="finXls">⬇ Скачать Excel</button></div>
     ${lastClosed() ? `<p class="hint" style="margin:0">${esc(dot(`Последний закрытый месяц: ${ymName(lastClosed())}`))}</p>` : ""}
     <p class="hint" style="margin:0">${esc(promoCfgText())}</p>
     <p class="hint" style="margin:0">${esc(`С оплаты картой вычитается ${fmt(cardPct())}% (КДВ и комиссия банка).`)}</p>
@@ -5529,6 +5529,8 @@ Object.assign(I18N, {"Другие названия": ["Other names", "Diğer ad
   "приход": ["receipt", "giriş"],
   "Объединение:": ["Merge:", "Birleştirme:"],
   "Отмена объединения:": ["Merge undone:", "Birleştirme geri alındı:"]});
+// Д13: reports to Excel
+Object.assign(I18N, {"Скачать Excel": ["Download Excel", "Excel indir"], "Файл Excel скачан": ["Excel file downloaded", "Excel dosyası indirildi"], "Не получилось сделать файл Excel": ["Could not make the Excel file", "Excel dosyası oluşturulamadı"], "За этот период на устройстве загружены не все старые записи. Загрузить их, чтобы в таблице были все продажи, расходы и смены? Это один раз прочитает их из базы. «Отмена» — скачать без них (итоги всё равно верные).": ["Not all older records of this period are loaded on this device. Load them so the table has all sales, expenses and shifts? This reads them from the database once. “Cancel” downloads without them (the totals are still right).", "Bu dönemin eski kayıtlarının hepsi bu cihazda yüklü değil. Tabloda tüm satışlar, giderler ve vardiyalar olsun diye yüklensin mi? Bu, kayıtları veritabanından bir kez okur. «İptal» — onlarsız indir (toplamlar yine doğru)."], "SUSHI YM — отчёт за период": ["SUSHI YM — report for the period", "SUSHI YM — dönem raporu"], "Отчёт сделан": ["Report made", "Rapor oluşturuldu"], "цифры из итога месяца": ["figures from the month's totals", "rakamlar ay kapanışından"], "Чеков": ["Checks", "Fiş sayısı"], "Нет цены закупки (себестоимость занижена)": ["No purchase price (cost is understated)", "Alış fiyatı yok (maliyet düşük görünüyor)"], "Показатель": ["Item", "Kalem"], "Часы": ["Hours", "Saat"], "Время": ["Time", "Saat"], "Тип": ["Type", "Tür"], "Скидка, ₺": ["Discount, ₺", "İndirim, ₺"], "Блюда, ₺": ["Dishes, ₺", "Yemekler, ₺"], "Доставка, ₺": ["Delivery, ₺", "Teslimat, ₺"], "Итого, ₺": ["Total, ₺", "Toplam, ₺"], "Себестоимость, ₺": ["Cost, ₺", "Maliyet, ₺"], "Кто": ["Who", "Kim"], "Состав": ["Items", "İçerik"], "Выручка, ₺": ["Revenue, ₺", "Ciro, ₺"], "Прибыль, ₺": ["Profit, ₺", "Kâr, ₺"], "Доля выручки": ["Share of revenue", "Ciro payı"], "Вид": ["Kind", "Tür"], "по расчёту (нет записи за месяц)": ["calculated (no record for the month)", "hesaplanan (ay için kayıt yok)"], "Работник": ["Worker", "Çalışan"], "Ставка, ₺/ч": ["Rate, ₺/h", "Ücret, ₺/sa"], "Оплата, ₺": ["Pay, ₺", "Ödeme, ₺"], "Отметка": ["Note", "Not"], "Ещё на смене": ["Still on shift", "Hâlâ vardiyada"], "Закрыта автоматически": ["Closed automatically", "Otomatik kapatıldı"], "С перерывом": ["With a break", "Molalı"], "Ед.": ["Unit", "Birim"], "Мин.": ["Min.", "Min."], "Состояние": ["Status", "Durum"], "Закупка за ед., ₺": ["Purchase per unit, ₺", "Birim alış, ₺"], "Стоимость, ₺": ["Value, ₺", "Değer, ₺"], "Кол-во": ["Qty", "Miktar"], "Цена за ед., ₺": ["Price per unit, ₺", "Birim fiyat, ₺"], "Итоги": ["Totals", "Özet"], "Блюда": ["Dishes", "Yemekler"], "Смены": ["Shifts", "Vardiyalar"], "Склад сейчас": ["Stock now", "Şu anki stok"], "Продукты за период": ["Products for the period", "Dönemdeki ürünler"], "Движение склада": ["Stock movements", "Stok hareketleri"], "Кассовый": ["Cash", "Kasa"], "Ежемесячный": ["Monthly", "Aylık"], "Прочий": ["Other", "Diğer"], "Оплачено картой": ["Paid by card", "Kartla ödenen"], "Доставка (деньги курьера)": ["Delivery (courier's money)", "Teslimat (kuryenin parası)"], "Закрытие дня: разница по наличным": ["Day close: cash difference", "Gün kapanışı: nakit farkı"], "Закрытие дня: разница по картам": ["Day close: card difference", "Gün kapanışı: kart farkı"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
@@ -6124,6 +6126,178 @@ document.addEventListener("click", async e=>{
   if (b.dataset.devoff){ if (d.main || id===DEV_ID) return; if (!tConfirm(`Отключить «${devName(d)}»? Оно выйдет из программы и удалит у себя копию данных. Вернуть его можно кнопкой «Разрешить».`)) return; devSet(id, {status:"off", offAt:Date.now(), offBy:S.me.name}); toast("Устройство отключено"); return; }
   if (b.dataset.devdel){ if (d.main) return; if (!tConfirm(`Убрать «${devName(d)}» из списка? Если оно снова откроет программу, то появится как новое.`)) return; devRef(id).delete().catch(writeErr); }
 });
+/* ---------- Д13: reports to Excel (admin) ---------- */
+// One .xlsx file for the period chosen in Финансы: Итоги (the same numbers as Финансы), Продажи (a row per check), Блюда, Расходы, Смены,
+// Склад сейчас, Продукты за период (by kind of movement), Движение склада (without sales: they are in Продажи).
+// Made on the device from the data it already has, with no library: an .xlsx is a zip of XML files. The file stays with the admin.
+const XL_CRC = (()=>{ const t = new Uint32Array(256); for (let n=0;n<256;n++){ let c = n; for (let k=0;k<8;k++) c = c&1 ? 0xEDB88320^(c>>>1) : c>>>1; t[n] = c>>>0; } return t; })();
+const xlCrc = b => { let c = 0xFFFFFFFF; for (let i=0;i<b.length;i++) c = XL_CRC[(c^b[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; };
+async function xlDeflate(b){
+  if (typeof CompressionStream!=="function") return null;   // an older browser: the file is stored without compression, just bigger
+  try { return new Uint8Array(await new Response(new Blob([b]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer()); } catch(e){ return null; }
+}
+async function xlZip(files){
+  const enc = new TextEncoder(), parts = [], cen = []; let off = 0;
+  const u16 = v => [v&255, (v>>>8)&255], u32 = v => [v&255, (v>>>8)&255, (v>>>16)&255, (v>>>24)&255];
+  const d = new Date(), tm = (d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1), dt = ((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+  for (const f of files){
+    const name = enc.encode(f.name), raw = enc.encode(f.data), z = await xlDeflate(raw), body = z || raw;
+    const h = [...u16(20), ...u16(0x0800), ...u16(z ? 8 : 0), ...u16(tm), ...u16(dt), ...u32(xlCrc(raw)), ...u32(body.length), ...u32(raw.length), ...u16(name.length), ...u16(0)];
+    parts.push(new Uint8Array([...u32(0x04034b50), ...h]), name, body);
+    cen.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...h, ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), name);
+    off += 30 + name.length + body.length;
+  }
+  const cs = cen.reduce((a,x)=>a+x.length, 0);
+  return new Blob([...parts, ...cen, new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cs), ...u32(off), ...u16(0)])],
+    {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+// cell styles (see xlStyles): 0 text, 1 header, 2 money, 3 date, 4 time, 5 hours, 6 percent, 7 bold text, 8 bold money, 9 quantity
+const XL_ST = {text:0, head:1, money:2, date:3, time:4, hours:5, pct:6, bold:7, bmoney:8, qty:9};
+const xlEsc = s => String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const xlCol = i => { let s = ""; for (i++; i>0; i = Math.floor((i-1)/26)) s = String.fromCharCode(65 + (i-1)%26) + s; return s; };
+const xlDate = dk => dk ? Date.UTC(...dk.split("-").map((v,i)=>Number(v)-(i===1?1:0)))/864e5 + 25569 : null;   // "YYYY-MM-DD" → Excel's day number
+const xlTime = ts => { const d = new Date(ts); return (d.getHours()*60 + d.getMinutes())/1440; };   // to the minute
+const xt = s => LANG==="ru" ? s : trExact(s);   // the app's words in the admin's language; what people typed stays as typed
+// a sheet: {name, cols:[[header, width, style]], rows:[[values]] or {b:true, c:[values]} for a bold row, table:true for a filter and a fixed header row}
+function xlSheet(sh){
+  const rows = [], put = (r, cells, bold) => {
+    const cs = cells.map((v, i) => {
+      if (v==null || v==="") return "";
+      const ref = xlCol(i)+r, st0 = (sh.cols[i]||[])[2] || "text";
+      let st = XL_ST[st0]; if (bold) st = st0==="money" ? XL_ST.bmoney : st0==="text" ? XL_ST.bold : st;
+      if (typeof v==="object"){ st = XL_ST[v.s]; v = v.v; }   // {v, s}: a cell with its own style
+      if (typeof v==="number") return isFinite(v) ? `<c r="${ref}" s="${st}"><v>${+v.toPrecision(15)}</v></c>` : "";
+      return `<c r="${ref}" s="${bold ? XL_ST.bold : st0==="head" ? XL_ST.head : 0}" t="inlineStr"><is><t xml:space="preserve">${xlEsc(v)}</t></is></c>`;
+    }).join("");
+    rows.push(`<row r="${r}">${cs}</row>`);
+  };
+  const h0 = sh.table ? 1 : 0;   // a table has its header row; a sheet of lines (Итоги) has not
+  if (h0){ put(1, sh.cols.map(c=>xt(c[0])).map(String), false); rows[0] = rows[0].replace(/ s="0"/g, ` s="${XL_ST.head}"`); }
+  sh.rows.forEach((x, i) => Array.isArray(x) ? put(i+1+h0, x, false) : put(i+1+h0, x.c, !!x.b));
+  const last = xlCol(sh.cols.length-1) + Math.max(1, sh.rows.length+1);
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`
+    + (sh.table ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` : `<sheetViews><sheetView workbookViewId="0"/></sheetViews>`)
+    + `<sheetFormatPr defaultRowHeight="15"/><cols>${sh.cols.map((c,i)=>`<col min="${i+1}" max="${i+1}" width="${c[1]||12}" customWidth="1"/>`).join("")}</cols>`
+    + `<sheetData>${rows.join("")}</sheetData>` + (sh.table && sh.rows.length ? `<autoFilter ref="A1:${last}"/>` : "") + `</worksheet>`;
+}
+const xlStyles = () => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="4"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="dd.mm.yyyy"/><numFmt numFmtId="166" formatCode="hh:mm"/><numFmt numFmtId="167" formatCode="#,##0.###"/></numFmts>`
+  + `<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>`
+  + `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF4"/><bgColor indexed="64"/></patternFill></fill></fills>`
+  + `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
+  + `<cellXfs count="10"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1" vertical="center"/></xf>`
+  + `<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`
+  + `<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="10" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>`
+  + `<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>`
+  + `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+async function xlBook(sheets){
+  const names = [], nm = s => { let n = xt(s).replace(/[\[\]:*?\/\\]/g, " ").slice(0, 31), k = 2; while (names.includes(n)) n = n.slice(0, 28) + " " + k++; names.push(n); return n; };
+  sheets.forEach(sh => sh.xname = nm(sh.name));
+  const files = [
+    {name:"[Content_Types].xml", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`},
+    {name:"_rels/.rels", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:"xl/workbook.xml", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>${sheets.map((s,i)=>`<sheet name="${xlEsc(s.xname)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets>`
+      + (sheets.some(s=>s.table && s.rows.length) ? `<definedNames>${sheets.map((s,i)=>s.table && s.rows.length ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xlEsc(s.xname.replace(/'/g,"''"))}'!$A$1:$${xlCol(s.cols.length-1)}$${s.rows.length+1}</definedName>` : "").join("")}</definedNames>` : "") + `</workbook>`},
+    {name:"xl/_rels/workbook.xml.rels", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:"xl/styles.xml", data:xlStyles()},
+    ...sheets.map((s,i)=>({name:`xl/worksheets/sheet${i+1}.xml`, data:xlSheet(s)}))];
+  return xlZip(files);
+}
+// the report: what Финансы show for [t0,t1), with the lists behind the numbers
+function xlReport(t0, t1){
+  const inR = ts => (ts||0)>=t0 && (ts||0)<t1, F = finData(t0, t1), first = t0 || Math.min(Date.now(), ...S.sales.map(x=>x.ts||Infinity), ...S.moves.map(x=>x.ts||Infinity));
+  const tEnd = Math.min(t1, Date.now()), dkOf = ts => xlDate(dayKey(ts)), per = `${dmy(dayKey(first))} – ${dmy(dayKey(tEnd-1))}`;
+  const sh = [];
+  // Итоги
+  const r = [], L = (a, v, b) => { v = Math.round(v*100)/100; r.push(b ? {b:true, c:[xt(a), v]} : [xt(a), v]); }, blank = () => r.push([]);
+  r.push({b:true, c:[`${xt("SUSHI YM — отчёт за период")}: ${per}`]}); r.push([`${xt("Отчёт сделан")}: ${new Date().toLocaleString(LOC())}, ${whoNow()}`]);
+  if (F.closed.length) r.push([`${xt("Месяц закрыт")}: ${F.closed.map(ymName).join(", ")} — ${xt("цифры из итога месяца")}`]);
+  blank();
+  r.push({b:true, c:["", xt("Сумма, ₺")]}); L("Выручка", F.revenue, true); r.push([xt("Чеков"), {v:F.nChecks, s:"qty"}]); if (F.nChecks) L("Средний чек", F.revenue/F.nChecks);
+  if (F.promo.n || F.promo.orders) L("Скидки по акциям и подарки", F.promo.disc);
+  L("Себестоимость проданного", -F.cogs); L("Валовая прибыль", finGross(F), true);
+  L("Списания (порча, брак)", -F.writeOff); if (F.manualOut) L("Расход со склада вручную", -F.manualOut);
+  if (F.invLoss) L(F.invLoss>0 ? "Недостача по инвентаризации" : "Излишки по инвентаризации", -F.invLoss);
+  if (F.cardCut) L("Удержание с оплат картой", -F.cardCut);
+  if (F.cashN){ L("Кассовые расходы", -F.cash.total); CASH_KINDS.filter(k=>F.cash[k]).forEach(k=>r.push(["   " + xt(k), -Math.round(F.cash[k]*100)/100])); }
+  Object.entries(F.expByCat).sort((a,b)=>b[1]-a[1]).forEach(([k,v])=>r.push([xt(k), -Math.round(v*100)/100]));
+  L("Чистая прибыль", finNet(F), true); blank();
+  L("Закуплено продуктов за период", F.buyIn); if (F.courN) L("Доставка (деньги курьера)", F.courSum);
+  if (F.cardSum) L("Оплачено картой", F.cardSum);
+  if (F.dc.n){ L("Закрытие дня: разница по наличным", F.dc.cashDiff); L("Закрытие дня: разница по картам", F.dc.cardDiff); }
+  const stf = Object.values(F.staff).sort((a,b)=>b.hrs-a.hrs);
+  if (stf.length){ blank(); r.push({b:true, c:[xt("Часы и оплата по сменам"), xt("Оплата, ₺"), xt("Часы")]}); stf.forEach(x=>r.push([x.name, x.pay, {v:Math.round(x.hrs*100)/100, s:"hours"}])); L("Итого", stf.reduce((a,x)=>a+x.pay, 0), true); }
+  if (F.noPrice.length){ blank(); r.push([`${xt("Нет цены закупки (себестоимость занижена)")}: ${F.noPrice.join(", ")}`]); }
+  sh.push({name:"Итоги", cols:[["Показатель", 46, "text"], ["Сумма, ₺", 16, "money"], ["Часы", 10, "hours"]], rows:r});
+  // Продажи: a row per check
+  const sales = S.sales.filter(x=>inR(x.ts)).sort((a,b)=>(a.ts||0)-(b.ts||0)), lineCost = l => { const k = l.kind||"dish", src = k==="set" ? setById(l.refId) : dishById(l.refId);
+    return (Number(l.uc)>0 ? Number(l.uc) : src ? (k==="set" ? setCost(src).cost : dishCost(src).cost) : 0) * (Number(l.qty)||0); };
+  sh.push({name:"Продажи", table:true, cols:[["Дата", 11, "date"], ["Время", 7, "time"], ["Заказ №", 9, "qty"], ["Тип", 12], ["Источник", 24], ["Оплата", 16], ["Наличные", 12, "money"], ["Карта", 12, "money"], ["Другое", 12, "money"],
+      ["Скидка, %", 9, "qty"], ["Скидка, ₺", 11, "money"], ["Блюда, ₺", 12, "money"], ["Доставка, ₺", 11, "money"], ["Итого, ₺", 12, "money"], ["Себестоимость, ₺", 14, "money"], ["Кто", 14], ["Состав", 60]],
+    rows:sales.map(sl=>{ const o = sl.orderId ? orderById(sl.orderId) : null, pp = payParts(sl), cash = paidBy(sl, "Наличные"), card = paidBy(sl, "Карта");
+      return [dkOf(sl.ts), xlTime(sl.ts), o && o.num!=null ? Number(o.num) : sl.orderNum!=null ? Number(sl.orderNum) : null, sl.orderType ? xt(OTYPES[sl.orderType]||sl.orderType) : xt("Быстрая продажа"),
+        sl.source ? xt(sl.source) : "", pp.map(x=>xt(x.m)).join(" + "), cash||null, card||null, pp.reduce((a,x)=>a+(x.m!=="Наличные" && x.m!=="Карта" ? x.sum : 0), 0)||null,
+        Number(sl.discPct)>0 ? Number(sl.discPct) : null, Number(sl.disc)>0 ? Number(sl.disc) : null, saleFood(sl), Number(sl.courierFee)||null, saleSum(sl),
+        Math.round((sl.lines||[]).reduce((a,l)=>a+lineCost(l), 0)*100)/100, sl.who||"", (sl.lines||[]).map(l=>`${fmt(l.qty)}× ${lName({kind:l.kind, id:l.refId, name:l.name})}${l.promo?" ("+xt("акция")+")":""}`).join(", ")]; })});
+  // Блюда
+  const items = Object.values(F.items).sort((a,b)=>b.rev-a.rev);
+  sh.push({name:"Блюда", table:true, cols:[["Блюдо", 34], ["Раздел", 20], ["Шт", 8, "qty"], ["Выручка, ₺", 13, "money"], ["Себестоимость, ₺", 15, "money"], ["Прибыль, ₺", 13, "money"], ["Доля выручки", 12, "pct"]],
+    rows:items.map(it=>[it.name + (it.kind==="set" ? " (" + xt("сет") + ")" : ""), xt(it.cat), it.qty, Math.round(it.rev*100)/100, Math.round(it.cost*100)/100, it.cost>0 ? Math.round((it.rev-it.cost)*100)/100 : null, F.revenue ? it.rev/F.revenue : null])});
+  // Расходы (as in Финансы: courier fees of delivered orders are not expenses)
+  const exps = [...S.expenses.filter(x=>inR(x.monthly ? monTs(x) : x.ts)), ...monthlyAutoIn(t0, t1)].filter(x=>!courPass(x)).sort((a,b)=>(a.monthly||a.auto ? monTs(a) : a.ts||0)-(b.monthly||b.auto ? monTs(b) : b.ts||0));
+  sh.push({name:"Расходы", table:true, cols:[["Дата", 11, "date"], ["Вид", 14], ["Статья", 22], ["Сумма, ₺", 13, "money"], ["Комментарий", 40], ["Кто", 14]],
+    rows:exps.map(x=>{ const m = x.monthly || x.auto;
+      return [m ? xlDate((x.month||ymOf(x.ts||0))+"-01") : dkOf(x.ts||0), xt(isCash(x) ? "Кассовый" : m ? "Ежемесячный" : "Прочий"), xt(isCash(x) ? (x.kind||"Другое") : (x.category||"Прочее")), Number(x.amount)||0,
+        x.auto ? xt("по расчёту (нет записи за месяц)") : x.orderNum!=null ? `${xt("Заказ №")}${x.orderNum}` : (x.note||""), x.who||""]; })});
+  // Смены: a row per shift (by its start), annulled ones with 0 hours
+  const staff = S.staff.filter(x=>roleOf(x)!=="admin" && !isDemoStaff(x)), sid = new Map(staff.map(x=>[x.id, x]));
+  const shs = S.shifts.filter(x=>sid.has(x.staffId) && inR(x.start)).sort((a,b)=>String(sid.get(a.staffId).name).localeCompare(sid.get(b.staffId).name, "ru") || a.start-b.start);
+  sh.push({name:"Смены", table:true, cols:[["Работник", 16], ["Дата", 11, "date"], ["Начало", 8, "time"], ["Конец", 8, "time"], ["Часы", 8, "hours"], ["Ставка, ₺/ч", 11, "money"], ["Оплата, ₺", 12, "money"], ["Отметка", 34]],
+    rows:shs.map(x=>{ const st = sid.get(x.staffId), v = isVoid(x), h = v ? 0 : Math.round(hoursOf(x)*100)/100, rate = rateAt(st, x.start||0);
+      const mark = v ? `${xt("Аннулирована")}: ${x.void.why||""}` : !x.end ? xt("Ещё на смене") : x.autoClosed ? xt("Закрыта автоматически") : (x.breaks||[]).some(b=>b.to>b.from) ? xt("С перерывом") : "";
+      return [st.name||"", dkOf(x.start), xlTime(x.start), x.end && !v ? xlTime(x.end) : null, h, rate||null, rate ? Math.round(h*rate*100)/100 : null, mark]; })});
+  // Склад сейчас (today, not the period)
+  const stk = stockMap(), prods = sortedProducts().filter(p=>tracked(p) && p.active!==false);
+  sh.push({name:"Склад сейчас", table:true, cols:[["Раздел", 20], ["Продукт", 30], ["Ед.", 6], ["Остаток", 10, "qty"], ["Мин.", 8, "qty"], ["Состояние", 11], ["Закупка за ед., ₺", 14, "money"], ["Стоимость, ₺", 13, "money"]],
+    rows:prods.map(p=>{ const q = Math.round((stk[p.id]||0)*1000)/1000, c = unitCost(p.id).cost, s = status(p, stk);
+      return [xt(p.category||"Прочее"), dn(p), xt(p.unit||""), q, Number(p.min)||null, xt(s==="empty" ? "нет" : s==="low" ? "мало" : "достаточно"), c>0 ? Math.round(c*100)/100 : null, c>0 ? Math.round(Math.max(q,0)*c*100)/100 : null]; })});
+  // Продукты за период: how much of each came and went, by kind of movement
+  const KS = ["in","sale","off","out","prod","use","cut","inv","mrg"], agg = {};
+  for (const m of S.moves){ if (!inR(m.ts) || m.reset || !m.productId || !TYPES[m.type]) continue; const a = agg[m.productId] = agg[m.productId] || {}; a[m.type] = (a[m.type]||0) + (Number(m.delta)||0); }
+  sh.push({name:"Продукты за период", table:true, cols:[["Продукт", 30], ["Ед.", 6], ...KS.map(k=>[TYPES[k].label, 12, "qty"]), ["Итого", 10, "qty"]],
+    rows:sortedProducts().filter(p=>agg[p.id]).map(p=>{ const a = agg[p.id], v = k => a[k] ? Math.round(a[k]*1000)/1000 : null;
+      return [dn(p), xt(p.unit||""), ...KS.map(v), Math.round(KS.reduce((s,k)=>s+(a[k]||0), 0)*1000)/1000]; })});
+  // Движение склада без продаж
+  const mv = S.moves.filter(m=>inR(m.ts) && m.type!=="sale" && m.productId && !m.reset).sort((a,b)=>(a.ts||0)-(b.ts||0));
+  sh.push({name:"Движение склада", table:true, cols:[["Дата", 11, "date"], ["Время", 7, "time"], ["Тип", 15], ["Продукт", 28], ["Кол-во", 10, "qty"], ["Ед.", 6], ["Цена за ед., ₺", 13, "money"], ["Сумма, ₺", 12, "money"], ["Комментарий", 40], ["Кто", 14]],
+    rows:mv.map(m=>{ const p = byId(m.productId), d = Number(m.delta)||0, pr = m.type==="in" ? Number(m.price)||0 : (p ? mvUc(m).cost : 0);
+      return [dkOf(m.ts), xlTime(m.ts), xt((TYPES[m.type]||{}).label||m.type), p ? dn(p) : m.productId, Math.round(d*1000)/1000, xt(m.unit || (p && p.unit) || ""), pr>0 ? Math.round(pr*100)/100 : null,
+        pr>0 ? Math.round(Math.abs(d)*pr*100)/100 : null, xlNote(m), m.who||""]; })});
+  return {sheets:sh, per, first, tEnd, F};
+}
+// a move's comment: its note, and the batch it belongs to when the note does not say it already
+const xlNote = m => { const n = String(m.note||""), b = String(m.batchLabel||""); return !b || n.includes(b) ? n : !n || b.includes(n) ? b : b + " · " + n; };
+async function xlDownload(){
+  if (!isAdmin()) return;
+  if (waiting()){ toast("Данные ещё загружаются, подождите немного"); return; }
+  const [t0, t1] = finRange();
+  // the lists need the detailed records of the period: a device that keeps only the recent ones (see SYNC_WIN) loads the older ones once
+  if (syncCutOf() > t0){
+    if (tConfirm("За этот период на устройстве загружены не все старые записи. Загрузить их, чтобы в таблице были все продажи, расходы и смены? Это один раз прочитает их из базы. «Отмена» — скачать без них (итоги всё равно верные).")){ toast("Загружаю старые записи…"); await Promise.all(Object.keys(SYNC_WIN).map(c=>syncOlder(c, t0))); if (syncCutOf() > t0) toast("Не всё загрузилось: нужен интернет"); }
+  }
+  try {
+    const R = xlReport(t0, t1), blob = await xlBook(R.sheets), a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `SUSHI-YM_${({ru:"otchet", en:"report", tr:"rapor"})[LANG]}_${dayKey(R.first)}_${dayKey(R.tEnd-1)}.xlsx`;
+    document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+    toast(`Файл Excel скачан: ${R.per}`);
+  } catch(e){ console.error("xlsx", e); toast("Не получилось сделать файл Excel"); }
+}
+document.addEventListener("click", e=>{ if (e.target.closest("#finXls")) xlDownload(); });
 /* ---------- backup: the whole database in one file (В2) ---------- */
 // The device already keeps all the data (see «reading» above), so the copy is made from it: no reads from the server.
 // The file stays with the admin (never on GitHub). Restoring writes back only what is missing now, or (if asked) also what differs;
