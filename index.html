@@ -165,6 +165,7 @@ h2.cat{font-size:.95rem;font-weight:600;color:var(--muted);margin:20px 0 6px;dis
 button.hist{width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
 button.hist:hover{border-color:var(--accent)}
 .hist .del{background:none;border:0;color:var(--muted);padding:0 4px;font-size:1.1rem}
+.hist.dlog .dlx{color:var(--ink);font-size:.86rem;overflow-wrap:anywhere}
 .day{font-size:.9rem;font-weight:600;color:var(--muted);margin:18px 0 6px}
 
 .invrow{display:grid;grid-template-columns:1fr 110px;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-s);padding:8px 12px}
@@ -1059,7 +1060,36 @@ async function commit(label, ops, opt){
     const err = new Error("month closed"); err.code = "month-closed"; err.done = done; throw err; }
   try { for (const op of ops){ await applyOp(op.col, op.id, clone(op.after)); done.push(op); } }
   catch(err){ err.done = done; throw err; }
+  if (opt && opt.dlog) [].concat(opt.dlog).forEach(dlog);
 }
+
+/* ---------- Журнал удалений (Д12) ---------- */
+// Every deletion, order cancel / write-off, dish taken out of a saved order and rejected website order leaves a line in
+// settings/dlog_YYYY-MM-DD {kind:"dlog", day, items:[…]} — one document per calendar day, added with arrayUnion, so two devices
+// writing at once do not overwrite each other. Not a new collection: the Firebase rules stay as they are. The admin sees it in История → «Журнал удалений».
+// A line: {ts, by (who did it), dev (device id), dn (device name then), k (what, see DLOG), n (a name people typed), c (the app's own word: expense category…),
+//   sum (₺), why (reason), d (details: dishes or products), num (order №), at (the time of the deleted record), who (who had made that record), month, cnt}
+const DLOG = {dish:"Удалено блюдо", set:"Удалён сет", exp:"Удалён расход", cash:"Удалён кассовый расход", mon:"Удалён ежемесячный расход",
+  staff:"Удалён сотрудник", staffoff:"Сотрудник перенесён в бывшие", inv:"Отклонён пересчёт", hist:"Удалена операция склада",
+  ordc:"Отменён заказ", ordw:"Списан заказ", reopen:"Заказ возвращён в работу", ordrm:"Убрано из заказа", web:"Отклонён заказ с сайта",
+  dev:"Убрано устройство", month:"Открыт снова месяц"};
+const DLOG_ORD = ["ordc","ordw","reopen","ordrm","web"];
+function dlog(e){
+  if (!e || !e.k) return;
+  const x = Object.assign({ts:Date.now(), by:whoNow(), dev:DEV_ID}, e);
+  try { x.dn = devName(DEV.me || {kind:devKind().kind}); } catch(er){}
+  for (const k of Object.keys(x)){ if (x[k]==null || x[k]==="" || (typeof x[k]==="number" && !isFinite(x[k]))) delete x[k]; else if (typeof x[k]==="string") x[k] = x[k].slice(0, k==="d" ? 400 : 200); }
+  if (x.sum!=null) x.sum = Math.round(Number(x.sum)*100)/100;
+  const day = calKey(x.ts), id = "dlog_" + day, loc = S.settings.find(y=>y.id===id);
+  if (loc) loc.items = [...(loc.items||[]), x]; else S.settings.push({id, kind:"dlog", day, items:[x]});
+  if (SYNC.upd.settings) SYNC.upd.settings.set(id, Date.now());
+  if (FS) FS.doc("settings/" + id).set({kind:"dlog", day, items:firebase.firestore.FieldValue.arrayUnion(x), upd:srvTs()}, {merge:true}).catch(writeErr);
+}
+const dlogAll = () => S.settings.filter(x=>x.kind==="dlog").flatMap(x=>x.items||[]).sort((a,b)=>(b.ts||0)-(a.ts||0));
+// order lines as plain text: «2 × Филадельфия, 1 × Мисо»
+const dlogLines = ls => (ls||[]).map(l=>{ const src = l.kind==="set" ? setById(l.id) : dishById(l.id); return `${fmt(l.qty)} × ${src ? src.name : l.name}`; }).join(", ");
+// stock moves as plain text: «Лосось −1,2 кг, Рис −0,5 кг»
+const dlogMoves = ms => ms.filter(m=>m.productId).map(m=>{ const p = byId(m.productId), dl = Number(m.delta)||0; return `${p ? p.name : "?"} ${dl>0?"+":""}${fmt(dl)} ${m.unit || (p ? p.unit : "")}`; }).join(", ");
 let urBusy = false;
 async function guarded(fn){ if (urBusy) return; urBusy = true; try { await fn(); } finally { urBusy = false; } }
 
@@ -1159,7 +1189,12 @@ function renderControls(){
       <div class="controls"><input class="search" id="mq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.menuQ)}" aria-label="Поиск по меню">
       ${nn?`<label class="toggle needtxt"><input type="checkbox" id="needOnly" ${S.needOnly?"checked":""}> Только требующие доработки (${nn})</label>`:""}</div>`;
   } else if (S.view==="hist"){
-    c.innerHTML = `<div class="controls"><input class="search" id="hq" type="search" placeholder="Фильтр по продукту или имени" value="${esc(S.histQ)}" aria-label="Фильтр истории"><label class="toggle">Перейти к дню <input type="date" id="hday" value="${esc(S.histDay)}" max="${calKey(Date.now())}"></label></div>`;
+    // История: «Операции склада» and «Журнал удалений» (Д12) are two buttons at the top
+    const del = S.histMode==="del", seg = (v, t) => `<button type="button" class="btn small ${(S.histMode||"ops")===v?"primary":""}" data-histmode="${v}">${t}</button>`;
+    const fseg = del ? `<div class="finseg" role="group" aria-label="Что показать">${[["all","Всё"],["ord","Заказы"],["rec","Записи и справочники"]].map(([k,l])=>`<button type="button" class="btn small" data-dlogf="${k}" aria-pressed="${(S.dlogF||"all")===k}">${l}</button>`).join("")}</div>` : "";
+    c.innerHTML = `<div class="controls">${seg("ops","Операции склада")}${seg("del","Журнал удалений")}</div>${fseg}
+      ${del ? `<p class="hint" style="margin:0 0 10px">Здесь видно, кто, когда и с какого устройства что-то удалил, отменил заказ или убрал блюдо из заказа. Журнал ведётся с ${esc(dlogSince())}. Видит только админ.</p>` : ""}
+      <div class="controls"><input class="search" id="hq" type="search" placeholder="${del ? "Фильтр по имени, блюду или причине" : "Фильтр по продукту или имени"}" value="${esc(S.histQ)}" aria-label="Фильтр истории"><label class="toggle">Перейти к дню <input type="date" id="hday" value="${esc(S.histDay)}" max="${calKey(Date.now())}"></label></div>`;
   } else if (S.view==="inv"){
     c.innerHTML = stockSeg() + `<p class="hint" style="margin:0 0 10px">${isAdmin() ? "Пересчитайте продукты и впишите фактическое количество. Пустые поля не меняются. Так же вносятся начальные остатки в первый раз." : "Пересчитайте продукты и впишите, сколько есть на самом деле. Пустые поля не меняются. Админ сверит с учётом при утверждении."}</p>
       <div class="controls"><input class="search" id="iq" type="search" placeholder="Найти продукт" value="${esc(S.invQ)}" aria-label="Поиск продукта"></div>`;
@@ -1223,6 +1258,7 @@ const histGroup = m => { const k = histKey(m); return k ? S.moves.filter(x=>hist
 // a sale or write-off of an order is undone through the order, so the order status stays right
 const histOrder = moves => { const x = moves.find(x=>x.orderId); const o = x && orderById(x.orderId); return o && o.status==="closed" && o.saleBatchId===x.batchId && moves.some(m=>m.type==="sale") ? o : null; };
 function renderHist(L){
+  if (S.histMode==="del") return renderDlog(L);
   const q = S.histQ.trim().toLowerCase();
   const sorted = [...S.moves].sort((a,b)=>(b.ts||0)-(a.ts||0));
   const entries = [], groups = new Map();
@@ -1278,6 +1314,54 @@ function renderHist(L){
         <span class="qty">${delta>0?"+":""}${fmt(delta)}<small>${esc(m.unit || (p?p.unit:""))}</small></span>
         <span class="meta">${time}${m.who?", "+esc(m.who):""}${m.note?" — "+noteHtml(m.note):""} ${del}</span></div>`;
     }
+  }
+  const more = all.length - list.length;
+  html += "</div>" + (more>0 ? `<p class="hint histmore" style="margin:12px 0 8px">Показано: ${list.length} · всего: ${all.length}</p><button type="button" class="btn" id="histMore">Показать ещё ${Math.min(more, HIST_PAGE)}</button>` : "");
+  L.innerHTML = html;
+}
+// the day the journal started: the first line in it, otherwise today
+function dlogSince(){ const a = dlogAll(), t = a.length ? a[a.length-1].ts : Date.now(); return new Date(t).toLocaleDateString(LOC(),{day:"2-digit",month:"2-digit",year:"numeric"}); }
+function dlogText(x){
+  const nm = x.n ? N(x.n) : "";
+  switch (x.k){
+    case "exp": case "cash": return esc(x.c||"") + (nm ? " — " + nm : "");
+    case "mon": return esc(x.c||"") + (x.month ? " · " + esc(ymName(x.month)) : "") + (nm ? " — " + nm : "");
+    case "inv": return `${nm}${x.cnt ? `, ${esc("позиций")}: ${x.cnt}` : ""}`;
+    case "hist": return esc(x.c||"") + (nm ? ": " + nm : "");
+    case "ordc": case "ordw": case "reopen": case "ordrm": return esc(`Заказ №${x.num||"?"}`);
+    case "web": return nm + (x.ph ? ` · ${N(x.ph)}` : "");
+    case "month": return x.month ? esc(ymName(x.month)) : "";
+    default: return nm;
+  }
+}
+function dlogRow(x){
+  const ex = [];
+  if (x.k==="ordrm" && x.late) ex.push(esc(x.cooked ? "после начала готовки, уже приготовлено (списано со склада)" : "после начала готовки, ещё не готовили"));
+  if (x.why) ex.push(`${esc("Причина")}: ${N(x.why)}`);
+  if (x.d) ex.push((x.k==="dish" ? esc("Убрано из сетов") + ": " : "") + N(x.d));
+  if (x.paid) ex.push(esc("заказ был оплачен: выручка убрана"));
+  if (x.k==="reopen") ex.push(esc("продажа удалена, продукты вернулись на склад") + (x.c ? ` · ${esc(x.c)}` : ""));
+  if (x.req) ex.push(`${esc("запросил(а)")}: ${N(x.req)}`);
+  const rec = [];
+  if (x.at) rec.push(`${esc(DLOG_ORD.includes(x.k) ? "заказ от" : "запись от")} ${esc(new Date(x.at).toLocaleString(LOC(),{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}))}`);
+  if (x.who && x.who!==x.by) rec.push(`${esc("записал(а)")}: ${N(x.who)}`);
+  if (rec.length) ex.push(rec.join(", "));
+  const dv = S.devices.find(d=>d.id===x.dev), dname = dv ? devName(dv) : x.dn;
+  return `<div class="hist dlog"><span><span class="tag ${DLOG_ORD.includes(x.k) ? "os-cancelled" : "off"}">${esc(DLOG[x.k]||x.k)}</span> ${dlogText(x)}</span><span class="qty">${x.sum!=null && (x.sum || x.k!=="hist") ? money(x.sum) : ""}</span>
+    <span class="meta">${hhmm(x.ts||0)}, ${N(x.by||"?")}${dname ? ` · ${esc(dname)}` : ""}</span>${ex.length ? `<span class="meta dlx">${ex.join("<br>")}</span>` : ""}</div>`;
+}
+function renderDlog(L){
+  const q = S.histQ.trim().toLowerCase(), f = S.dlogF || "all";
+  const dayEnd = S.histDay ? new Date(S.histDay+"T00:00").getTime() + 86400000 : Infinity;
+  const hay = x => [x.by, x.n, x.d, x.why, x.who, x.req, x.ph, x.c, x.num!=null ? "№"+x.num : "", x.dn, DLOG[x.k]].filter(Boolean).join(" ").toLowerCase();
+  const all = dlogAll().filter(x => (x.ts||0) < dayEnd && (f==="all" || (f==="ord")===DLOG_ORD.includes(x.k)) && (!q || hay(x).includes(q) || trS(hay(x)).toLowerCase().includes(q)));
+  const list = all.slice(0, S.histN);
+  if (!list.length){ L.innerHTML = `<div class="empty-state">${q||S.histDay||f!=="all" ? "Ничего не найдено." : "Пока ничего не удаляли."}</div>`; return; }
+  let html = "", day = "";
+  for (const x of list){
+    const dk = new Date(x.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"long",year:"numeric"});
+    if (dk!==day){ if (day) html += "</div>"; html += `<div class="day">${dk}</div><div class="list">`; day = dk; }
+    html += dlogRow(x);
   }
   const more = all.length - list.length;
   html += "</div>" + (more>0 ? `<p class="hint histmore" style="margin:12px 0 8px">Показано: ${list.length} · всего: ${all.length}</p><button type="button" class="btn" id="histMore">Показать ещё ${Math.min(more, HIST_PAGE)}</button>` : "");
@@ -2137,7 +2221,7 @@ $("#dDel").addEventListener("click", async ()=>{
   const inSets = setsWithDish(d.id);
   if (!tConfirm(`Удалить блюдо «${d.name}»?${inSets.length?`\nОно будет убрано из сетов: ${inSets.map(x=>x.name).join(", ")}.`:""}`)) return;
   const ops = [{col:"menu", id:d.id, after:null}].concat(inSets.map(st=>({col:"sets", id:st.id, after:Object.assign({}, st, {items:(st.items||[]).filter(i=>i.dishId!==d.id)})})));
-  try { await commit("Удаление блюда: " + d.name, ops); $("#dishDlg").close(); render(); toast("Блюдо удалено"); }
+  try { await commit("Удаление блюда: " + d.name, ops, {dlog:{k:"dish", n:d.name, d:inSets.map(x=>x.name).join(", ")}}); $("#dishDlg").close(); render(); toast("Блюдо удалено"); }
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
 /* cooking method: field helper + drafts for dishes without a method */
@@ -2301,7 +2385,7 @@ $("#setForm").addEventListener("submit", async e=>{
 $("#stDel").addEventListener("click", async ()=>{
   const st = setById(editingSet); if (!st) return;
   if (!tConfirm(`Удалить сет «${st.name}»? Роллы из него останутся в меню.`)) return;
-  try { await commit("Удаление сета: " + st.name, [{col:"sets", id:st.id, after:null}]); $("#setDlg").close(); render(); toast("Сет удалён"); }
+  try { await commit("Удаление сета: " + st.name, [{col:"sets", id:st.id, after:null}], {dlog:{k:"set", n:st.name}}); $("#setDlg").close(); render(); toast("Сет удалён"); }
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
 
@@ -3220,7 +3304,7 @@ document.addEventListener("click", async e=>{
   if (!tConfirm(`Открыть месяц снова: ${ymName(ym)}? Итог месяца удалится, записи месяца снова можно будет менять. Потом закройте месяц ещё раз.`)) return;
   monSaving = true;
   try { const ops = S.expenses.filter(x=>x.monthly && x.byClose===ym).map(x=>({col:"expenses", id:x.id, after:null}));
-    await commit(`Открыт снова месяц: ${ymName(ym)}`, [{col:"settings", id:"month_"+ym, after:null}, ...ops], {unlock:true}); render(true); openMonClose(); toast(`Месяц открыт: ${ymName(ym)}`); }
+    await commit(`Открыт снова месяц: ${ymName(ym)}`, [{col:"settings", id:"month_"+ym, after:null}, ...ops], {unlock:true, dlog:{k:"month", month:ym}}); render(true); openMonClose(); toast(`Месяц открыт: ${ymName(ym)}`); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
   finally { monSaving = false; }
 });
@@ -3298,7 +3382,7 @@ $("#expForm").addEventListener("submit", async e=>{
 $("#expDel").addEventListener("click", async ()=>{
   const x = S.expenses.find(y=>y.id===expEdit); if (!x || !isAdmin()) return;
   if (!tConfirm(`Удалить расход «${x.category}» на ${money(x.amount)}?`)) return;
-  try { await commit(`Удалён расход: ${x.category}`, [{col:"expenses", id:x.id, after:null}]); $("#expDlg").close(); render(); toast("Расход удалён"); }
+  try { await commit(`Удалён расход: ${x.category}`, [{col:"expenses", id:x.id, after:null}], {dlog:{k:"exp", c:x.category, sum:x.amount, n:x.note, at:x.ts, who:x.who}}); $("#expDlg").close(); render(); toast("Расход удалён"); }
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
 document.addEventListener("click", async e=>{
@@ -3376,7 +3460,7 @@ $("#cashForm").addEventListener("submit", async e=>{
 $("#cashDel").addEventListener("click", async ()=>{
   const x = S.expenses.find(y=>y.id===cashEdit); if (!x || !canEditCash(x)) return;
   if (!tConfirm(`Удалить запись «${x.note||x.kind}» на ${money(x.amount)}?`)) return;
-  try { await commit(`Удалён кассовый расход: ${x.note||x.kind}`, [{col:"expenses", id:x.id, after:null}]); $("#cashDlg").close(); render(); toast("Запись удалена"); }
+  try { await commit(`Удалён кассовый расход: ${x.note||x.kind}`, [{col:"expenses", id:x.id, after:null}], {dlog:{k:"cash", c:x.kind, sum:x.amount, n:x.note, at:x.ts, who:x.who}}); $("#cashDlg").close(); render(); toast("Запись удалена"); }
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
 document.addEventListener("click", e=>{
@@ -3805,7 +3889,9 @@ async function saveOrder(ed, old, rmw){
   if ($("#oPrint").checked && o.status==="new"){ o.status = "cooking"; o.cookingAt = now; } // the kitchen ticket is printed: the kitchen starts
   o.total = orderTotal(o);
   ODsaving = true; // my own save comes back through the live list: not a change from another device
-  try { await commit((old?"Изменение заказа №":"Новый заказ №")+o.num, [{col:"orders", id:o.id, after:o}, ...courOps(o), ...ops]); ODsaving = false; $("#orderDlg").close();
+  const rmE = log.find(e=>(e.rm||[]).length);
+  const dl = rmE ? {k:"ordrm", num:o.num, sum:rmSum(rmE), d:dlogLines(rmE.rm), why:rmE.reason, late:rmE.late, cooked:rmE.late ? rmE.cooked : undefined, at:old.createdAt} : null;
+  try { await commit((old?"Изменение заказа №":"Новый заказ №")+o.num, [{col:"orders", id:o.id, after:o}, ...courOps(o), ...ops], {dlog:dl}); ODsaving = false; $("#orderDlg").close();
     lsSet("sushi.autoprint", $("#oPrint").checked ? "1" : "0"); if ($("#oPrint").checked) setTimeout(()=>printOrder(o, !!old), 300); S.view="orders"; S.ordView="open"; render(true); toast(old?`Заказ №${o.num} сохранён`:`Заказ №${o.num} принят`); }
   catch(err){ ODsaving = false; console.error(err); toast("Не удалось сохранить заказ. Проверьте права на изменение."); }
 }
@@ -4052,7 +4138,7 @@ async function cancelOrder(id){
   const reason = (tPrompt(`Отмена заказа №${seen.num}. Укажите причину (обязательно):`, "") || "").trim();
   if (!reason && !(isAdmin() && tConfirm("Причина не указана. Вы админ — отменить заказ без причины?"))){ toast("Заказ не отменён: нужно указать причину"); return; }
   const o = await freshOrder(id); if (!o || !isOpen(o)) return orderStale(o, seen.num);
-  try { await commit(`Отменён заказ №${o.num}`, [...courOps(null, o.id), {col:"orders", id, after:Object.assign({}, o, {status:"cancelled", cancelReason:reason, cancelledBy:S.me?S.me.name:"", cancelledAt:Date.now(), updatedAt:Date.now()})}]); render(); toast(`Заказ №${o.num} отменён`); }
+  try { await commit(`Отменён заказ №${o.num}`, [...courOps(null, o.id), {col:"orders", id, after:Object.assign({}, o, {status:"cancelled", cancelReason:reason, cancelledBy:S.me?S.me.name:"", cancelledAt:Date.now(), updatedAt:Date.now()})}], {dlog:{k:"ordc", num:o.num, sum:orderTotal(o), why:reason, d:dlogLines(o.lines), at:o.createdAt}}); render(); toast(`Заказ №${o.num} отменён`); }
   catch(err){ console.error(err); toast("Не удалось отменить заказ."); }
 }
 async function reopenOrder(id){
@@ -4064,7 +4150,7 @@ async function reopenOrder(id){
   if (S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
   const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.pays; delete n.given; delete n.change; delete n.closedAt; delete n.saleBatchId; delete n.voidReq;
   ops.push({col:"orders", id, after:n});
-  try { await commit(`Заказ №${o.num} возвращён в работу`, ops); S.ordView="open"; render(true); toast(`Заказ №${o.num} снова открыт`); }
+  try { await commit(`Заказ №${o.num} возвращён в работу`, ops, {dlog:{k:"reopen", num:o.num, sum:Number(o.total)||orderTotal(o), c:o.payment, at:o.closedAt}}); S.ordView="open"; render(true); toast(`Заказ №${o.num} снова открыт`); }
   catch(err){ console.error(err); toast("Не удалось вернуть заказ."); }
 }
 
@@ -4108,7 +4194,7 @@ async function applyVoid(o, kind, reason, req){
   const n = Object.assign({}, o, {status:"cancelled", voidKind:kind, wasClosed:closed, cancelReason:reason, cancelledBy:req ? (req.by||"") : me, cancelledAt:ts, updatedAt:ts});
   delete n.voidReq; if (req) n.approvedBy = me; else delete n.approvedBy;
   ops.push({col:"orders", id:o.id, after:n});
-  await commit(`${kind==="cancel"?"Отменён":"Списан"} заказ №${o.num}`, ops);
+  await commit(`${kind==="cancel"?"Отменён":"Списан"} заказ №${o.num}`, ops, {dlog:{k:kind==="cancel" ? "ordc" : "ordw", num:o.num, sum:closed ? Number(o.total)||orderTotal(o) : orderTotal(o), why:reason, d:dlogLines(o.lines), at:o.createdAt, req:req ? req.by : "", paid:closed ? 1 : 0}});
   toast(kind==="cancel" ? (closed ? `Заказ №${o.num} отменён, продукты вернулись на склад` : `Заказ №${o.num} отменён`) : `Заказ №${o.num} списан`);
 }
 $("#voidForm").addEventListener("submit", async e=>{
@@ -4515,12 +4601,12 @@ $("#sfDel").addEventListener("click", async ()=>{
   // shifts stay in the salary of past months only while the worker exists: with shifts, switch off instead of deleting
   if (S.shifts.some(sh=>sh.staffId===st.id)){
     if (!tConfirm(`Перенести «${st.name}» в «Бывшие работники»? Удалить совсем нельзя: у него есть смены, и пропала бы его зарплата за прошлые месяцы в Финансах. Бывший работник не может входить в программу, его смены и зарплата сохраняются.`)) return;
-    try { await commit("В бывшие работники: "+st.name, [{col:"staff", id:st.id, after:Object.assign({}, st, {active:false})}]); $("#staffDlg").close(); render(); toast("Перенесён(а) в «Бывшие работники»"); }
+    try { await commit("В бывшие работники: "+st.name, [{col:"staff", id:st.id, after:Object.assign({}, st, {active:false})}], {dlog:{k:"staffoff", n:st.name}}); $("#staffDlg").close(); render(); toast("Перенесён(а) в «Бывшие работники»"); }
     catch(er){ console.error(er); toast("Не удалось сохранить."); }
     return;
   }
   if (!tConfirm(`Удалить сотрудника «${st.name}»? История его операций сохранится.`)) return;
-  try { await commit("Удаление сотрудника: "+st.name, [{col:"staff", id:st.id, after:null}]); $("#staffDlg").close(); render(); toast("Сотрудник удалён"); }
+  try { await commit("Удаление сотрудника: "+st.name, [{col:"staff", id:st.id, after:null}], {dlog:{k:"staff", n:st.name}}); $("#staffDlg").close(); render(); toast("Сотрудник удалён"); }
   catch(er){ console.error(er); toast("Не удалось удалить."); }
 });
 
@@ -4601,7 +4687,7 @@ document.addEventListener("click", async e=>{
   if (!isAdmin()) return;
   const d = S.invdrafts.find(x=>x.id===(ok?ok.dataset.dok:rej.dataset.drej)); if (!d) return;
   if (rej){ if (!tConfirm(`Отклонить пересчёт от ${d.by||"сотрудника"}? Остатки не изменятся.`)) return;
-    return guarded(async()=>{ if (!await freshDraft(d)) return; try { await commit("Отклонён пересчёт: "+(d.by||""), [{col:"invdrafts", id:d.id, after:null}]); render(); toast("Пересчёт отклонён"); } catch(er){ console.error(er); toast("Не удалось."); } }); }
+    return guarded(async()=>{ if (!await freshDraft(d)) return; try { await commit("Отклонён пересчёт: "+(d.by||""), [{col:"invdrafts", id:d.id, after:null}], {dlog:{k:"inv", n:d.by, at:d.ts, cnt:Object.keys(d.items||{}).length}}); render(); toast("Пересчёт отклонён"); } catch(er){ console.error(er); toast("Не удалось."); } }); }
   return guarded(async()=>{
     if (!await freshDraft(d)) return;
     const own = draftOwn(d), now = Date.now(), ops = []; let newer = 0;
@@ -5144,7 +5230,7 @@ $("#monthForm").addEventListener("submit", async e=>{
 $("#mDel").addEventListener("click", async ()=>{
   const d = monthlyDoc(mEdit, S.finMonth); if (!d) return;
   if (!tConfirm("Удалить эту запись?")) return;
-  try { await commit(`Удалено: ${mEdit} за ${ymName(S.finMonth)}`, [{col:"expenses", id:d.id, after:null}]); $("#monthDlg").close(); render(); } catch(er){ console.error(er); toast("Не удалось удалить."); }
+  try { await commit(`Удалено: ${mEdit} за ${ymName(S.finMonth)}`, [{col:"expenses", id:d.id, after:null}], {dlog:{k:"mon", c:mEdit, month:S.finMonth, sum:d.amount, n:d.note}}); $("#monthDlg").close(); render(); } catch(er){ console.error(er); toast("Не удалось удалить."); }
 });
 document.addEventListener("click", e=>{
   const m = e.target.closest("[data-mmon]"); if (m && isAdmin()){ S.finMonth = ymShift(S.finMonth||ymOf(Date.now()), +m.dataset.mmon); return renderList(); }
@@ -5302,7 +5388,11 @@ document.addEventListener("click", async e => {
     const dops = mvDocIds(group).map(id=>({col:"moves", id, after:null}));
     if (m.batchId && S.sales.some(x=>x.id===m.batchId)) dops.push({col:"sales", id:m.batchId, after:null});
     if (offOrd && offOrd.status==="cancelled" && offOrd.voidKind==="writeoff") dops.push({col:"orders", id:offOrd.id, after:Object.assign({}, offOrd, {voidKind:"cancel", updatedAt:Date.now()})});
-    try { await commit(`Удаление: ${m.batchLabel || ((TYPES[m.type]?.label||"") + " — " + (p?p.name:""))}`, dops); render(); toast("Операция удалена"); }
+    const sale = m.batchId && S.sales.find(x=>x.id===m.batchId), ins = group.filter(x=>x.type==="in" && Number(x.price)>0);
+    const hsum = sale ? (sale.lines||[]).reduce((a,l)=>a+(Number(l.price)||0)*(Number(l.qty)||0), 0) : ins.length ? ins.reduce((a,x)=>a+(Number(x.delta)||0)*(Number(x.price)||0), 0) : null;
+    const hc = group.some(x=>x.type==="sale") ? "Продажа" : group.some(x=>x.type==="cut") ? "Разделка" : group.every(x=>x.type==="in") ? "Приход" : group.some(x=>x.type==="prod") ? "Приготовлено" : (TYPES[m.type]?.label||"");
+    const hdl = {k:"hist", c:hc, n:m.batchLabel || (group.length===1 && p ? p.name : ""), d:dlogMoves(group), sum:hsum, at:m.ts, who:m.who, why:group.length===1 || group.every(x=>x.note===m.note) ? m.note : ""};
+    try { await commit(`Удаление: ${m.batchLabel || ((TYPES[m.type]?.label||"") + " — " + (p?p.name:""))}`, dops, {dlog:hdl}); render(); toast("Операция удалена"); }
     catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
     return;
   }
@@ -5336,6 +5426,10 @@ document.addEventListener("click", async e => {
 });
 document.addEventListener("change", e => { if (e.target.id==="hday"){ S.histDay = e.target.value; S.histN = HIST_PAGE; renderList(); } });
 document.addEventListener("click", e => { if (e.target.closest("#histMore")){ S.histN += HIST_PAGE; renderList(); } });
+document.addEventListener("click", e => { const b = e.target.closest("[data-histmode],[data-dlogf]"); if (!b) return;
+  if (b.dataset.histmode){ if ((S.histMode||"ops")===b.dataset.histmode) return; S.histMode = b.dataset.histmode; S.histQ = ""; }
+  else S.dlogF = b.dataset.dlogf;
+  S.histN = HIST_PAGE; render(true); });
 document.addEventListener("click", e => { const b = e.target.closest("[data-stockview]"); if (!b || S.view===b.dataset.stockview) return; S.view = b.dataset.stockview; render(true); });
 document.addEventListener("input", e => {
   const t = e.target;
@@ -5530,6 +5624,7 @@ Object.assign(I18N, {"Другие названия": ["Other names", "Diğer ad
   "Объединение:": ["Merge:", "Birleştirme:"],
   "Отмена объединения:": ["Merge undone:", "Birleştirme geri alındı:"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
+Object.assign(I18N, {"Удалено блюдо": ["Dish deleted", "Yemek silindi"], "Удалён сет": ["Set deleted", "Set silindi"], "Удалён расход": ["Expense deleted", "Gider silindi"], "Удалён кассовый расход": ["Cash expense deleted", "Kasa gideri silindi"], "Удалён ежемесячный расход": ["Monthly expense deleted", "Aylık gider silindi"], "Удалён сотрудник": ["Staff member deleted", "Çalışan silindi"], "Сотрудник перенесён в бывшие": ["Moved to former staff", "Eski çalışanlara taşındı"], "Отклонён пересчёт": ["Count rejected", "Sayım reddedildi"], "Удалена операция склада": ["Stock entry deleted", "Stok kaydı silindi"], "Отменён заказ": ["Order cancelled", "Sipariş iptal edildi"], "Списан заказ": ["Order written off", "Sipariş fireye yazıldı"], "Заказ возвращён в работу": ["Order reopened", "Sipariş yeniden açıldı"], "Убрано из заказа": ["Removed from order", "Siparişten çıkarıldı"], "Отклонён заказ с сайта": ["Website order rejected", "Web sitesi siparişi reddedildi"], "Убрано устройство": ["Device removed", "Cihaz kaldırıldı"], "Открыт снова месяц": ["Month reopened", "Ay yeniden açıldı"], "Операции склада": ["Stock entries", "Stok kayıtları"], "Журнал удалений": ["Deletion log", "Silme kaydı"], "Всё": ["All", "Tümü"], "Записи и справочники": ["Records and lists", "Kayıtlar ve listeler"], "Что показать": ["What to show", "Ne gösterilsin"], "Здесь видно, кто, когда и с какого устройства что-то удалил, отменил заказ или убрал блюдо из заказа.": ["Here you see who deleted something, cancelled an order or removed a dish from an order, when, and from which device.", "Burada kimin, ne zaman ve hangi cihazdan bir şey sildiği, siparişi iptal ettiği veya siparişten yemek çıkardığı görünür."], "Журнал ведётся с": ["The log is kept since", "Kayıt başlangıcı:"], "Видит только админ.": ["Only the admin sees it.", "Sadece yönetici görür."], "Фильтр по имени, блюду или причине": ["Filter by name, dish or reason", "İsme, yemeğe veya nedene göre filtrele"], "после начала готовки, уже приготовлено (списано со склада)": ["after cooking started, already cooked (written off from stock)", "hazırlık başladıktan sonra, zaten hazırlanmıştı (stoktan fireye yazıldı)"], "после начала готовки, ещё не готовили": ["after cooking started, not cooked yet", "hazırlık başladıktan sonra, henüz hazırlanmamıştı"], "Убрано из сетов": ["Removed from sets", "Setlerden çıkarıldı"], "заказ был оплачен: выручка убрана": ["the order was paid: revenue removed", "sipariş ödenmişti: ciro kaldırıldı"], "продажа удалена, продукты вернулись на склад": ["sale deleted, products returned to stock", "satış silindi, ürünler stoğa döndü"], "запросил(а)": ["requested by", "talep eden"], "заказ от": ["order of", "sipariş tarihi"], "запись от": ["record of", "kayıt tarihi"], "записал(а)": ["recorded by", "kaydeden"], "Пока ничего не удаляли.": ["Nothing has been deleted yet.", "Henüz hiçbir şey silinmedi."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
@@ -5730,6 +5825,7 @@ async function webReject(id){
       t.update(ref, {st:"rejected", reason, takenBy:me, takenAt:Date.now()});
     });
     await FS.doc("webstatus/" + id).set({s:"rejected", reason, type:w.type==="pickup" ? "pickup" : "delivery", ts:Date.now()});
+    dlog({k:"web", n:w.name, sum:w.total, why:reason, d:webLines(w).map(l=>`${l.qty} × ${l.name}`).join(", "), ph:w.phone});
     toast("Заказ с сайта отклонён. Клиент увидит причину."); }
   catch(e){ if (e && e.code==="taken") toast("Этот заказ уже принят или отклонён на другом устройстве"); else { console.error(e); toast("Не удалось отклонить: " + ((e && e.code) || "ошибка")); } }
 }
@@ -6122,7 +6218,7 @@ document.addEventListener("click", async e=>{
   if (b.dataset.devmain){ if (!tConfirm(`Сделать «${devName(d)}» главным? Главное устройство нельзя отключить, и с него можно управлять всеми устройствами.`)) return; devSet(id, {main:true, mainAt:Date.now(), mainBy:S.me.name}); return; }
   if (b.dataset.devunmain){ if (!tConfirm(`Снять отметку «главное» с «${devName(d)}»? Например, если это устройство потеряно. После этого его можно будет отключить.`)) return; devSet(id, {main:false, stay:false}); return; }
   if (b.dataset.devoff){ if (d.main || id===DEV_ID) return; if (!tConfirm(`Отключить «${devName(d)}»? Оно выйдет из программы и удалит у себя копию данных. Вернуть его можно кнопкой «Разрешить».`)) return; devSet(id, {status:"off", offAt:Date.now(), offBy:S.me.name}); toast("Устройство отключено"); return; }
-  if (b.dataset.devdel){ if (d.main) return; if (!tConfirm(`Убрать «${devName(d)}» из списка? Если оно снова откроет программу, то появится как новое.`)) return; devRef(id).delete().catch(writeErr); }
+  if (b.dataset.devdel){ if (d.main) return; if (!tConfirm(`Убрать «${devName(d)}» из списка? Если оно снова откроет программу, то появится как новое.`)) return; devRef(id).delete().catch(writeErr); dlog({k:"dev", n:devName(d) + " · " + devCode(id)}); }
 });
 /* ---------- backup: the whole database in one file (В2) ---------- */
 // The device already keeps all the data (see «reading» above), so the copy is made from it: no reads from the server.
