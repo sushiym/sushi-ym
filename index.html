@@ -133,6 +133,17 @@ h2.cat{font-size:.95rem;font-weight:600;color:var(--muted);margin:20px 0 6px;dis
 .tag{font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
 .tag.low{background:var(--low-bg);color:var(--low)}
 .tag.empty{background:var(--empty-bg);color:var(--empty)}
+/* Список покупок */
+.shop{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-left:5px solid var(--low);border-radius:var(--radius-s);background:var(--surface)}
+.shop.s-empty{border-left-color:var(--empty)}
+.shop.off{opacity:.5}
+#shopList h4.cat{font-size:.9rem;font-weight:600;color:var(--muted);margin:14px 0 6px}
+.shop .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+.shop .nm small{display:block;color:var(--muted);font-size:.82rem}
+.shop .sq{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.shop .sq input{width:74px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--bg);color:var(--ink);text-align:right}
+.shop .ss{min-width:76px;text-align:right;color:var(--muted);font-size:.85rem;font-variant-numeric:tabular-nums}
+@media (max-width:640px){.shop{flex-wrap:wrap}.shop .nm{flex:1 1 60%}.shop .sq{margin-left:auto}}
 .tag.in{background:var(--ok-bg);color:var(--ok)}
 .tag.out{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 .tag.off{background:var(--empty-bg);color:var(--empty)}
@@ -521,6 +532,18 @@ details.fold[open]>summary{margin-bottom:8px}
   </div>
 </form></dialog>
 
+<dialog id="shopDlg" class="wide"><form method="dialog" id="shopForm">
+  <h3>Список покупок</h3>
+  <p class="hint" id="shopHint"></p>
+  <div id="shopList"></div>
+  <div class="controls" style="margin:6px 0 0"><label class="f" style="flex-direction:row;align-items:center;gap:8px;white-space:nowrap">Язык списка<select id="shopLang" translate="no"><option value="ru">Русский</option><option value="tr">Türkçe</option><option value="en">English</option></select></label></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Закрыть</button>
+    <button type="button" class="btn" id="shopCopy">Скопировать</button>
+    <button type="button" class="btn primary" id="shopWa">Отправить в WhatsApp</button>
+  </div>
+</form></dialog>
+
 <dialog id="prodDlg"><form method="dialog" id="prodForm">
   <h3 id="prodTitle">Продукт</h3>
   <label class="f">Название<input id="pName" required autocomplete="off"></label>
@@ -532,6 +555,7 @@ details.fold[open]>summary{margin-bottom:8px}
     <label class="f">Единица<select id="pUnit"></select></label>
     <label class="f">Мин. остаток<input id="pMin" inputmode="decimal" autocomplete="off"></label>
   </div>
+  <label class="f"><span>Докупать до <small class="hint">(норма)</small></span><input id="pPar" inputmode="decimal" autocomplete="off" placeholder="2 × мин. остаток"><small class="hint">Сколько держать на складе. «Список покупок» предлагает докупить до этого количества. Пусто — вдвое больше минимального остатка.</small></label>
   <label class="f" id="pCostWrap"><span>Цена закупки за 1 <span id="pCostUnit">кг</span>, ₺</span><input id="pCost" inputmode="decimal" autocomplete="off" placeholder="0"><small class="hint" id="pCostHint"></small></label>
   <p class="hint" id="pCostInfo" hidden></p>
   <label class="f">Выход после чистки, % <span class="inline"><input id="pYield" inputmode="decimal" autocomplete="off" placeholder="100" aria-label="Выход после чистки в процентах"><span>%</span></span></label>
@@ -1147,6 +1171,7 @@ function renderControls(){
       ${isAdmin() ? `<div class="controls"><button class="btn primary" id="addProd">Добавить продукт</button></div>` : ""}
       <div class="controls"><input class="search" id="q" type="search" placeholder="Найти продукт" value="${esc(S.q)}" aria-label="Поиск продукта">
       <label class="toggle"><input type="checkbox" id="lowOnly" ${S.lowOnly?"checked":""}> Только заканчивающиеся</label>
+      <button type="button" class="btn" id="openShop">🛒 Список покупок${(()=>{ const n = shopItems().buy.length; return n ? ` (${n})` : ""; })()}</button>
       ${isAdmin() ? `<label class="toggle"><input type="checkbox" id="showHidden" ${S.showHidden?"checked":""}> Показать скрытые и без учёта</label>` : ""}</div>
       <p class="hint" style="margin:0 0 10px">${showCost() ? "Нажмите на продукт — откроется его карточка: остаток, цена, описание, рецепт и кнопки прихода, расхода и списания." : "Нажмите на продукт — откроется его карточка: описание, рецепт и кнопки прихода, расхода и списания."}</p>`;
   } else if (S.view==="orders"){
@@ -1437,6 +1462,84 @@ document.addEventListener("click", e=>{
   $("#bulkDlg").showModal(); $("#bulkText").focus();
 });
 $("#bulkCheck").addEventListener("click", ()=>{ bulkRows = bulkParse($("#bulkText").value); bulkRender(); });
+/* ----- Д4 «Список покупок»: what is low or out in stock, and how much to buy up to the norm (p.par, else 2 × min) ----- */
+// workers see no stock figures (decision 21.10), so for them the list has names and «мало/нет» only, no quantities
+const SHOP_STEP = {"кг":0.1, "л":0.1, "г":10, "мл":10};
+function shopNeed(p, st){
+  const norm = p.par>0 ? p.par : (p.min>0 ? p.min*2 : 0);
+  if (!(norm>0)) return 0;
+  const need = norm - Math.max(st[p.id]||0, 0), step = SHOP_STEP[p.unit] || 1;
+  return need>0 ? Math.round(Math.ceil(need/step - 1e-9)*step*1000)/1000 : 0;
+}
+function shopItems(){
+  const st = stockMap(), buy = [], cook = [];
+  for (const p of sortedProducts()){
+    if (p.active===false || !tracked(p) || p.mergedInto) continue;
+    const s = status(p, st); if (s==="ok") continue;
+    (recipeOf(p.id) ? cook : buy).push({p, s, qty: shopNeed(p, st)});
+  }
+  return {buy, cook};
+}
+let shopRows = [];
+function openShop(){
+  const {buy, cook} = shopItems(), adm = showStock();
+  shopRows = buy.map(r => ({...r, on:true}));
+  $("#shopHint").textContent = !buy.length && !cook.length ? "Всё в норме — заканчивающихся продуктов нет." : adm
+    ? "Продукты, которые заканчиваются или закончились. Сколько купить — до нормы «Докупать до» из карточки продукта, а если её нет — вдвое больше минимального остатка. Количество можно поправить, снятая галочка убирает строку из списка."
+    : "Продукты, которые заканчиваются или закончились. Снятая галочка убирает строку из списка.";
+  $("#shopLang").value = LANG==="ru" ? "ru" : LANG;
+  shopRender(); $("#shopDlg").showModal();
+}
+function shopRender(){
+  const adm = showStock(), {cook} = shopItems();
+  let html = "", cur = null, sum = 0, noPrice = 0;
+  shopRows.forEach((r, i) => {
+    const p = r.p;
+    if (p.category!==cur){ html += (cur!==null ? "</div>" : "") + `<h4 class="cat">${esc(p.category||"Прочее")}</h4><div class="list">`; cur = p.category; }
+    const tag = r.s==="empty" ? `<span class="tag empty">нет</span>` : `<span class="tag low">мало</span>`;
+    let q = "", ss = "";
+    if (adm){
+      const uc = unitCost(p.id).cost;
+      q = `<span class="sq"><input data-shopq="${i}" inputmode="decimal" autocomplete="off" value="${r.qty>0 ? String(r.qty).replace(".",",") : ""}" placeholder="?" aria-label="Сколько купить"><span>${esc(p.unit)}</span></span>`;
+      ss = `<span class="ss">${r.qty>0 && uc>0 ? "≈ " + money(r.qty*uc) : uc>0 ? "" : "нет цены"}</span>`;
+      if (r.on && r.qty>0){ if (uc>0) sum += r.qty*uc; else noPrice++; }
+    }
+    const info = adm ? `<small>остаток ${fmt(stockMap()[p.id]||0)} · мин. ${fmt(p.min)}${p.par>0 ? ` · норма ${fmt(p.par)}` : ""} ${esc(p.unit)}</small>` : "";
+    html += `<label class="shop s-${r.s}${r.on?"":" off"}"><input type="checkbox" data-shopon="${i}" ${r.on?"checked":""}><span class="nm">${N(dn(p))}${info}</span>${tag}${q}${ss}</label>`;
+  });
+  if (cur!==null) html += "</div>";
+  if (adm && shopRows.length) html += `<p style="margin:10px 0 0">Примерно на <b>${money(sum)}</b> по последним ценам закупки${noPrice ? ` · без цены: ${noPrice}` : ""}</p>`;
+  if (cook.length) html += `<h4 class="cat">Заготовки — приготовить, а не купить</h4><p class="hint" style="margin:0">${cook.map(r=>N(dn(r.p)) + " — " + (r.s==="empty" ? "нет" : "мало")).join(", ")}</p>`;
+  $("#shopList").innerHTML = html;
+  const has = shopRows.some(r=>r.on);
+  $("#shopCopy").disabled = $("#shopWa").disabled = !has;
+}
+// the text goes outside the program (WhatsApp, a note), so it is translated here, into the language chosen in the window
+const trTo = (str, l) => l==="ru" || !str ? str : String(str).replace(I18N_RE, m => I18N[m] ? I18N[m][l==="en" ? 0 : 1] : m);
+function shopText(){
+  const l = $("#shopLang").value, adm = showStock(), nm = p => (p["name_"+l] || p.name);
+  const d = new Date().toLocaleDateString(l==="tr" ? "tr-TR" : l==="en" ? "en-GB" : "ru-RU", {day:"numeric", month:"long"});
+  let t = `SUSHI YM — ${trTo("список покупок", l)}, ${d}\n`, cur = null;
+  for (const r of shopRows){
+    if (!r.on) continue;
+    if (r.p.category!==cur){ cur = r.p.category; t += `\n${trTo(cur||"Прочее", l)}:\n`; }
+    t += `• ${nm(r.p)}` + (adm && r.qty>0 ? ` — ${String(r.qty).replace(".", l==="en" ? "." : ",")} ${trTo(r.p.unit, l)}` : "") + "\n";
+  }
+  return t.trim();
+}
+document.addEventListener("click", e => { if (e.target.closest("#openShop")) openShop(); });
+$("#shopList").addEventListener("change", e => {
+  const t = e.target;
+  if (t.dataset.shopon!==undefined){ shopRows[+t.dataset.shopon].on = t.checked; shopRender(); }
+  if (t.dataset.shopq!==undefined){ const v = num(t.value); shopRows[+t.dataset.shopq].qty = v>0 ? v : 0; shopRender(); }
+});
+$("#shopCopy").addEventListener("click", async ()=>{
+  const t = shopText();
+  try { await navigator.clipboard.writeText(t); toast("Список скопирован. Вставьте его в WhatsApp или в заметки."); }
+  catch(e){ tPrompt("Скопируйте список:", t); }
+});
+$("#shopWa").addEventListener("click", ()=>{ window.open("https://wa.me/?text=" + encodeURIComponent(shopText()), "_blank", "noopener"); });
+
 function productListText(){
   const cost = p => Number(p.cost)>0 ? String(Math.round(p.cost*100)/100).replace(".",",") : "";
   return `SUSHI YM — продукты склада (${S.products.length}): раздел | продукт | единица | цена закупки\n\n` + sortedProducts().filter(p=>!p.mergedInto).map(p=>[p.category||"", p.name, p.unit, cost(p)].join(" | ") + (p.active===false ? " | скрыт" : "") + (aliasesOf(p).length ? " | другие названия: " + aliasesOf(p).join("; ") : "")).join("\n");
@@ -1512,6 +1615,7 @@ function openProd(id){
   $("#pCat").innerHTML = allCats().map(c=>`<option value="${esc(c)}" ${p&&p.category===c?"selected":""}>${esc(c)}</option>`).join("") + `<option value="__new">Новый раздел…</option>`;
   $("#pUnit").innerHTML = (p && p.unit && !UNITS.includes(p.unit) ? [...UNITS, p.unit] : UNITS).map(u=>`<option value="${esc(u)}" ${p&&p.unit===u?"selected":""}>${esc(u)}</option>`).join("");
   $("#pMin").value = p ? String(p.min??"").replace(".",",") : "";
+  $("#pPar").value = p && p.par ? String(p.par).replace(".",",") : "";
   $("#pCost").value = p && p.cost ? String(p.cost).replace(".",",") : "";
   $("#pCostUnit").textContent = p ? p.unit : "кг"; $("#pCostHint").innerHTML = "";
   { const r = p && recipeOf(p.id); const info = $("#pCostInfo");
@@ -1546,7 +1650,8 @@ $("#prodForm").addEventListener("submit", async e => {
   e.preventDefault();
   const name = $("#pName").value.trim(); if (!name){ need($("#pName"), "Введите название"); return; }
   const old = editingId ? byId(editingId) : null;
-  const min = num($("#pMin").value);
+  const min = num($("#pMin").value), par = num($("#pPar").value);
+  if (!isNaN(par) && par>0 && !isNaN(min) && par<min){ need($("#pPar"), "«Докупать до» должно быть не меньше минимального остатка"); return; }
   const yv = num($("#pYield").value);
   if (!isNaN(yv) && (yv<=0 || yv>100)){ need($("#pYield"), "Выход после чистки должен быть от 1 до 100 %"); return; }
   { const c = numMoney($("#pCost").value); if (old && !$("#pCostWrap").hidden && old.unit===$("#pUnit").value && c!==Number(old.cost) && priceJump(old.cost, c) && !tConfirm(priceJumpMsg(old, c))){ $("#pCost").focus(); return; } }
@@ -1554,6 +1659,7 @@ $("#prodForm").addEventListener("submit", async e => {
     order: old ? (old.order ?? 9999) : Math.max(0, ...S.products.map(x=>x.order||0)) + 1};
   { const al = [...new Set($("#pAliases").value.split(/[,;\n]/).map(x=>x.trim().replace(/\s+/g," ")).filter(Boolean))].filter(a=>!allNames({name:p.name, name_en:p.name_en, name_tr:p.name_tr}).some(n=>bulkKey(n)===bulkKey(a)));
     if (al.length) p.aliases = al; }
+  if (par>0) p.par = par;
   if (old && old.mergedInto) Object.assign(p, {mergedInto:old.mergedInto, mergedAt:old.mergedAt, mergeBk:old.mergeBk});
   // unit change
   let conv = null;
@@ -1733,6 +1839,7 @@ function openCard(id){
   let h = line("Раздел", esc(p.category||""));
   if (tr) h += line("На складе", showStock() ? `${fmt(st)} ${esc(p.unit)}` : ({empty:"нет", low:"мало", ok:"достаточно"})[status(p, {[p.id]:st})]);
   h += line("Единица", esc(p.unit)) + line("Мин. остаток", `${fmt(p.min)} ${esc(p.unit)}`);
+  if (tr && p.par>0) h += line("Докупать до", `${fmt(p.par)} ${esc(p.unit)}`);
   if (showCost()) h += line(u.computed ? "Себестоимость по рецепту" : "Цена закупки", u.cost>0 ? `${money(u.cost)} / ${esc(p.unit)}` : "нет цены закупки");
   if (p.yieldPct && p.yieldPct<100) h += line("Выход после чистки", `${fmt(p.yieldPct)} %`);
   if (!tr) h += line("Учёт остатка", "без учёта");
@@ -5528,7 +5635,27 @@ Object.assign(I18N, {"Другие названия": ["Other names", "Diğer ad
   "Объединение: из": ["Merge: from", "Birleştirme: kaynak"],
   "приход": ["receipt", "giriş"],
   "Объединение:": ["Merge:", "Birleştirme:"],
-  "Отмена объединения:": ["Merge undone:", "Birleştirme geri alındı:"]});
+  "Отмена объединения:": ["Merge undone:", "Birleştirme geri alındı:"],
+  "Список покупок": ["Shopping list", "Alışveriş listesi"],
+  "список покупок": ["shopping list", "alışveriş listesi"],
+  "Язык списка": ["List language", "Liste dili"],
+  "Скопировать": ["Copy", "Kopyala"],
+  "Отправить в WhatsApp": ["Send via WhatsApp", "WhatsApp ile gönder"],
+  "Продукты, которые заканчиваются или закончились. Сколько купить — до нормы «Докупать до» из карточки продукта, а если её нет — вдвое больше минимального остатка. Количество можно поправить, снятая галочка убирает строку из списка.": ["Products that are running low or out. How much to buy: up to the «Restock up to» target from the product card, or twice the minimum stock if it is empty. You can change the amount; an unticked row is left out of the list.", "Azalan veya biten ürünler. Ne kadar alınacağı: ürün kartındaki «Şu miktara tamamla» hedefine kadar, boşsa minimum stokun iki katı. Miktarı değiştirebilirsiniz; işareti kaldırılan satır listeye girmez."],
+  "Продукты, которые заканчиваются или закончились. Снятая галочка убирает строку из списка.": ["Products that are running low or out. An unticked row is left out of the list.", "Azalan veya biten ürünler. İşareti kaldırılan satır listeye girmez."],
+  "Примерно на": ["About", "Yaklaşık"],
+  "по последним ценам закупки": ["at the latest purchase prices", "son alış fiyatlarıyla"],
+  "без цены:": ["no price:", "fiyatsız:"],
+  "Сколько купить": ["How much to buy", "Alınacak miktar"],
+  "Заготовки — приготовить, а не купить": ["Preps — make them, don't buy", "Hazırlıklar — satın alınmaz, hazırlanır"],
+  "норма": ["target", "hedef"],
+  "Докупать до": ["Restock up to", "Şu miktara tamamla"],
+  "(норма)": ["(target)", "(hedef)"],
+  "2 × мин. остаток": ["2 × min. stock", "2 × min. stok"],
+  "Сколько держать на складе. «Список покупок» предлагает докупить до этого количества. Пусто — вдвое больше минимального остатка.": ["How much to keep in stock. The «Shopping list» suggests buying up to this amount. Empty — twice the minimum stock.", "Depoda ne kadar tutulacağı. «Alışveriş listesi» bu miktara kadar almayı önerir. Boş — minimum stokun iki katı."],
+  "«Докупать до» должно быть не меньше минимального остатка": ["«Restock up to» must not be less than the minimum stock", "«Şu miktara tamamla» minimum stoktan az olamaz"],
+  "Список скопирован. Вставьте его в WhatsApp или в заметки.": ["List copied. Paste it into WhatsApp or your notes.", "Liste kopyalandı. WhatsApp'a veya notlara yapıştırın."],
+  "Скопируйте список:": ["Copy the list:", "Listeyi kopyalayın:"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
