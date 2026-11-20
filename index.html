@@ -245,6 +245,7 @@ details.det div{display:flex;justify-content:space-between;gap:10px;padding:2px 
 /* customers by phone */
 .tag.cnew{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 .tag.cold{background:var(--ok-bg);color:var(--ok)}
+.btn.wa{color:#1a8f4c;text-decoration:none;padding-top:2px;padding-bottom:2px}
 .ocust{font-size:.9rem;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
 .ocust br{flex-basis:100%;content:""}
 .clist{display:flex;flex-direction:column;gap:6px;margin-top:10px}
@@ -2686,7 +2687,7 @@ function orderCard(o){
   const lines = (o.lines||[]).map(l=>`<div><span>${fmt(l.qty)} × ${NL(l)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}${promoTag(l)}${l.comment?` <i>— ${N(l.comment)}</i>`:""}</span><span>${showMoney()&&(l.price||l.promo)?promoPrice(l)+money(l.price*l.qty):""}</span></div>`).join("");
   const meta = [];
   if (o.status==="cancelled" && o.cancelReason) meta.push("причина: "+N(o.cancelReason)+(o.cancelledBy?" ("+N(o.cancelledBy)+(o.approvedBy?", одобрил(а) "+N(o.approvedBy):"")+")":""));
-  if (o.type!=="hall" && phoneKey(o.phone) && o.status!=="cancelled") meta.push(custTag(o));
+  if (o.type!=="hall" && phoneKey(o.phone) && o.status!=="cancelled") meta.push(custTag(o) + " " + waBtn(o.phone));
   if (o.type!=="hall" && o.source) meta.push(esc(o.source));
   if (o.type==="delivery"){ if (o.address) meta.push(N(o.address)); if (o.courier) meta.push("курьер: "+N(o.courier)); if (o.due) meta.push("к "+esc(o.due)); }
   if (o.status==="closed" && o.payment) meta.push("оплата: "+payText(o)+(o.change>0 && showMoney() ? ", сдача "+money(o.change) : ""));
@@ -2760,7 +2761,9 @@ function phoneParse(s){
   if (/^\+/.test(raw) || d.startsWith("00")){
     d = d.replace(/^00/, "");
     if (!d.startsWith("90")){ if (d.length<8 || d.length>15) return null;
-      return {key:d, txt: d.length===11 && d[0]==="7" ? `+7 ${d.slice(1,4)} ${d.slice(4,7)} ${d.slice(7,9)} ${d.slice(9)}` : "+" + d}; }
+      // a foreign number keeps the groups it was typed with (+1 415 555 2671); typed without spaces, a Russian one is grouped
+      const sp = raw.replace(/^\s*(\+|00)/, "").replace(/\D+/g, " ").trim();
+      return {key:d, txt: /\s/.test(sp) ? "+" + sp : d.length===11 && d[0]==="7" ? `+7 ${d.slice(1,4)} ${d.slice(4,7)} ${d.slice(7,9)} ${d.slice(9)}` : "+" + d}; }
     d = d.slice(2);
   } else if (d.length===12 && d.startsWith("90")) d = d.slice(2);
   if (d.length===11 && d[0]==="0") d = d.slice(1);
@@ -2768,6 +2771,8 @@ function phoneParse(s){
   return {key:"90"+d, txt:`+90 ${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6,8)} ${d.slice(8)}`};
 }
 const phoneKey = s => (phoneParse(s)||{}).key || "";
+// a chat in WhatsApp: needs the full number with the country code (the key is exactly that, without +)
+const waBtn = s => { const k = phoneKey(s); return k ? `<a class="btn small wa" href="https://wa.me/${k}" target="_blank" rel="noopener" translate="no" title="WhatsApp">WhatsApp</a>` : ""; };
 const phoneTxt = s => { const p = phoneParse(s); return p ? p.txt : String(s||"").trim(); };
 const PHONE_BAD = "Проверьте телефон: 10 цифр с кодом, например 0532 123 45 67. Иностранный номер — с «+» и кодом страны.";
 const CUST_PRE = "cust_";
@@ -2850,7 +2855,7 @@ function custHint(fill){
   el.hidden = false;
   if (!p){ el.innerHTML = `<span class="hint">${v.replace(/\D/g,"").length<10 ? "Введите номер полностью: 0532 123 45 67" : PHONE_BAD}</span>`; return; }
   const c = custIdx().get(p.key), past = c ? c.list.filter(x=>x.id!==OD.id && (!OD.createdAt || x.t<=OD.createdAt)) : [];
-  if (!past.length){ el.innerHTML = `<span class="tag cnew">Новый клиент</span> <span class="hint">первый заказ</span>`; return; }
+  if (!past.length){ el.innerHTML = `<span class="tag cnew">Новый клиент</span> <span class="hint">первый заказ</span> ${waBtn(p.txt)}`; return; }
   const last = past[past.length-1], sum = past.reduce((a,x)=>a+x.s, 0);
   let filled = [];
   if (fill && !OD.id){
@@ -2861,7 +2866,7 @@ function custHint(fill){
   el.innerHTML = `<span class="tag cold">Повторный клиент</span> <b>${ordNo(past.length+1)}</b>`
     + ` <span class="hint">· до этого заказов: ${past.length} · последний: ${esc(dmy(dayKey(last.t)))}${showMoney() ? ` · всего: ${money(sum)}` : ""}</span>`
     + (c.name ? ` <span class="hint">· ${N(c.name)}</span>` : "")
-    + ` <button type="button" class="btn small" data-cust="${esc(c.key)}">История</button>`
+    + ` <button type="button" class="btn small" data-cust="${esc(c.key)}">История</button> ${waBtn(p.txt)}`
     + (filled.length ? `<br><small class="hint">${filled.length>1 ? "Имя и адрес — из прошлого заказа. Проверьте." : filled[0]==="n" ? "Имя — из прошлого заказа. Проверьте." : "Адрес — из прошлого заказа. Проверьте."}</small>` : "");
 }
 /* «Продажи → Клиенты»: everyone who ordered by phone (takeaway, delivery, the website) */
@@ -2888,7 +2893,7 @@ function openCust(key){
     const when = new Date(x.t).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
     const what = o ? (o.lines||[]).map(l=>`${fmt(l.qty)} × ${NL(l)}`).join(", ") : `<span class="hint">старый заказ: состав на этом устройстве не хранится</span>`;
     return `<div class="cord"><div class="chead"><span><b>${ordNo(nth)}</b> <span class="hint">${esc(when)}${o ? ` · №${esc(o.num)}` : ""}</span>${o ? ` <span class="tag t-${o.type}">${OTYPES[o.type]}</span>` : ""}${o && o.source ? ` <span class="hint">${esc(o.source)}</span>` : ""}</span><b>${showMoney() ? money(x.s) : ""}</b></div><small>${what}</small>${o && o.type==="delivery" && o.address ? `<small class="hint">${N(o.address)}</small>` : ""}</div>`; }).join("");
-  $("#custTitle").innerHTML = `<a href="tel:${esc(c.phone.replace(/\s/g,""))}" translate="no">${esc(c.phone)}</a>${c.name ? ` · ${N(c.name)}` : ""}`;
+  $("#custTitle").innerHTML = `<a href="tel:+${esc(c.key)}" translate="no">${esc(c.phone)}</a>${c.name ? ` · ${N(c.name)}` : ""} ${waBtn(c.phone)}`;
   $("#custBody").innerHTML = `<div class="prev">
       <div><span>Заказов</span><b>${c.n}</b></div>
       <div><span>Первый заказ</span><b>${esc(dmy(dayKey(c.first)))}</b></div>
@@ -5888,7 +5893,7 @@ function webCard(w){
   }
   const sum = ls.reduce((a,l)=>a + (l.src ? l.price*l.qty : 0), 0);
   const lines = ls.map(l=>`<div><span>${fmt(l.qty)} × ${l.src ? N(dn(l.src)) : N(l.name)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}</span><span>${showMoney() && l.src ? money(l.price*l.qty) : ""}</span></div>`).join("");
-  const meta = [`<a href="tel:${esc(String(w.phone||"").replace(/\s/g,""))}" translate="no">${esc(phoneTxt(w.phone))}</a> ${custTag({type:pick ? "takeaway" : "delivery", phone:w.phone})}`];
+  const meta = [`<a href="tel:${esc(String(w.phone||"").replace(/\s/g,""))}" translate="no">${esc(phoneTxt(w.phone))}</a> ${custTag({type:pick ? "takeaway" : "delivery", phone:w.phone})} ${waBtn(w.phone)}`];
   if (!pick && (w.address || w.note)) meta.push(N([w.address, w.note].filter(Boolean).join(", ")));
   meta.push(w.when && w.when!=="asap" ? (pick ? "заберут к " : "к ") + esc(w.when) : "как можно скорее");
   if (w.pay) meta.push("оплата " + (WEB_PAY[w.pay] || esc(w.pay)) + " при получении");
