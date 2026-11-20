@@ -846,6 +846,17 @@ details.fold[open]>summary{margin-bottom:8px}
   </div>
 </form></dialog>
 
+<dialog id="aggDlg"><form method="dialog" id="aggForm">
+  <h3>Комиссия агрегаторов</h3>
+  <p class="hint">Сколько процентов от заказа забирает агрегатор, вместе с КДВ на комиссию. В «Финансах» и «Итогах дня» вычитается из суммы заказов с этим источником (без денег курьеру).</p>
+  <div id="aggBody" style="display:flex;flex-direction:column;gap:10px"></div>
+  <p class="hint" style="margin:0">Процент запоминается в заказе при закрытии: если потом его поменять, уже закрытые заказы останутся со своим. 0 — не вычитать. Комиссию за эти заказы больше не нужно вносить вручную расходом.</p>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
 <dialog id="webHrsDlg"><form method="dialog" id="webHrsForm">
   <h3>Часы приёма заказов с сайта</h3>
   <p class="hint">Сайт сам принимает заказы только в эти часы (время Турции). Выключатель закрывает приём в любой момент.</p>
@@ -2803,7 +2814,7 @@ function orderCard(o){
     ${reqBox}
     ${logHtml(o)}
     ${showMoney()?discLine(o)+courLine(o):""}
-    <div class="ofoot"><b>${showMoney()?money(orderTotal(o)):""}</b><span class="obtns">${btns}</span></div></div>`;
+    <div class="ofoot"><b>${showMoney()?money(orderTotal(o)):""}</b><span class="obtns">${btns}</span></div>${aggLine(o)}</div>`;
 }
 function renderOrders(L){
   if ((S.ordView==="report" && !isAdmin()) || (S.ordView==="woff" && !can("dishOff"))) S.ordView = "open";
@@ -2898,6 +2909,12 @@ function renderReport(L){
     ${table("По способу оплаты", Object.entries(byPay).sort((a,b)=>b[1].sum-a[1].sum))}
     ${nSplit ? `<p class="hint" style="margin-top:6px">${esc(`Оплачено частями (нал + карта): ${nSplit}. Такой заказ входит и в «Наличные», и в «Карта» — своей частью.`)}</p>` : ""}
     ${table("По источнику", agg(sl=>sl.orderType && sl.orderType!=="hall" ? (sl.source||"Не указан") : (sl.orderType==="hall"?"Зал":"Продажи без заказа")))}
+    ${(()=>{ const by = {}; for (const sl of sales){ const a = saleAgg(sl); if (!a) continue; const r = by[a.src] = by[a.src] || {n:0, sum:0, cut:0, ps:new Set()}; r.n++; r.sum += a.food; r.cut += a.cut; r.ps.add(a.p); }
+      const rows = Object.entries(by).sort((a,b)=>b[1].sum-a[1].sum); if (!rows.length) return "";
+      const cut = rows.reduce((a,[,r])=>a+r.cut,0), sum = rows.reduce((a,[,r])=>a+r.sum,0);
+      return `<h2 class="cat"><span>Комиссия агрегаторов</span><span>${money(cut)}</span></h2><div class="sum">${rows.map(([k,r])=>`<div><span>${esc(k)} <small class="hint">(${r.n}) ${esc(`сумма ${money(r.sum)}, комиссия ${[...r.ps].map(p=>fmt(p)+"%").join(" / ")}`)}</small></span><b>− ${money(r.cut)}</b></div>`).join("")}
+        <div class="subtot"><span>${esc("Вам останется с заказов агрегаторов")}</span><b>${money(sum-cut)}</b></div></div>
+        ${rows.some(([,r])=>r.ps.has(0)) ? `<p class="hint">${esc("У части агрегаторов не указан процент комиссии: Финансы → «Комиссия агрегаторов».")}</p>` : ""}`; })()}
     ${top.length ? `<h2 class="cat"><span>Что продано</span><span>${top.length}</span></h2><div class="sum">${top.map(r=>`<div><span>${N(r.name)}${r.kind==="set"?" (сет)":""}</span><span><b>${fmt(r.qty)}</b>${r.sum?` <small class="hint">${money(r.sum)}</small>`:""}</span></div>`).join("")}</div>` : ""}
     ${promoHtml(ps, false)}
     ${sales.some(sl=>sl.total==null) ? `<p class="hint">Часть продаж внесена до появления цен — их сумма посчитана по текущим ценам меню.</p>` : ""}`;
@@ -2925,8 +2942,8 @@ function dayProfit(dk){
   }
   pay = Math.round(pay);
   const otherSum = Object.values(other).reduce((a,v)=>a+v,0), rentD = rent ? rent.amount/nd : 0, utilD = util ? util.amount/nd : 0;
-  const net = F.revenue - F.cogs - F.writeOff - F.manualOut - F.cardCut - cash - otherSum - rentD - utilD - pay;
-  return {rev:F.revenue, nChecks:F.nChecks, courOut, cogs:F.cogs, off:F.writeOff, out:F.manualOut, inv:F.invLoss, card:F.cardCut, cardSum:F.cardSum, cash, cashN:cashL.length, other,
+  const net = F.revenue - F.cogs - F.writeOff - F.manualOut - F.cardCut - (Number(F.aggCut)||0) - cash - otherSum - rentD - utilD - pay;
+  return {rev:F.revenue, nChecks:F.nChecks, courOut, cogs:F.cogs, off:F.writeOff, out:F.manualOut, inv:F.invLoss, card:F.cardCut, cardSum:F.cardSum, agg:Number(F.aggCut)||0, aggBy:F.aggBy||{}, cash, cashN:cashL.length, other,
     rent, util, nd, rentD, utilD, pay, hrs, noRate, noPrice:F.noPrice, net:Math.round(net*100)/100};
 }
 function dayProfitHtml(dk, P){
@@ -2941,6 +2958,7 @@ function dayProfitHtml(dk, P){
     ${P.off ? line("Списания (порча, брак)", neg(P.off)) : ""}
     ${P.out ? line("Расход со склада вручную", neg(P.out), "", "питание персонала, кухня") : ""}
     ${P.card ? line("Удержание с оплат картой", neg(P.card), "", esc(`оплачено картой ${money(P.cardSum)}, ${fmt(cardPct())}%`)) : ""}
+    ${P.agg ? line("Комиссия агрегаторов", neg(P.agg), "", esc(Object.entries(P.aggBy).filter(([,a])=>a.cut).map(([k,a])=>`${k}: ${money(a.cut)}`).join(", "))) : ""}
     ${P.cashN ? line("Кассовые расходы", neg(P.cash), "", P.courOut ? esc(`${"без денег курьеру за доставку"} ${money(P.courOut)}`) : "") : ""}
     ${Object.entries(P.other).sort((a,b)=>b[1]-a[1]).map(([k,v])=>line(esc(k), neg(v))).join("")}
     ${share(P.rent, "Аренда, доля дня")}
@@ -3007,10 +3025,11 @@ function renderFinControls(c){
   c.innerHTML = `<div class="finseg" role="group" aria-label="Период">${FIN_PERIODS.map(([k,l])=>`<button type="button" class="btn small" data-finp="${k}" aria-pressed="${S.finPeriod===k}">${l}</button>`).join("")}</div>
     ${S.finPeriod==="quarter" || S.finPeriod==="year" ? `<div class="mnav finq"><button type="button" class="btn small" data-finoff="-1" aria-label="Назад">‹</button><b>${esc(finQName())}</b><button type="button" class="btn small" data-finoff="1" aria-label="Вперёд" ${(Number(S.finOff)||0)>=0?"disabled":""}>›</button></div>` : ""}
     ${isC ? `<div class="controls"><label class="f" style="flex:1 1 140px">С<input type="date" id="finFrom" class="search" value="${esc(S.finFrom||"")}"></label><label class="f" style="flex:1 1 140px">По<input type="date" id="finTo" class="search" value="${esc(S.finTo||todayKey())}"></label></div>` : ""}
-    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button><button class="btn" id="openOff">Расход и списание</button><button class="btn" id="openCardFee">Удержание с карт</button><button class="btn" id="openMonClose">Закрыть месяц</button></div>
+    <div class="controls"><button class="btn primary" id="addExp">+ Прочий расход</button><button class="btn" id="openPromo">Акции и скидки</button><button class="btn" id="openOff">Расход и списание</button><button class="btn" id="openCardFee">Удержание с карт</button><button class="btn" id="openAggFee">Комиссия агрегаторов</button><button class="btn" id="openMonClose">Закрыть месяц</button></div>
     ${lastClosed() ? `<p class="hint" style="margin:0">${esc(dot(`Последний закрытый месяц: ${ymName(lastClosed())}`))}</p>` : ""}
     <p class="hint" style="margin:0">${esc(promoCfgText())}</p>
     <p class="hint" style="margin:0">${esc(`С оплаты картой вычитается ${fmt(cardPct())}% (КДВ и комиссия банка).`)}</p>
+    <p class="hint" style="margin:0">${esc(aggCfgText())}</p>
     <p class="hint" style="margin:0">${esc(`Расход и списание работника дороже ${money(offMax())} за запись попадает вам на проверку.`)}</p>`;
 }
 // a long block of Финансы folded: the heading opens and closes it, «Свернуть» at the top and at the bottom; stays as it was between renders
@@ -3026,7 +3045,7 @@ document.addEventListener("click", e=>{ const b = e.target.closest("[data-foldcl
 // so Финансы show it the same after its detailed records are gone. Shifts (hours and pay by worker) may take their own range [s0,s1).
 function finEmpty(){
   return {revenue:0, nChecks:0, cogs:0, writeOff:0, manualOut:0, invLoss:0, buyIn:0, woffSum:0, woffBy:{}, noPrice:[], oldPrice:0, expTotal:0, cash:{total:0}, cashN:0, expByCat:{},
-    courSum:0, courN:0, cardSum:0, cardCut:0, cardPs:[], promo:{n:0, disc:0, gifts:0, orders:0}, items:{}, dc:{n:0, cashDiff:0, cardDiff:0, takeN:0, take:0}, staff:{}};
+    courSum:0, courN:0, cardSum:0, cardCut:0, cardPs:[], aggSum:0, aggCut:0, aggN:0, aggBy:{}, promo:{n:0, disc:0, gifts:0, orders:0}, items:{}, dc:{n:0, cashDiff:0, cardDiff:0, takeN:0, take:0}, staff:{}};
 }
 function finCalc(t0, t1, s0, s1){
   const inR = ts => (ts||0)>=t0 && (ts||0)<t1, F = finEmpty();
@@ -3055,6 +3074,9 @@ function finCalc(t0, t1, s0, s1){
   F.courSum = sales.reduce((a,sl)=>a+(Number(sl.courierFee)||0),0); F.courN = sales.filter(sl=>Number(sl.courierFee)>0).length;
   // paid by card (whole card part, courier fee included: the bank keeps its share of all of it)
   const cardP = cardPct(); F.cardSum = sales.reduce((a,sl)=>a+paidBy(sl,"Карта"),0); F.cardCut = Math.round(F.cardSum*cardP)/100; F.cardPs = F.cardSum ? [cardP] : [];
+  // Д7: aggregator orders, by aggregator: orders, their sum (without the courier fee) and the commission
+  for (const sl of sales){ const a = saleAgg(sl); if (!a) continue;
+    const r = F.aggBy[a.src] = F.aggBy[a.src] || {n:0, sum:0, cut:0}; r.n++; r.sum += a.food; r.cut += a.cut; F.aggN++; F.aggSum += a.food; F.aggCut += a.cut; }
   const ps = promoSummary(sales); F.promo = {n:ps.n, disc:ps.disc, gifts:ps.gifts, orders:ps.orders};
   // dishes
   for (const sl of sales) for (const l of sl.lines||[]){
@@ -3076,14 +3098,15 @@ function finCalc(t0, t1, s0, s1){
   return F;
 }
 const finGross = F => F.revenue - F.cogs;
-const finNet = F => finGross(F) - F.writeOff - F.manualOut - F.invLoss - F.expTotal - F.cardCut;
+const finNet = F => finGross(F) - F.writeOff - F.manualOut - F.invLoss - F.expTotal - F.cardCut - (Number(F.aggCut)||0);
 const addTo = (a, b) => { for (const [k,v] of Object.entries(b||{})) a[k] = (a[k]||0) + (Number(v)||0); };
 function finMerge(list){
   const F = finEmpty(), np = new Set(), cps = new Set();
   for (const f of list){ if (!f) continue;
-    for (const k of ["revenue","nChecks","cogs","writeOff","manualOut","invLoss","buyIn","woffSum","oldPrice","expTotal","cashN","courSum","courN","cardSum","cardCut"]) F[k] += Number(f[k])||0;
+    for (const k of ["revenue","nChecks","cogs","writeOff","manualOut","invLoss","buyIn","woffSum","oldPrice","expTotal","cashN","courSum","courN","cardSum","cardCut","aggSum","aggCut","aggN"]) F[k] += Number(f[k])||0;
     for (const k of ["woffBy","cash","expByCat","promo","dc"]) addTo(F[k], f[k]);
     (f.noPrice||[]).forEach(n=>np.add(n)); (f.cardPs||[]).forEach(p=>cps.add(p));
+    for (const [k,a] of Object.entries(f.aggBy||{})) addTo(F.aggBy[k] = F.aggBy[k] || {n:0, sum:0, cut:0}, a);
     for (const [k,it] of Object.entries(f.items||{})){ const r = F.items[k] = F.items[k] || {name:it.name, kind:it.kind, cat:it.cat, qty:0, rev:0, cost:0};
       r.qty += Number(it.qty)||0; r.rev += Number(it.rev)||0; r.cost += Number(it.cost)||0; if ((Number(it.last)||0) > (r.last||0)) r.last = Number(it.last); }
     for (const [id,s] of Object.entries(f.staff||{})){ const r = F.staff[id] = F.staff[id] || {name:s.name, hrs:0, pay:0}; r.hrs += Number(s.hrs)||0; r.pay += Number(s.pay)||0; }
@@ -3137,7 +3160,7 @@ function staleHtml(){
 function renderFin(L){
   const [t0,t1] = finRange(), inR = ts => (ts||0)>=t0 && (ts||0)<t1;
   const F = finData(t0, t1), revenue = F.revenue, nChecks = F.nChecks, cogs = F.cogs, writeOff = F.writeOff, manualOut = F.manualOut, invLoss = F.invLoss;
-  const expTotal = F.expTotal, cardCut = F.cardCut, gross = finGross(F), net = finNet(F), cashS = F.cash;
+  const expTotal = F.expTotal, cardCut = F.cardCut, aggC = Number(F.aggCut)||0, gross = finGross(F), net = finNet(F), cashS = F.cash;
   const cp = F.cardPs.length===1 ? F.cardPs[0] : null;
   // lists come from the detailed records (as long as they are kept)
   const ps = promoSummary(S.sales.filter(sl=>inR(sl.ts)));
@@ -3159,7 +3182,7 @@ function renderFin(L){
     <div class="kpis">
       <div class="kpi"><small>Выручка</small><b>${money(revenue)}</b></div>
       <div class="kpi"><small>Себестоимость продаж</small><b>${money(cogs)}</b><small>${pct(cogs,revenue)} от выручки</small></div>
-      <div class="kpi"><small>Расходы и потери</small><b>${money(writeOff+manualOut+invLoss+expTotal+cardCut)}</b></div>
+      <div class="kpi"><small>Расходы и потери</small><b>${money(writeOff+manualOut+invLoss+expTotal+cardCut+aggC)}</b></div>
       <div class="kpi finnet ${net<0?"minus":"plus"}"><small>Чистая прибыль</small><b>${money(net)}</b><small>${pct(net,revenue)} от выручки</small></div></div>
     ${monthlyHtml()}
     ${finMonthsHtml(t0, t1)}
@@ -3174,6 +3197,7 @@ function renderFin(L){
       ${manualOut ? line("Расход со склада вручную", neg(manualOut), "", "питание персонала, кухня") : ""}
       ${invLoss ? line(invLoss>0?"Недостача по инвентаризации":"Излишки по инвентаризации", neg(invLoss)) : ""}
       ${cardCut ? line("Удержание с оплат картой", neg(cardCut), "", esc(`оплачено картой ${money(F.cardSum)}${cp!=null?`, удержание ${fmt(cp)}%`:""}: КДВ и комиссия банка`)) : ""}
+      ${aggC ? line("Комиссия агрегаторов", neg(aggC), "", esc(Object.entries(F.aggBy||{}).filter(([,a])=>a.cut).sort((a,b)=>b[1].cut-a[1].cut).map(([k,a])=>`${k}: заказов ${a.n}, сумма ${money(a.sum)}, комиссия ${money(a.cut)}`).join("; "))) : ""}
       ${F.cashN ? line("Кассовые расходы", neg(cashS.total), "", CASH_KINDS.filter(k=>cashS[k]).map(k=>k.toLowerCase()+" "+money(cashS[k])).join(", ")) : ""}
       ${Object.entries(F.expByCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>line(esc(k), neg(v))).join("")}
       ${line("Чистая прибыль", money(net), "total "+(net<0?"minus":"plus"))}
@@ -3419,6 +3443,37 @@ $("#cardForm").addEventListener("submit", async e=>{
   try { await commit("Удержание с оплаты картой", [{col:"settings", id:"cardfee", after:x}]); $("#cardDlg").close(); render(true); toast("Сохранено"); }
   catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
 });
+// Д7: an aggregator (Yemeksepeti, Uber Eats, Migros Yemek) keeps its commission, % of the order without the courier fee (settings/aggfee {pcts:{source:%}}).
+// A closed order keeps the % it was closed with (order and sale: aggPct, aggCut); one closed before a % was set counts with today's %.
+const AGG_SRC = SOURCES.filter(s=>AGGREGATORS.includes(s));
+const aggPctOf = src => { const c = S.settings.find(x=>x.id==="aggfee"), v = c && c.pcts ? Number(c.pcts[src]) : 0; return isNaN(v) || v<0 || v>100 ? 0 : v; };
+const aggCutOf = (food, p) => Math.round((Number(food)||0)*p)/100;
+const aggCut = (src, food, keptPct, keptCut) => { const p = keptPct!=null ? Number(keptPct)||0 : aggPctOf(src); return {src, p, food, cut: keptCut!=null ? Number(keptCut)||0 : aggCutOf(food, p)}; };
+const saleAgg = sl => sl && sl.orderType && sl.orderType!=="hall" && AGGREGATORS.includes(sl.source) ? aggCut(sl.source, saleFood(sl), sl.aggPct, sl.aggCut) : null;
+const orderAgg = o => o && o.status!=="cancelled" && o.type!=="hall" && AGGREGATORS.includes(o.source) ? aggCut(o.source, orderFood(o), o.status==="closed" ? o.aggPct : null, o.status==="closed" ? o.aggCut : null) : null;
+const aggText = a => `Комиссия ${a.src} ${fmt(a.p)}%`;
+// admin only (like the cost of dishes): what the aggregator keeps and what is left
+const aggLine = o => { const a = isAdmin() ? orderAgg(o) : null; if (!a) return "";
+  return a.p>0 ? `<div class="odiscl"><span>${esc(aggText(a))}</span><span>−${money(a.cut)}</span></div><div class="ocourl"><span>${esc("Вам останется")}</span><b>${money(a.food-a.cut)}</b></div>`
+    : `<div class="ocourl"><span class="hint">${esc(`Комиссия ${a.src}: процент не указан (Финансы → «Комиссия агрегаторов»).`)}</span></div>`; };
+const aggCfgText = () => "Комиссия агрегаторов: " + AGG_SRC.map(s=>`${s} ${fmt(aggPctOf(s))}%`).join(", ") + ".";
+function openAggFee(){
+  if (!isAdmin()) return;
+  $("#aggBody").innerHTML = AGG_SRC.map((s,i)=>`<label class="f">${esc(s)}, %<input data-aggp="${i}" inputmode="decimal" autocomplete="off" placeholder="0" value="${aggPctOf(s) ? esc(String(aggPctOf(s))) : ""}"></label>`).join("");
+  $("#aggDlg").showModal(); const f = $("#aggBody input"); if (f) f.focus();
+}
+$("#aggForm").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const pcts = {};
+  for (const inp of document.querySelectorAll("#aggBody input[data-aggp]")){
+    const t = inp.value.trim(), v = t ? num(t) : 0;
+    if (isNaN(v) || v<0 || v>100){ need(inp, "Введите процент от 0 до 100"); return; }
+    pcts[AGG_SRC[Number(inp.dataset.aggp)]] = Math.round(v*100)/100;
+  }
+  const x = {id:"aggfee", pcts, updatedAt:Date.now(), by:S.me?S.me.name:""};
+  try { await commit("Комиссия агрегаторов", [{col:"settings", id:"aggfee", after:x}]); $("#aggDlg").close(); render(true); toast("Сохранено"); }
+  catch(err){ console.error(err); toast("Не удалось сохранить. Проверьте права на изменение."); }
+});
 function openOff(){ if (!isAdmin()) return; $("#offMax").value = String(offMax()); $("#offDlg").showModal(); $("#offMax").focus(); }
 $("#offForm").addEventListener("submit", async e=>{
   e.preventDefault();
@@ -3462,7 +3517,7 @@ $("#expDel").addEventListener("click", async ()=>{
   catch(err){ console.error(err); toast("Не удалось удалить. Проверьте права на изменение."); }
 });
 document.addEventListener("click", async e=>{
-  const t = e.target.closest("[data-finp],[data-fins],[data-finoff],#addExp,#openPromo,#openOff,#openCardFee,[data-exp]"); if (!t) return;
+  const t = e.target.closest("[data-finp],[data-fins],[data-finoff],#addExp,#openPromo,#openOff,#openCardFee,#openAggFee,[data-exp]"); if (!t) return;
   if (t.dataset.finoff){ S.finOff = Math.min(0, (Number(S.finOff)||0) + Number(t.dataset.finoff)); return render(true); }
   if (t.dataset.finp){ S.finPeriod = t.dataset.finp; S.finOff = 0; lsSet("sushi.finp", S.finPeriod); return render(true); }
   if (t.dataset.fins){ S.finSort = t.dataset.fins; return renderList(); }
@@ -3470,6 +3525,7 @@ document.addEventListener("click", async e=>{
   if (t.id==="openPromo") return openPromo();
   if (t.id==="openOff") return openOff();
   if (t.id==="openCardFee") return openCardFee();
+  if (t.id==="openAggFee") return openAggFee();
   if (t.dataset.exp) return openExp(t.dataset.exp);
 });
 document.addEventListener("change", e=>{
@@ -4146,6 +4202,7 @@ function openPay(id){
   $("#payBody").innerHTML = `<div class="prev">${(o.lines||[]).map(l=>`<div><span>${fmt(l.qty)} × ${NL(l)}${promoTag(l)}</span><span>${l.price||l.promo?promoPrice(l)+money(l.price*l.qty):"—"}</span></div>`).join("")}</div>
     ${discLine(o)}${courLine(o)}
     <div class="ototal">К оплате: <b>${money(orderTotal(o))}</b></div>
+    ${aggLine(o)}
     <div class="seg seg5" role="radiogroup" aria-label="Способ оплаты">${PAYS.map(pm=>`<label><input type="radio" name="paym" value="${esc(pm)}" ${pm===def?"checked":""}>${esc(pm)}</label>`).join("")}</div>
     <div class="paycash" id="payCash">
       <div class="two" id="paySplitW"><label class="f">Наличными, ₺<input id="paySplit" inputmode="decimal" autocomplete="off" placeholder="0"></label>
@@ -4199,9 +4256,11 @@ async function payOrder(){
   const mvs = Object.entries(ing).map(([pid,q])=>({productId:pid, unit:byId(pid).unit, type:"sale", delta:-q, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id})).map(withUc);
   if (!mvs.length) mvs.push({productId:"", unit:"", type:"sale", delta:0, note:"Продажа", batchLabel:label, who, ts, batchId, orderId:o.id});
   const md = foldMoves("m"+batchId, mvs), ops = [{col:"moves", id:md.id, after:md}];
-  const total = orderTotal(o);
-  ops.push({col:"sales", id:batchId, after:Object.assign({id:batchId, lines:(o.lines||[]).map(l=>Object.assign({kind:l.kind, refId:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0}, lineUc(l)!==undefined ? {uc:lineUc(l)} : {}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})), who, ts, orderId:o.id, orderType:o.type, source:o.source||"", payment, total}, payx, courFee(o) ? {courierFee:courFee(o)} : {}, orderPct(o) ? {discPct:orderPct(o), disc:orderDisc(o), subtotal:orderSubtotal(o), discBy:o.discBy||"", orderNum:o.num} : {})});
-  const on = Object.assign({}, o, {status:"closed", payment, total, closedAt:ts, saleBatchId:batchId, updatedAt:ts}, payx);
+  const total = orderTotal(o), agp = o.type!=="hall" && AGGREGATORS.includes(o.source) ? aggPctOf(o.source) : 0;
+  const agx = agp>0 ? {aggPct:agp, aggCut:aggCutOf(orderFood(o), agp)} : {};   // Д7: the % stays with the order
+  ops.push({col:"sales", id:batchId, after:Object.assign({id:batchId, lines:(o.lines||[]).map(l=>Object.assign({kind:l.kind, refId:l.id, name:l.name, qty:l.qty, price:Number(l.price)||0}, lineUc(l)!==undefined ? {uc:lineUc(l)} : {}, l.promo ? {promo:true, basePrice:Number(l.basePrice)||0, promoBy:l.promoBy||""} : {})), who, ts, orderId:o.id, orderType:o.type, source:o.source||"", payment, total}, payx, courFee(o) ? {courierFee:courFee(o)} : {}, orderPct(o) ? {discPct:orderPct(o), disc:orderDisc(o), subtotal:orderSubtotal(o), discBy:o.discBy||"", orderNum:o.num} : {}, agx)});
+  const on = Object.assign({}, o, {status:"closed", payment, total, closedAt:ts, saleBatchId:batchId, updatedAt:ts}, payx, agx);
+  if (!agx.aggPct){ delete on.aggPct; delete on.aggCut; }
   if (!payx.pays) delete on.pays; if (payx.change==null){ delete on.given; delete on.change; }
   ops.push({col:"orders", id:o.id, after:on});
   try { await commit(`Закрыт заказ №${o.num}`, ops); $("#payDlg").close(); render(); toast(`Заказ №${o.num} закрыт: ${money(total)}, ${payment}${payx.pays ? ` (наличными ${money(pst.cash)}, картой ${money(pst.card)})` : ""}${payx.change>0 ? `. Сдача ${money(payx.change)}` : ""}`); }
@@ -4222,7 +4281,7 @@ async function reopenOrder(id){
   await syncSale(o);
   const ops = S.mdocs.filter(d=>d.batchId && d.batchId===o.saleBatchId).map(d=>({col:"moves", id:d.id, after:null}));
   if (S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
-  const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.pays; delete n.given; delete n.change; delete n.closedAt; delete n.saleBatchId; delete n.voidReq;
+  const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.pays; delete n.given; delete n.change; delete n.closedAt; delete n.saleBatchId; delete n.voidReq; delete n.aggPct; delete n.aggCut;
   ops.push({col:"orders", id, after:n});
   try { await commit(`Заказ №${o.num} возвращён в работу`, ops); S.ordView="open"; render(true); toast(`Заказ №${o.num} снова открыт`); }
   catch(err){ console.error(err); toast("Не удалось вернуть заказ."); }
@@ -5709,6 +5768,16 @@ Object.assign(I18N, {"Другие названия": ["Other names", "Diğer ad
   "«Докупать до» должно быть не меньше минимального остатка": ["«Restock up to» must not be less than the minimum stock", "«Şu miktara tamamla» minimum stoktan az olamaz"],
   "Список скопирован. Вставьте его в WhatsApp или в заметки.": ["List copied. Paste it into WhatsApp or your notes.", "Liste kopyalandı. WhatsApp'a veya notlara yapıştırın."],
   "Скопируйте список:": ["Copy the list:", "Listeyi kopyalayın:"]});
+// Д7: aggregator commission
+Object.assign(I18N, {"Сколько процентов от заказа забирает агрегатор, вместе с КДВ на комиссию. В «Финансах» и «Итогах дня» вычитается из суммы заказов с этим источником (без денег курьеру).": ["What percent of an order the aggregator keeps, including KDV on the commission. In «Finance» and «Day summary» it is taken off the orders from this source (without the courier money).", "Platformun siparişten aldığı yüzde, komisyonun KDV'si dahil. «Finans» ve «Gün özeti» bölümlerinde bu kaynaktan gelen siparişlerin tutarından düşülür (kurye parası hariç)."],
+  "Процент запоминается в заказе при закрытии: если потом его поменять, уже закрытые заказы останутся со своим. 0 — не вычитать. Комиссию за эти заказы больше не нужно вносить вручную расходом.": ["The percent is saved in the order when it is closed: if you change it later, closed orders keep their own. 0 — do not deduct. You no longer need to enter the commission for these orders by hand as an expense.", "Yüzde, sipariş kapatılırken siparişe kaydedilir: sonradan değiştirirseniz kapanmış siparişler kendi yüzdesiyle kalır. 0 — düşme. Bu siparişlerin komisyonunu artık elle gider olarak girmenize gerek yok."],
+  "Вам останется с заказов агрегаторов": ["Left for you from aggregator orders", "Platform siparişlerinden size kalan"],
+  "У части агрегаторов не указан процент комиссии: Финансы → «Комиссия агрегаторов».": ["Some aggregators have no commission percent: Finance → «Aggregator commission».", "Bazı platformların komisyon yüzdesi girilmemiş: Finans → «Platform komisyonu»."],
+  "процент не указан": ["percent not set", "yüzde girilmemiş"],
+  "Вам останется": ["Left for you", "Size kalan"],
+  "Комиссия": ["Commission", "Komisyon"],
+  "комиссия": ["commission", "komisyon"],
+  "заказов": ["orders", "sipariş"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
