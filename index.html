@@ -281,6 +281,10 @@ s.oldp{color:var(--muted)}
 .seg.seg5 label:nth-child(n+4){grid-column:span 3}
 .okc{color:var(--ok);font-weight:600}
 .warnc{color:var(--low);font-weight:600}
+.wrnav{display:flex;align-items:center;justify-content:center;gap:14px}
+.wrnav b{font-family:var(--display);font-weight:500;font-size:1.05rem;min-width:9em;text-align:center}
+.paybox{margin:2px 0}
+#wrBody .sum b,.paybox b{white-space:nowrap}
 .monlock{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);padding:8px 12px;border-radius:var(--radius-s);margin-bottom:12px;font-size:.92rem}
 .finq{margin:0 0 8px;max-width:420px}
 .monbox .sum b{white-space:nowrap}
@@ -917,6 +921,33 @@ details.fold[open]>summary{margin-bottom:8px}
     <button type="submit" class="btn primary" id="shSave">Сохранить</button>
   </div>
 </form></dialog>
+<dialog id="payoutDlg"><form method="dialog" id="payoutForm">
+  <h3 id="poTitle">Новая выплата</h3>
+  <label class="f">Сотрудник<select id="poStaff"></select></label>
+  <div class="seg" style="grid-template-columns:1fr 1fr" role="radiogroup" aria-label="Вид выплаты">
+    <label><input type="radio" name="potype" value="Аванс" checked>Аванс</label>
+    <label><input type="radio" name="potype" value="Зарплата">Зарплата</label></div>
+  <div class="two"><label class="f">Сумма, ₺<input id="poAmt" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+    <label class="f">За месяц<select id="poMonth"></select></label></div>
+  <p class="hint" id="poLeft" style="margin:0"></p>
+  <div class="two daytwo"><label class="f">Дата выдачи<input id="poDate" type="date"></label>
+    <label class="toggle" style="color:var(--ink)"><input type="checkbox" id="poTill"> Взято из кассы</label></div>
+  <label class="f">Комментарий<input id="poNote" autocomplete="off" maxlength="200" placeholder="Необязательно"></label>
+  <p class="hint" style="margin:0">Записывайте каждую выданную сумму: программа покажет, сколько ещё осталось выдать. В «Финансы» выплата не идёт: зарплата там уже считается по сменам. Если деньги взяли из кассы, отметьте «Взято из кассы»: «Закрытие дня» это учтёт.</p>
+  <p class="hint" id="poWho" style="margin:0"></p>
+  <div class="dlg-actions">
+    <button type="button" class="btn danger" id="poDel" hidden>Удалить</button><span class="spacer"></span>
+    <button type="button" class="btn" data-close>Отмена</button>
+    <button type="submit" class="btn primary">Сохранить</button>
+  </div>
+</form></dialog>
+
+<dialog id="wrepDlg" class="wide"><form method="dialog">
+  <h3 id="wrTitle">Отчёт по работнику</h3>
+  <div id="wrBody" style="display:flex;flex-direction:column;gap:12px"></div>
+  <div class="dlg-actions"><button type="button" class="btn" data-close>Закрыть</button></div>
+</form></dialog>
+
 <dialog id="monthDlg"><form method="dialog" id="monthForm">
   <h3 id="mTitle">Ежемесячный расход</h3>
   <label class="f">Сумма, ₺<input id="mAmt" inputmode="decimal" autocomplete="off" placeholder="0"></label>
@@ -1313,6 +1344,7 @@ function render(full){
   { const pn = $("#pubNote"); if (pn && S.view==="menu"){ const h = pubNote(); if (pn.dataset.h!==h){ pn.innerHTML = h; pn.dataset.h = h; } } }
   if (S.view!=="inv" && !isDishOff()) $("#savebarHost").innerHTML="";
   document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected", String(b.dataset.view===(S.view==="inv" ? "stock" : S.view))));
+  if ($("#wrepDlg").open) wrepRender();
 }
 
 /* ---------- movement dialog ---------- */
@@ -2742,7 +2774,7 @@ function renderReport(L){
   for (const sl of sales) for (const l of sl.lines||[]){ const k=(l.kind||"dish")+":"+l.refId; dishes[k] = dishes[k] || {name:l.name, kind:l.kind, qty:0, sum:0}; dishes[k].qty += Number(l.qty)||0; dishes[k].sum += (Number(l.price)||0)*(Number(l.qty)||0)*saleK(sl); }
   const top = Object.values(dishes).sort((a,b)=>b.qty-a.qty);
   const table = (title, rows) => rows.length ? `<h2 class="cat"><span>${title}</span></h2><div class="sum">${rows.map(([k,v])=>`<div><span>${esc(k)} <small class="hint">(${v.n})</small></span><b>${money(v.sum)}</b></div>`).join("")}</div>` : "";
-  const cashList = cashOfDay(dk), cashOut = cashSums(cashList).total;
+  const cashList = cashOfDay(dk), cashOut = cashSums(cashList).total, tillPays = tillPaysOf(dk), payOut = sumAmt(tillPays);
   // «Расход» and «Списание» entered by hand that day, and dishes taken out of an order after cooking (whole-order write-offs are in their own block), by who entered them
   const offs = S.moves.filter(m=>(m.type==="off" || m.type==="out") && (!m.orderId || m.rmLate) && dayKey(m.ts||0)===dk).sort((a,b)=>(a.ts||0)-(b.ts||0));
   const offSum = m => -(Number(m.delta)||0)*(mvUc(m).cost||0), offBy = {};
@@ -2772,7 +2804,8 @@ function renderReport(L){
     <h2 class="cat"><span>Касса (наличные)</span></h2><div class="sum">
       <div><span>Получено наличными${cashCour?` <small class="hint">вместе с доставкой ${money(cashCour)}</small>`:""}</span><b>${money(cashIn)}</b></div>
       <div><span>Кассовые расходы <small class="hint">(${cashList.length})</small></span><b>${cashOut ? "− "+money(cashOut) : money(0)}</b></div>
-      <div class="subtot"><span>Должно остаться в кассе <small class="hint">без учёта размена на начало дня</small></span><b>${money(cashIn-cashOut)}</b></div></div>
+      ${payOut ? `<div><span>Выплаты работникам из кассы <small class="hint">(${tillPays.length}: ${tillPays.map(p=>N(p.name||"")).join(", ")})</small></span><b>− ${money(payOut)}</b></div>` : ""}
+      <div class="subtot"><span>Должно остаться в кассе <small class="hint">без учёта размена на начало дня</small></span><b>${money(cashIn-cashOut-payOut)}</b></div></div>
     ${dayCloseHtml(dk)}
     ${(()=>{ const dm = dayMoney(dk); return dm.nTransfer ? `<h2 class="cat"><span>Переводы на счёт</span></h2><div class="sum"><div><span>${esc(`Переводом за день, заказов: ${dm.nTransfer}`)} <small class="hint">сверьте с выпиской банка</small></span><b>${money(dm.transfer)}</b></div></div>` : ""; })()}
     ${cour.length ? `<p class="hint">${esc(`Доставка за день (заказов: ${cour.length}): ${money(courSum)}. Это деньги курьера: в выручку и средний чек не входят.`)}</p>` : ""}
@@ -3097,7 +3130,7 @@ function lockYm(col, x){
   if (col==="orders"){ const t = x.closedAt||x.cancelledAt||x.createdAt; return t ? wYm(t) : ""; }
   if (col==="expenses") return x.monthly ? (x.month||ymOf(x.ts||0)) : x.ts ? wYm(x.ts) : "";
   if (col==="shifts") return x.start ? ymOf(x.start) : "";   // salary counts shifts by the calendar month
-  if (col==="settings") return x.kind==="dayClose" && x.day ? x.day.slice(0,7) : "";
+  if (col==="settings") return x.kind==="dayClose" && x.day ? x.day.slice(0,7) : x.kind==="payout" && x.till && x.ts ? wYm(x.ts) : "";   // a payout from the till is in the day closing
   return "";
 }
 function opsLocked(ops){
@@ -3393,7 +3426,7 @@ const r2 = n => Math.round((Number(n)||0)*100)/100;
 const closeOf = dk => S.settings.find(x=>x.id==="close_"+dk);
 function dayMoney(dk){
   const sales = S.sales.filter(x=>dayKey(x.ts||0)===dk), by = m => r2(sales.reduce((a,sl)=>a+paidBy(sl,m),0));
-  return {cashIn:by("Наличные"), cashOut:r2(cashSums(cashOfDay(dk)).total), card:by("Карта"), nCard:sales.filter(sl=>paidBy(sl,"Карта")>0).length,
+  return {cashIn:by("Наличные"), cashOut:r2(cashSums(cashOfDay(dk)).total), payOut:sumAmt(tillPaysOf(dk)), card:by("Карта"), nCard:sales.filter(sl=>paidBy(sl,"Карта")>0).length,
     transfer:by("Перевод"), nTransfer:sales.filter(sl=>paidBy(sl,"Перевод")>0).length};
 }
 // размен: what was in the till in the morning — what was left at the last closing (С2), or its размен when that was not written
@@ -3454,10 +3487,11 @@ function openDay(dk){
 function dayCalc(){
   if (!isAdmin() || !$("#dcCashRes")) return;
   const dm = dayMoney(dayDk), fl = numMoney($("#dcFloat").value)||0, cv = $("#dcCash").value.trim(), cash = numMoney(cv), tv = $("#dcCard").value.trim(), card = numMoney(tv);
-  const exp = r2(fl + dm.cashIn - dm.cashOut);
+  const exp = r2(fl + dm.cashIn - dm.cashOut - dm.payOut);
   $("#dcCashRes").innerHTML = `<div><span>Размен утром</span><b>${money(fl)}</b></div>
     <div><span>Получено наличными</span><b>+ ${money(dm.cashIn)}</b></div>
     <div><span>Кассовые расходы</span><b>− ${money(dm.cashOut)}</b></div>
+    ${dm.payOut ? `<div><span>Выплаты работникам из кассы</span><b>− ${money(dm.payOut)}</b></div>` : ""}
     <div class="subtot"><span>Должно быть в кассе</span><b>${money(exp)}</b></div>
     ${cv && !isNaN(cash) ? `<div><span>Разница</span>${diffTxt(r2(cash-exp))}</div>` : ""}`;
   $("#dcCardRes").innerHTML = `<div><span>По карте в программе <small class="hint">(${dm.nCard})</small></span><b>${money(dm.card)}</b></div>
@@ -3493,11 +3527,12 @@ async function saveDay(){
   const unstop = [...document.querySelectorAll("#dayBody [data-unstop]:checked")].map(c=>c.dataset.unstop).filter(id=>S.settings.some(x=>x.id===id));
   const dk = dayDk, dm = dayMoney(dk), op = dk===todayKey() ? dayOpen() : null;
   if (op && op.orders.length && !tConfirm(`Открытых заказов: ${op.orders.length}. Их деньги не войдут в этот день. Всё равно закрыть день?`)) return;
-  const old = closeOf(dk), exp = r2(fl + dm.cashIn - dm.cashOut), ts = Date.now();
+  const old = closeOf(dk), exp = r2(fl + dm.cashIn - dm.cashOut - dm.payOut), ts = Date.now();
   const x = {id:"close_"+dk, kind:"dayClose", day:dk, ts, who:S.me.name, whoId:S.me.id, float:r2(fl), cash:r2(cash), cashIn:dm.cashIn, cashOut:dm.cashOut, cashExp:exp, cashDiff:r2(cash-exp),
     card:card==null ? null : r2(card), cardExp:dm.card, cardDiff:card==null ? null : r2(card-dm.card), transfer:dm.transfer, nTransfer:dm.nTransfer,
     take:take==null ? null : r2(take), left:left==null ? null : r2(left), note:$("#dcNote").value.trim()};
   if (unstop.length) x.unstop = unstop.length;
+  if (dm.payOut) x.payOut = dm.payOut;
   if (op) x.open = {orders:op.orders.length, shifts:op.shifts.map(sh=>sh.name||""), req:op.req, drafts:op.drafts};
   if (old) x.hist = [...(old.hist||[]), {who:old.who||"", ts:old.ts||0, cash:old.cash, cashDiff:old.cashDiff, card:old.card==null ? null : old.card, cardDiff:old.cardDiff==null ? null : old.cardDiff}].slice(-10);
   daySaving = true;
@@ -3515,9 +3550,9 @@ function dayCloseHtml(dk){
   const rec = closeOf(dk), dm = dayMoney(dk);
   const btn = `<button type="button" class="btn small" data-dayclose="${esc(dk)}">${rec ? "Закрыть заново" : "Закрыть день"}</button>`;
   if (!rec) return `<div class="oreq" style="margin-top:8px">День не закрыт: наличные и терминал не сверены. ${btn}</div>`;
-  const live = r2((Number(rec.float)||0) + dm.cashIn - dm.cashOut), moved = Math.abs(live - (Number(rec.cashExp)||0))>=0.005 || Math.abs(dm.card - (Number(rec.cardExp)||0))>=0.005;
+  const live = r2((Number(rec.float)||0) + dm.cashIn - dm.cashOut - dm.payOut), moved = Math.abs(live - (Number(rec.cashExp)||0))>=0.005 || Math.abs(dm.card - (Number(rec.cardExp)||0))>=0.005;
   return `<h2 class="cat"><span>Закрытие дня</span><span>${esc(`${rec.who||""}, ${hhmm(rec.ts||0)}`)}</span></h2><div class="sum">
-      <div><span>Должно быть в кассе <small class="hint">${esc(`размен утром ${money(rec.float)} + наличные ${money(rec.cashIn)} − кассовые расходы ${money(rec.cashOut)}`)}</small></span><b>${money(rec.cashExp)}</b></div>
+      <div><span>Должно быть в кассе <small class="hint">${esc(`размен утром ${money(rec.float)} + наличные ${money(rec.cashIn)} − кассовые расходы ${money(rec.cashOut)}${rec.payOut ? ` − выплаты работникам ${money(rec.payOut)}` : ""}`)}</small></span><b>${money(rec.cashExp)}</b></div>
       <div><span>Насчитали в кассе</span><b>${money(rec.cash)}</b></div>
       <div class="subtot"><span>Наличные</span>${diffTxt(Number(rec.cashDiff)||0)}</div>
       <div><span>По карте в программе</span><b>${money(rec.cardExp)}</b></div>
@@ -4908,6 +4943,8 @@ function renderStaff(L){
         <div class="shead"><button type="button" class="btn small" data-editstaff="${esc(x.id)}">Карточка сотрудника</button>
           <span class="stot"><b>${fmtH(h)}</b><small>${SH_PERIODS.find(p=>p[0]===S.shPeriod)[1]} · ${nSh} ${plural(nSh,"смена","смены","смен")}${rate?` · ${money(pay)}`:""}</small></span></div>
         ${rate ? `<p class="hint" style="margin:0">${ROLES[roleOf(x)]} · ${rateText(x)}</p>` : ""}
+        ${rate || payoutsOf(x.id).length ? payLineHtml(x) : ""}
+        <div class="acts"><button type="button" class="btn small" data-payadd="${esc(x.id)}">+ Выплата</button><button type="button" class="btn small" data-wrep="${esc(x.id)}">Отчёт по работнику</button></div>
         ${x.active!==false ? `<div class="acts">${open ? `<button type="button" class="btn small primary" data-shoff="${esc(x.id)}">Снять со смены</button>` : `<button type="button" class="btn small primary" data-shon="${esc(x.id)}">Поставить на смену</button>`}<button type="button" class="btn small" data-shpast="${esc(x.id)}">+ Смена задним числом</button></div>` : ""}
         ${rows ? (wk ? `<div class="slist">${rows}</div>` : `<details class="det" data-k="p-${esc(x.id)}"><summary>Смены</summary><div class="slist">${rows}</div></details>`) : ""}
         ${staffWeeksHtml(x)}</div></details>`;
@@ -5064,6 +5101,156 @@ $("#shBack").addEventListener("click", async ()=>{
   try { await commit("Восстановление смены: "+(sh.name||""), [{col:"shifts", id:sh.id, after:n}]); $("#shiftDlg").close(); render(); toast("Смена восстановлена"); }
   catch(er){ console.error(er); toast("Не удалось сохранить."); }
 });
+
+/* ---------- Д10: payouts to workers · Д11: the report on one worker ---------- */
+// A payout: what the admin gave a worker (an advance or salary). One document in settings, id "pay…", kind "payout":
+// {staffId, name, amount, month (whose salary it is, YYYY-MM), ts (when given), type "Аванс"|"Зарплата", till (taken from the till), note, by, byId, createdAt}.
+// Only the admin sees them. Финансы do not count them: the salary is already there as shifts × rates (a payout only says how much of it was given).
+// A payout taken from the till is counted by «Закрытие дня», like a cash expense.
+const PAY_TYPES = ["Аванс","Зарплата"];
+const isPayout = x => !!(x && x.kind==="payout");
+const payoutsOf = sid => S.settings.filter(x=>isPayout(x) && x.staffId===sid);
+const tillPaysOf = dk => S.settings.filter(x=>isPayout(x) && x.till && dayKey(x.ts||0)===dk).sort((a,b)=>(b.ts||0)-(a.ts||0));
+const sumAmt = arr => r2(arr.reduce((a,x)=>a+(Number(x.amount)||0),0));
+// what a worker earned in a calendar month (as in Финансы): shifts × rates; a closed month whose shifts this device does not keep — from its record
+function earnedIn(st, ym){
+  const t0 = ymStart(ym), t1 = ymStart(ymShift(ym,1)), shs = S.shifts.filter(sh=>sh.staffId===st.id && sh.start && sh.start>=t0 && sh.start<t1);
+  const rec = monthRec(ym), r = rec && rec.fin && rec.fin.staff ? rec.fin.staff[st.id] : null;
+  if (!shs.length && r) return {hrs:Number(r.hrs)||0, pay:Math.round(Number(r.pay)||0), n:null, shs, rec:true};
+  return {hrs:workedH(shs), pay:Math.round(payOf(st, shs)), n:shs.filter(sh=>!isVoid(sh)).length, shs, rec:false};
+}
+// left to give: from the first month that has a payout (or this month) up to this month, earned − given, month by month
+function payBalance(st){
+  const cur = ymOf(Date.now()), pays = payoutsOf(st.id).filter(p=>p.month && p.month<=cur);
+  let from = cur; for (const p of pays) if (p.month < from) from = p.month;
+  const months = [];
+  for (let ym = from; ym <= cur; ym = ymShift(ym,1)){
+    const e = earnedIn(st, ym), ps = pays.filter(p=>p.month===ym), paid = sumAmt(ps);
+    months.push({ym, earned:e.pay, paid, left:r2(e.pay - paid), pays:ps});
+  }
+  return {months, left:r2(months.reduce((a,m)=>a+m.left,0)), cur:months[months.length-1]};
+}
+const leftTxt = v => v < -0.005 ? `<span class="okc">выдано больше на ${money(-v)}</span>` : money(Math.max(0, v));
+// in the worker's card in Сотрудники: what is left to give, and the buttons
+function payLineHtml(x){
+  const b = payBalance(x), m = b.cur, earlier = r2(b.left - m.left);
+  return `<div class="sum paybox"><div class="subtot"><span>Осталось выдать</span><b>${leftTxt(b.left)}</b></div>
+    <div><span>${ymName(m.ym)}: <small class="hint">заработано ${money(m.earned)}, выдано ${money(m.paid)}</small></span><b>${leftTxt(m.left)}</b></div>
+    ${Math.abs(earlier) >= 0.005 ? `<div><span>С прошлых месяцев</span><b>${leftTxt(earlier)}</b></div>` : ""}</div>`;
+}
+const payRowHtml = p => `<button type="button" class="srow" data-payout="${esc(p.id)}"><span>${new Date(p.ts||0).toLocaleDateString(LOC(),{day:"numeric",month:"short"})}</span><span>${esc(p.type||"Выплата")}${p.till?" · из кассы":""}${p.note?`<small>${N(p.note)}</small>`:""}<small>${esc(ymName(p.month||ymOf(p.ts||0)))}</small></span><b>${money(p.amount)}</b></button>`;
+
+let poEdit = null;
+function openPayout(id, sid){
+  if (!isAdmin()) return;
+  const p = id ? S.settings.find(x=>x.id===id && isPayout(x)) : null; poEdit = p ? p.id : null; sid = p ? p.staffId : sid;
+  $("#poTitle").textContent = trS(p ? "Выплата" : "Новая выплата");
+  $("#poStaff").innerHTML = S.staff.filter(x=>(roleOf(x)!=="admin" && !isDemoStaff(x) && x.active!==false) || x.id===sid).sort((a,b)=>String(a.name).localeCompare(b.name,"ru")).map(x=>`<option value="${esc(x.id)}" ${x.id===sid?"selected":""}>${esc(x.name)}</option>`).join("");
+  const cur = ymOf(Date.now()), yms = []; for (let i = 0; i < 4; i++) yms.push(ymShift(cur, -i));
+  if (p && p.month && !yms.includes(p.month)) yms.push(p.month);
+  $("#poMonth").innerHTML = yms.map(ym=>`<option value="${ym}">${esc(ymName(ym))}</option>`).join("");
+  // early in a month, while last month's salary is not all given, the payout goes to last month
+  const st0 = S.staff.find(x=>x.id===sid), prevLeft = st0 && new Date().getDate() <= 10 ? r2(earnedIn(st0, ymShift(cur,-1)).pay - sumAmt(payoutsOf(sid).filter(x=>x.month===ymShift(cur,-1)))) : 0;
+  $("#poMonth").value = p ? p.month : prevLeft > 0 && payoutsOf(sid).some(x=>x.month===ymShift(cur,-1)) ? ymShift(cur,-1) : cur;
+  const tp = p && PAY_TYPES.includes(p.type) ? p.type : "Аванс";
+  document.querySelectorAll('input[name="potype"]').forEach(r=>{ r.checked = r.value===tp; });
+  $("#poAmt").value = p ? String(p.amount) : ""; $("#poDate").value = p ? calKey(p.ts||0) : todayKey();
+  $("#poTill").checked = !!(p && p.till); $("#poNote").value = p ? p.note||"" : "";
+  $("#poWho").textContent = p ? `Записал(а): ${p.by||"—"}` : "";
+  $("#poDel").hidden = !p;
+  poLeftUi();
+  $("#payoutDlg").showModal(); if (!p) $("#poAmt").focus();
+}
+// how much of the chosen month is still to give (this payout not counted when it is being changed)
+function poLeftUi(){
+  const st = S.staff.find(x=>x.id===$("#poStaff").value), ym = $("#poMonth").value;
+  if (!st || !ym){ $("#poLeft").innerHTML = ""; return; }
+  const e = earnedIn(st, ym), paid = sumAmt(payoutsOf(st.id).filter(p=>p.month===ym && p.id!==poEdit)), left = r2(e.pay - paid);
+  $("#poLeft").innerHTML = `${esc(ymName(ym))}: заработано ${money(e.pay)}${e.hrs ? ` (${fmtH(e.hrs)})` : ""}, уже выдано ${money(paid)}, осталось ${leftTxt(left)}.`
+    + (left > 0 ? ` <button type="button" class="btn small" id="poFill" data-v="${left}">Вписать ${money(left)}</button>` : "");
+}
+document.addEventListener("change", e=>{ if (e.target.id==="poStaff" || e.target.id==="poMonth") poLeftUi(); });
+document.addEventListener("click", e=>{
+  const f = e.target.closest("#poFill"); if (f){ $("#poAmt").value = String(Number(f.dataset.v)||""); if (Number(f.dataset.v) > 0 && $("#poMonth").value < ymOf(Date.now())) document.querySelectorAll('input[name="potype"]').forEach(r=>{ r.checked = r.value==="Зарплата"; }); return; }
+  const a = e.target.closest("[data-payadd]"); if (a && isAdmin()) return openPayout(null, a.dataset.payadd);
+  const p = e.target.closest("[data-payout]"); if (p && isAdmin()) return openPayout(p.dataset.payout);
+  const r = e.target.closest("[data-wrep]"); if (r && isAdmin()) return openWRep(r.dataset.wrep);
+  const m = e.target.closest("[data-wrm]"); if (m && wrep){ const n = ymShift(wrep.ym, Number(m.dataset.wrm)); if (n <= ymOf(Date.now())){ wrep.ym = n; wrepRender(); } }
+});
+$("#payoutForm").addEventListener("submit", async e=>{
+  e.preventDefault(); if (!isAdmin()) return;
+  const st = S.staff.find(x=>x.id===$("#poStaff").value), amt = numMoney($("#poAmt").value), month = $("#poMonth").value, d = $("#poDate").value;
+  if (!st){ need($("#poStaff"), "Выберите сотрудника"); return; }
+  if (!(amt>0)){ need($("#poAmt"), "Введите сумму больше нуля"); return; }
+  if (!d || d > todayKey()){ need($("#poDate"), "Дата выдачи не может быть позже сегодня"); return; }
+  const old = poEdit ? S.settings.find(x=>x.id===poEdit) : null;
+  const type = (document.querySelector('input[name="potype"]:checked')||{}).value || "Аванс";
+  // the time of day: now for today, midday for an earlier day (so the payout falls into that working day)
+  let ts = old && calKey(old.ts||0)===d ? old.ts : d===calKey(Date.now()) ? Date.now() : new Date(d+"T12:00").getTime();
+  const amount = Math.round(amt*100)/100;
+  const x = Object.assign({}, old || {id:uid("pay"), kind:"payout", by:S.me.name, byId:S.me.id, createdAt:Date.now()},
+    {staffId:st.id, name:st.name, amount, month, ts, type, till:$("#poTill").checked, note:$("#poNote").value.trim().slice(0,200)});
+  if (old){ x.editedBy = S.me.name; x.editedAt = Date.now(); }
+  if (!x.note) delete x.note;
+  try { await commit(`${old ? "Изменена выплата" : "Выплата"}: ${st.name}, ${money(amount)}`, [{col:"settings", id:x.id, after:x}]); $("#payoutDlg").close(); render(); toast(old ? "Исправлено" : `Записано: ${st.name}, ${type.toLowerCase()} ${money(amount)}`); }
+  catch(err){ console.error(err); if (err.code!=="month-closed") toast("Не удалось сохранить. Проверьте интернет и попробуйте ещё раз."); }
+});
+$("#poDel").addEventListener("click", async ()=>{
+  const p = S.settings.find(x=>x.id===poEdit); if (!p || !isAdmin()) return;
+  if (!tConfirm(`Удалить выплату ${p.name||""} на ${money(p.amount)}?`)) return;
+  try { await commit(`Удалена выплата: ${p.name||""}, ${money(p.amount)}`, [{col:"settings", id:p.id, after:null}]); $("#payoutDlg").close(); render(); toast("Запись удалена"); }
+  catch(err){ console.error(err); if (err.code!=="month-closed") toast("Не удалось удалить. Проверьте интернет и попробуйте ещё раз."); }
+});
+
+// Д11: one page per worker for a month — shifts, hours, money (earned, given, left), orders and other records made under their name
+let wrep = null;
+function openWRep(id){ if (!isAdmin()) return; wrep = {id, ym:ymOf(Date.now())}; wrepRender(); if (!$("#wrepDlg").open) $("#wrepDlg").showModal(); }
+function wrepRender(){
+  const st = wrep && S.staff.find(x=>x.id===wrep.id); if (!st){ $("#wrBody").innerHTML = ""; return; }
+  const ym = wrep.ym, cur = ymOf(Date.now()), rate = hasRate(st), e = earnedIn(st, ym);
+  const pays = payoutsOf(st.id).filter(p=>p.month===ym).sort((a,b)=>(a.ts||0)-(b.ts||0)), paid = sumAmt(pays), bal = payBalance(st);
+  $("#wrTitle").innerHTML = esc("Отчёт по работнику") + ": " + N(st.name);
+  const kpi = (l, v, s) => `<div class="kpi"><small>${l}</small><b>${v}</b>${s ? `<small>${s}</small>` : ""}</div>`;
+  let h = `<div class="wrnav"><button type="button" class="btn small" data-wrm="-1" aria-label="Предыдущий месяц">‹</button><b>${esc(ymName(ym))}</b><button type="button" class="btn small" data-wrm="1" aria-label="Следующий месяц" ${ym>=cur?"disabled":""}>›</button></div>`;
+  h += `<div class="kpis">${kpi("Смен", e.n==null ? "—" : e.n)}${kpi("Часы", fmtH(e.hrs))}${rate ? kpi("Заработано", money(e.pay)) : ""}${kpi("Выдано за месяц", money(paid), pays.length ? `${pays.length} ${plural(pays.length,"выплата","выплаты","выплат")}` : "")}${rate ? kpi("Осталось за месяц", leftTxt(r2(e.pay - paid))) : ""}</div>`;
+  if (rate) h += `<p class="hint" style="margin:0">${esc(ROLES[roleOf(st)]||"")} · ${rateText(st)}</p>`;
+  // money
+  h += `<h2 class="cat"><span>Деньги</span><span></span></h2><div class="sum">
+      ${rate ? `<div><span>Заработано за месяц <small class="hint">${fmtH(e.hrs)} по ставке</small></span><b>${money(e.pay)}</b></div>` : `<div><span>Ставка не указана: заработок не считается</span></div>`}
+      <div><span>Выдано за этот месяц</span><b>${paid ? "− " + money(paid) : money(0)}</b></div>
+      ${rate ? `<div class="subtot"><span>Осталось за месяц</span><b>${leftTxt(r2(e.pay - paid))}</b></div>` : ""}
+      <div class="subtot"><span>Всего осталось выдать <small class="hint">на сегодня, все месяцы</small></span><b>${leftTxt(bal.left)}</b></div></div>`;
+  h += pays.length ? `<div class="slist">${pays.map(payRowHtml).join("")}</div>` : `<p class="hint" style="margin:0">За этот месяц выплат не записано.</p>`;
+  h += `<div class="acts"><button type="button" class="btn small primary" data-payadd="${esc(st.id)}">+ Выплата</button></div>`;
+  // work: orders, payments, cash, stock — the records made under the worker's name in the working month
+  const b0 = ymBeg(ym), b1 = ymEnd(ym), inM = t => (t||0)>=b0 && (t||0)<b1, nm = st.name;
+  if (b0 < syncCutOf() && e.rec){
+    h += `<h2 class="cat"><span>Работа</span><span></span></h2><p class="hint" style="margin:0">Подробности этого месяца на устройстве не хранятся (месяц закрыт): видны только часы и заработок из итога месяца.</p>`;
+  } else {
+    const took = S.orders.filter(o=>o.who===nm && inM(o.createdAt));
+    const sales = S.sales.filter(sl=>sl.who===nm && inM(sl.ts)), salesSum = sales.reduce((a,sl)=>a+saleFood(sl),0);
+    const voids = S.orders.filter(o=>(o.status==="cancelled" || o.voidKind) && inM(o.cancelledAt) && ((o.voidReq && o.voidReq.byId===st.id) || o.cancelledBy===nm));
+    const cash = S.expenses.filter(x=>isCash(x) && !x.fromOrder && x.whoId===st.id && inM(x.ts));
+    const offs = S.moves.filter(m=>(m.type==="off" || m.type==="out") && m.who===nm && inM(m.ts)), offDocs = new Set(offs.map(m=>m.doc||m.id));
+    const offSum = offs.reduce((a,m)=>a-(Number(m.delta)||0)*(mvUc(m).cost||0),0);
+    const ins = new Set(S.moves.filter(m=>m.type==="in" && m.who===nm && inM(m.ts)).map(m=>m.doc||m.batchId||m.id));
+    const cnt = S.invdrafts.filter(d=>d.byId===st.id && inM(d.ts));
+    const row = (l, n, v) => `<div><span>${l}${n && typeof v==="string" && v!=="—" ? ` <small class="hint">(${n})</small>` : ""}</span><b>${v}</b></div>`;
+    h += `<h2 class="cat"><span>Работа</span><span></span></h2><div class="sum">
+      ${row("Принято заказов", took.length, took.length)}
+      ${row("Закрыто заказов (принята оплата)", sales.length, money(salesSum))}
+      ${row("Отменено или списано заказов", voids.length, voids.length ? money(voids.reduce((a,o)=>a+orderFood(o),0)) : "—")}
+      ${row("Кассовые расходы", cash.length, cash.length ? money(sumAmt(cash)) : "—")}
+      ${row("Расход и списание со склада", offDocs.size, offDocs.size ? money(offSum) : "—")}
+      ${row("Приход на склад", ins.size, ins.size || "—")}
+      ${row("Пересчёты склада", cnt.length, cnt.length || "—")}</div>
+      <p class="hint" style="margin:0">Считаются записи под именем работника за рабочий месяц (день до 06:00 утра). Записи, сделанные через YM, сюда не входят.</p>`;
+  }
+  // shifts of the month, day by day (tap one to change it)
+  const shs = [...e.shs].sort((a,b)=>a.start-b.start);
+  h += `<h2 class="cat"><span>Смены</span><span>${fmtH(e.hrs)}</span></h2>` + (shs.length ? `<div class="slist">${shs.map(shRowHtml).join("")}</div>` : `<p class="hint" style="margin:0">${e.rec ? "Смены этого месяца на устройстве не хранятся: часы из итога месяца." : "В этом месяце смен нет."}</p>`);
+  $("#wrBody").innerHTML = h;
+}
 
 /* ---------- monthly fixed costs ---------- */
 const MONTHLY = [["Аренда","Аренда"],["Коммунальные услуги","Коммунальные платежи"],["Зарплата","Заработная плата сотрудников"]];
@@ -5529,6 +5716,7 @@ Object.assign(I18N, {"Другие названия": ["Other names", "Diğer ad
   "приход": ["receipt", "giriş"],
   "Объединение:": ["Merge:", "Birleştirme:"],
   "Отмена объединения:": ["Merge undone:", "Birleştirme geri alındı:"]});
+Object.assign(I18N, {"Новая выплата": ["New payout", "Yeni ödeme"], "Выплата": ["Payout", "Ödeme"], "+ Выплата": ["+ Payout", "+ Ödeme"], "Вид выплаты": ["Payout type", "Ödeme türü"], "Аванс": ["Advance", "Avans"], "аванс": ["advance", "avans"], "зарплата": ["salary", "maaş"], "За месяц": ["For month", "Hangi ay için"], "Дата выдачи": ["Date given", "Veriliş tarihi"], "Взято из кассы": ["Taken from the till", "Kasadan alındı"], "Необязательно": ["Optional", "İsteğe bağlı"], "Записывайте каждую выданную сумму: программа покажет, сколько ещё осталось выдать. В «Финансы» выплата не идёт: зарплата там уже считается по сменам. Если деньги взяли из кассы, отметьте «Взято из кассы»: «Закрытие дня» это учтёт.": ["Record every amount you give: the program shows how much is still left to pay. A payout does not go into “Finance”: the salary there is already counted by shifts. If the money was taken from the till, tick “Taken from the till”: “Close the day” will count it.", "Verdiğiniz her tutarı yazın: program ödenecek kalan tutarı gösterir. Ödeme «Finans»a girmez: maaş orada zaten vardiyalara göre hesaplanır. Para kasadan alındıysa «Kasadan alındı»yı işaretleyin: «Günü kapat» bunu hesaba katar."], "Отчёт по работнику": ["Worker report", "Çalışan raporu"], "заработано": ["earned", "kazanılan"], "уже выдано": ["already given", "verilen"], "выдано": ["given", "verilen"], "осталось": ["left", "kalan"], "Вписать": ["Fill in", "Yaz:"], "выдано больше на": ["overpaid by", "fazla ödenen:"], "Осталось выдать": ["Left to pay", "Ödenecek kalan"], "С прошлых месяцев": ["From previous months", "Önceki aylardan"], "из кассы": ["from the till", "kasadan"], "Удалить выплату": ["Delete the payout of", "Ödeme silinsin mi:"], "Выберите сотрудника": ["Choose a staff member", "Personel seçin"], "Дата выдачи не может быть позже сегодня": ["The date given cannot be later than today", "Veriliş tarihi bugünden sonra olamaz"], "Не удалось удалить. Проверьте интернет и попробуйте ещё раз.": ["Could not delete. Check the internet and try again.", "Silinemedi. İnterneti kontrol edip tekrar deneyin."], "Предыдущий месяц": ["Previous month", "Önceki ay"], "Следующий месяц": ["Next month", "Sonraki ay"], "Смен": ["Shifts", "Vardiya"], "Часы": ["Hours", "Saat"], "Заработано": ["Earned", "Kazanılan"], "Выдано за месяц": ["Given for the month", "Ay için verilen"], "выплата": ["payout", "ödeme"], "выплаты": ["payouts", "ödeme"], "выплат": ["payouts", "ödeme"], "Осталось за месяц": ["Left for the month", "Ay için kalan"], "Деньги": ["Money", "Para"], "Заработано за месяц": ["Earned in the month", "Ay içinde kazanılan"], "по ставке": ["at the rate", "saatlik ücretle"], "Ставка не указана: заработок не считается": ["No rate set: earnings are not counted", "Saatlik ücret yok: kazanç hesaplanmaz"], "Выдано за этот месяц": ["Given for this month", "Bu ay için verilen"], "Всего осталось выдать": ["Total left to pay", "Toplam ödenecek kalan"], "на сегодня, все месяцы": ["as of today, all months", "bugün itibarıyla, tüm aylar"], "За этот месяц выплат не записано.": ["No payouts recorded for this month.", "Bu ay için ödeme kaydı yok."], "Работа": ["Work", "İş"], "Подробности этого месяца на устройстве не хранятся (месяц закрыт): видны только часы и заработок из итога месяца.": ["This month's details are not kept on the device (the month is closed): only hours and earnings from the month's total are shown.", "Bu ayın ayrıntıları cihazda tutulmuyor (ay kapalı): yalnızca ay toplamındaki saatler ve kazanç görünür."], "Принято заказов": ["Orders taken", "Alınan sipariş"], "Закрыто заказов (принята оплата)": ["Orders closed (payment taken)", "Kapatılan sipariş (ödeme alındı)"], "Отменено или списано заказов": ["Orders cancelled or written off", "İptal edilen veya fire yazılan sipariş"], "Приход на склад": ["Stock receipts", "Depo girişi"], "Пересчёты склада": ["Stock counts", "Depo sayımı"], "Считаются записи под именем работника за рабочий месяц (день до 06:00 утра). Записи, сделанные через YM, сюда не входят.": ["Counts the records made under the worker's name in the working month (a day lasts until 06:00). Records made via YM are not included.", "Çalışma ayında çalışanın adıyla yapılan kayıtlar sayılır (gün sabah 06:00'ya kadar sürer). YM üzerinden yapılan kayıtlar dahil değildir."], "Смены этого месяца на устройстве не хранятся: часы из итога месяца.": ["This month's shifts are not kept on the device: hours from the month's total.", "Bu ayın vardiyaları cihazda tutulmuyor: saatler ay toplamından."], "В этом месяце смен нет.": ["No shifts this month.", "Bu ay vardiya yok."], "Выплаты работникам из кассы": ["Payouts to workers from the till", "Kasadan çalışanlara ödemeler"], "выплаты работникам": ["payouts to workers", "çalışanlara ödemeler"], "Изменена выплата": ["Payout changed", "Ödeme değiştirildi"], "Удалена выплата": ["Payout deleted", "Ödeme silindi"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
