@@ -242,6 +242,16 @@ details.det div{display:flex;justify-content:space-between;gap:10px;padding:2px 
 .tag.os-cooking{background:var(--low-bg);color:var(--low)}
 .tag.os-ready{background:var(--ok-bg);color:var(--ok)}
 .tag.os-served,.tag.os-closed{background:var(--line);color:var(--ink)}
+/* customers by phone */
+.tag.cnew{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.tag.cold{background:var(--ok-bg);color:var(--ok)}
+.ocust{font-size:.9rem;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
+.ocust br{flex-basis:100%;content:""}
+.clist{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.cord{border:1px solid var(--line);border-radius:var(--radius-s);padding:8px 10px;display:flex;flex-direction:column;gap:2px;font-size:.92rem}
+.cord small{display:block}
+.cord .chead{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.cord .chead b:last-child{white-space:nowrap}
 .tag.os-cancelled{background:var(--empty-bg);color:var(--empty)}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-s);padding:10px 12px}
@@ -714,6 +724,15 @@ details.fold[open]>summary{margin-bottom:8px}
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Отмена</button>
     <button type="submit" class="btn primary">Сохранить заказ</button>
+  </div>
+</form></dialog>
+
+<dialog id="custDlg" class="wide"><form method="dialog">
+  <h3 id="custTitle">Клиент</h3>
+  <div id="custBody"></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Закрыть</button>
+    <button type="button" class="btn primary" id="custNew">+ Новый заказ этому клиенту</button>
   </div>
 </form></dialog>
 
@@ -1308,7 +1327,7 @@ function render(full){
   if (S.me && !canView(S.view)){ S.view = ALL_VIEWS.find(canView) || "stock"; full = true; }
   renderChips(); renderNotice();
   { const sb = document.querySelector('[data-stockview="inv"]'); if (sb && sb.textContent!==invSegTxt()) sb.textContent = invSegTxt(); }
-  if (full || (S.view==="orders" && !document.activeElement?.matches?.("#repDate,#sq"))) renderControls();
+  if (full || (S.view==="orders" && !document.activeElement?.matches?.("#repDate,#sq,#custQ"))) renderControls();
   renderList();
   { const pn = $("#pubNote"); if (pn && S.view==="menu"){ const h = pubNote(); if (pn.dataset.h!==h){ pn.innerHTML = h; pn.dataset.h = h; } } }
   if (S.view!=="inv" && !isDishOff()) $("#savebarHost").innerHTML="";
@@ -2624,7 +2643,7 @@ function renderStop(L){
 }
 function orderWhere(o){
   if (o.type==="hall") return o.table ? `стол ${esc(o.table)}` : "";
-  return N([o.name, o.phone].filter(Boolean).join(", "));
+  return N([o.name, o.phone && phoneTxt(o.phone)].filter(Boolean).join(", "));
 }
 function minsSince(ts){ return Math.max(0, Math.floor((Date.now()-(ts||Date.now()))/60000)); }
 // late counts only until the kitchen marks the order «Готов»; after that the card shows how long it waits to be handed out
@@ -2650,9 +2669,10 @@ function renderOrdersControls(c){
     + (can("dishOff") ? `<button class="btn act-off ${S.ordView==="woff"?"primary":""}" data-ordview="woff">Списать блюда</button>` : "")
     + (can("orderPay") ? `<button class="btn act-day" data-dayclose="">Закрытие дня${closeOf(todayKey()) ? " ✓" : ""}</button>` : "");
   c.innerHTML = (acts ? `<div class="actions oacts">${acts}</div>` : "") + `
-    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}${isAdmin() ? seg("rev", `На проверку${nRev?` (${nRev})`:""}`) : ""}${can("stopList") ? seg("stop", `Стоп-лист${nStop?` (${nStop})`:""}`) : ""}
+    <div class="controls">${seg("open", `Открытые${open?` (${open})`:""}`)}${seg("closed","Закрытые")}${isAdmin()?seg("report","Итоги дня"):""}${isAdmin() && (nReq || S.ordView==="req") ? seg("req", `Запросы на отмену${nReq?` (${nReq})`:""}`) : ""}${isAdmin() ? seg("rev", `На проверку${nRev?` (${nRev})`:""}`) : ""}${can("stopList") ? seg("stop", `Стоп-лист${nStop?` (${nStop})`:""}`) : ""}${seg("cust", "Клиенты")}
       ${S.ordView==="closed" || S.ordView==="report" ? `<input type="date" id="repDate" class="search" style="flex:0 1 170px" value="${esc(S.repDate||todayKey())}" aria-label="Дата">` : ""}${bellBtn()}</div>`;
   if (S.ordView==="open") c.innerHTML += webBlock();
+  if (S.ordView==="cust") c.innerHTML += `<div class="controls"><input class="search" id="custQ" type="search" placeholder="Телефон, имя или адрес" value="${esc(S.custQ||"")}" aria-label="Найти клиента"></div>`;
   if (S.ordView==="open" && nStop) c.innerHTML += `<div class="ostop"><b>Стоп-лист:</b> ${stops.map(x=>N(dn(x.src)) + (x.m.ts && dayKey(x.m.ts)!==todayKey() ? ` <small class="hint">(отмечено ${stopWhen(x.m)})</small>` : "")).join(", ")}</div>`;
   if (S.ordView==="stop") c.innerHTML += `<div class="controls"><input class="search" id="sq" type="search" placeholder="Найти блюдо или сет" value="${esc(S.saleQ)}" aria-label="Поиск блюда"></div>
       <p class="hint" style="margin:0 0 10px">Нажмите на блюдо или сет, которое закончилось: в «Новом заказе» оно станет серым и не добавится. Когда оно снова есть, нажмите ещё раз.</p><p class="hint" style="margin:0 0 10px">На сайте заказов то, что в стоп-листе, не показывается. Сет с закончившимся блюдом остаётся в продаже: позвоните клиенту и предложите замену.</p>`;
@@ -2666,6 +2686,7 @@ function orderCard(o){
   const lines = (o.lines||[]).map(l=>`<div><span>${fmt(l.qty)} × ${NL(l)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}${promoTag(l)}${l.comment?` <i>— ${N(l.comment)}</i>`:""}</span><span>${showMoney()&&(l.price||l.promo)?promoPrice(l)+money(l.price*l.qty):""}</span></div>`).join("");
   const meta = [];
   if (o.status==="cancelled" && o.cancelReason) meta.push("причина: "+N(o.cancelReason)+(o.cancelledBy?" ("+N(o.cancelledBy)+(o.approvedBy?", одобрил(а) "+N(o.approvedBy):"")+")":""));
+  if (o.type!=="hall" && phoneKey(o.phone) && o.status!=="cancelled") meta.push(custTag(o));
   if (o.type!=="hall" && o.source) meta.push(esc(o.source));
   if (o.type==="delivery"){ if (o.address) meta.push(N(o.address)); if (o.courier) meta.push("курьер: "+N(o.courier)); if (o.due) meta.push("к "+esc(o.due)); }
   if (o.status==="closed" && o.payment) meta.push("оплата: "+payText(o)+(o.change>0 && showMoney() ? ", сдача "+money(o.change) : ""));
@@ -2705,6 +2726,7 @@ function renderOrders(L){
   if (S.ordView==="rev") return renderRev(L);
   if (S.ordView==="woff") return renderDishOff(L);
   if (S.ordView==="stop"){ if (can("stopList")) return renderStop(L); S.ordView = "open"; }
+  if (S.ordView==="cust") return renderCust(L);
   let list;
   if (S.ordView==="req" && !isAdmin()) S.ordView = "open";
   if (S.ordView==="open") list = S.orders.filter(isOpen).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
@@ -2725,6 +2747,174 @@ function quickCard(sl){
     <div class="ofoot"><b>${showMoney()&&sl.total!=null?money(Number(sl.total)||0):""}</b></div></div>`;
 }
 const isDishOff = () => S.view==="orders" && S.ordView==="woff";
+
+/* ----- customers by phone (Д6) ----- */
+// Every phone is kept in one form: Turkish numbers "+90 5xx xxx xx xx" (landlines 2xx/3xx/4xx and 850 the same way);
+// a foreign number is typed with + and its country code. The digits without + are the customer's key.
+// The customer base: settings "cust_<key>" (kind "customer") lists every closed order of the phone {orderId: [closedAt, sum]}.
+// It is written together with closing the order, so the history stays when old orders are no longer on the device.
+// Orders still on the device are read too: an order reopened or cancelled after closing does not count.
+function phoneParse(s){
+  const raw = String(s||"").trim(); let d = raw.replace(/\D/g, "");
+  if (!d) return null;
+  if (/^\+/.test(raw) || d.startsWith("00")){
+    d = d.replace(/^00/, "");
+    if (!d.startsWith("90")){ if (d.length<8 || d.length>15) return null;
+      return {key:d, txt: d.length===11 && d[0]==="7" ? `+7 ${d.slice(1,4)} ${d.slice(4,7)} ${d.slice(7,9)} ${d.slice(9)}` : "+" + d}; }
+    d = d.slice(2);
+  } else if (d.length===12 && d.startsWith("90")) d = d.slice(2);
+  if (d.length===11 && d[0]==="0") d = d.slice(1);
+  if (!/^[2-58]\d{9}$/.test(d)) return null;
+  return {key:"90"+d, txt:`+90 ${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6,8)} ${d.slice(8)}`};
+}
+const phoneKey = s => (phoneParse(s)||{}).key || "";
+const phoneTxt = s => { const p = phoneParse(s); return p ? p.txt : String(s||"").trim(); };
+const PHONE_BAD = "Проверьте телефон: 10 цифр с кодом, например 0532 123 45 67. Иностранный номер — с «+» и кодом страны.";
+const CUST_PRE = "cust_";
+const ordNo = n => LANG==="tr" ? `${n}. sipariş` : LANG==="en" ? `order ${n}` : `${n}-й заказ`;
+// all customers: built once per moment (the next tick builds it again with the newest data)
+let custMemo = null;
+function custIdx(){
+  if (custMemo) return custMemo;
+  const m = new Map(), get = k => { let c = m.get(k); if (!c) m.set(k, c = {key:k, phone:"", name:"", address:"", type:"", t:0, ords:new Map()}); return c; };
+  for (const d of S.settings){ if (d.kind!=="customer" || !d.key) continue;
+    const c = get(d.key); c.doc = d; c.phone = d.phone||""; c.name = d.name||""; c.address = d.address||""; c.type = d.type||""; c.t = d.last||0;
+    for (const [id, v] of Object.entries(d.o||{})) if (Array.isArray(v)) c.ords.set(id, {id, t:Number(v[0])||0, s:Number(v[1])||0}); }
+  for (const o of S.orders){ if (o.type==="hall") continue; const k = phoneKey(o.phone); if (!k) continue;
+    const c = get(k);
+    if (o.status!=="closed"){ c.ords.delete(o.id); continue; }
+    const t = o.closedAt||o.createdAt||0;
+    c.ords.set(o.id, {id:o.id, t, s:orderFood(o), o});
+    if (t>=c.t){ c.t = t; c.phone = phoneTxt(o.phone); c.type = o.type; if (o.name) c.name = o.name; if (o.type==="delivery" && o.address) c.address = o.address; }
+  }
+  for (const [k, c] of m){
+    c.list = [...c.ords.values()].sort((a,b)=>a.t-b.t);
+    if (!c.list.length){ m.delete(k); continue; }
+    c.n = c.list.length; c.sum = Math.round(c.list.reduce((a,x)=>a+x.s, 0)*100)/100;
+    c.first = c.list[0].t; c.last = c.list[c.n-1].t;
+    if (!c.phone) c.phone = "+" + k;
+  }
+  custMemo = m; Promise.resolve().then(()=>{ custMemo = null; });
+  return m;
+}
+const custOf = phone => { const k = phoneKey(phone); return k ? custIdx().get(k) || null : null; };
+// which order of the customer this is: 1 = first
+function custNth(o){
+  const c = o.type!=="hall" && custOf(o.phone); if (!c) return 1;
+  const i = c.list.findIndex(x=>x.id===o.id); if (i>=0) return i+1;
+  const t = o.createdAt || Infinity;
+  return c.list.filter(x=>x.t<=t).length + 1;
+}
+const custTag = o => { if (o.type==="hall" || !phoneKey(o.phone)) return ""; const n = custNth(o);
+  return n===1 ? `<span class="tag cnew">Новый клиент</span>` : `<span class="tag cold">${ordNo(n)}</span>`; };
+// the customer's record after this order closed (or after it stopped counting: drop)
+function custDoc(c, ords){
+  const vals = Object.values(ords), last = vals.length ? Math.max(...vals.map(v=>v[0])) : 0;
+  return {id:CUST_PRE+c.key, kind:"customer", key:c.key, phone:c.phone, name:c.name||"", address:c.address||"", type:c.type||"", o:ords,
+    n:vals.length, sum:Math.round(vals.reduce((a,v)=>a+(Number(v[1])||0), 0)*100)/100, first:vals.length ? Math.min(...vals.map(v=>v[0])) : 0, last};
+}
+function custOp(o, drop){
+  const p = o.type!=="hall" && phoneParse(o.phone); if (!p) return null;
+  const id = CUST_PRE + p.key, was = S.settings.find(x=>x.id===id);
+  if (drop && !(was && was.o && was.o[o.id])) return null;
+  const ords = Object.assign({}, was && was.o || {});
+  const c = {key:p.key, phone:was ? was.phone : p.txt, name:was ? was.name : "", address:was ? was.address : "", type:was ? was.type : ""};
+  if (drop) delete ords[o.id];
+  else { const t = o.closedAt || Date.now(); ords[o.id] = [t, orderFood(o)];
+    if (!was || t>=(was.last||0)){ c.phone = p.txt; c.type = o.type; if (o.name) c.name = o.name; if (o.type==="delivery" && o.address) c.address = o.address; } }
+  return {col:"settings", id, after:custDoc(c, ords)};
+}
+// customers whose orders on this device are not in the base yet (orders closed before the base existed)
+function custMissing(){
+  const out = [];
+  for (const c of custIdx().values()){
+    const have = c.doc && c.doc.o || {}, add = c.list.filter(x=>x.o && !have[x.id]);
+    if (!add.length) continue;
+    const ords = Object.assign({}, have); for (const x of add) ords[x.id] = [x.t, x.s];
+    out.push({col:"settings", id:CUST_PRE+c.key, after:custDoc(c, ords)});
+  }
+  return out;
+}
+async function custSaveOld(){
+  const ops = custMissing(); if (!ops.length) return;
+  if (!tConfirm(`Записать в базу клиентов старые заказы с этого устройства? Клиентов: ${ops.length}. Сами заказы не меняются.`)) return;
+  try { await commit("База клиентов", ops); toast(`Записано в базу клиентов: ${ops.length}`); }
+  catch(e){ console.error(e); toast("Записано не всё. Нажмите ещё раз."); }
+  render();
+}
+// the line under the phone in the order window: new or returning customer; fills an empty name and address
+function custHint(fill){
+  const el = $("#oCust"), inp = $("#o_phone"); if (!el || !OD) return;
+  const v = inp ? inp.value.trim() : "", p = phoneParse(v);
+  if (!v || OD.type==="hall"){ el.hidden = true; return; }
+  el.hidden = false;
+  if (!p){ el.innerHTML = `<span class="hint">${v.replace(/\D/g,"").length<10 ? "Введите номер полностью: 0532 123 45 67" : PHONE_BAD}</span>`; return; }
+  const c = custIdx().get(p.key), past = c ? c.list.filter(x=>x.id!==OD.id && (!OD.createdAt || x.t<=OD.createdAt)) : [];
+  if (!past.length){ el.innerHTML = `<span class="tag cnew">Новый клиент</span> <span class="hint">первый заказ</span>`; return; }
+  const last = past[past.length-1], sum = past.reduce((a,x)=>a+x.s, 0);
+  let filled = [];
+  if (fill && !OD.id){
+    const nm = $("#o_name"), ad = $("#o_address");
+    if (nm && !nm.value.trim() && c.name){ nm.value = c.name; OD.name = c.name; filled.push("n"); needClear(nm); }
+    if (ad && !ad.value.trim() && c.address){ ad.value = c.address; OD.address = c.address; filled.push("a"); }
+  }
+  el.innerHTML = `<span class="tag cold">Повторный клиент</span> <b>${ordNo(past.length+1)}</b>`
+    + ` <span class="hint">· до этого заказов: ${past.length} · последний: ${esc(dmy(dayKey(last.t)))}${showMoney() ? ` · всего: ${money(sum)}` : ""}</span>`
+    + (c.name ? ` <span class="hint">· ${N(c.name)}</span>` : "")
+    + ` <button type="button" class="btn small" data-cust="${esc(c.key)}">История</button>`
+    + (filled.length ? `<br><small class="hint">${filled.length>1 ? "Имя и адрес — из прошлого заказа. Проверьте." : filled[0]==="n" ? "Имя — из прошлого заказа. Проверьте." : "Адрес — из прошлого заказа. Проверьте."}</small>` : "");
+}
+/* «Продажи → Клиенты»: everyone who ordered by phone (takeaway, delivery, the website) */
+const CUST_PAGE = 100;
+function renderCust(L){
+  const q = (S.custQ||"").trim().toLowerCase(), qd = q.replace(/\D/g,"");
+  const all = [...custIdx().values()];
+  const list = all.filter(c=>!q || (qd.length>=3 && c.key.includes(qd.replace(/^0/,""))) || (c.name||"").toLowerCase().includes(q) || (c.address||"").toLowerCase().includes(q))
+    .sort((a,b)=>b.last-a.last);
+  const n = S.custN || CUST_PAGE, rep = all.filter(c=>c.n>1).length;
+  const miss = isAdmin() ? custMissing().length : 0;
+  let html = `<p class="hint" style="margin:0 0 10px">Клиентов: ${all.length} · повторных: ${rep}. Клиент — это номер телефона: все заказы с этим номером (самовывоз, доставка, сайт) собраны вместе.</p>`;
+  if (miss) html += `<div class="oreq" style="margin-bottom:10px">На этом устройстве есть заказы, которых ещё нет в базе клиентов. Клиентов: ${miss}. Без записи их история пропадёт, когда старые заказы уйдут с устройств. <button class="btn small primary" id="custSaveOld">Записать в базу</button></div>`;
+  if (!list.length){ L.innerHTML = html + `<div class="empty-state">${all.length ? "Ничего не найдено." : "Клиентов пока нет: они появятся после первого закрытого заказа с телефоном."}</div>`; return; }
+  html += `<div class="list">${list.slice(0, n).map(c=>`<button class="row" style="border-left-color:${c.n>1 ? "var(--ok)" : "var(--accent)"}" data-cust="${esc(c.key)}">
+      <span class="nm"><b translate="no">${esc(c.phone)}</b>${c.name ? ` · ${N(c.name)}` : ""}<small>Заказов: ${c.n} · последний: ${esc(dmy(dayKey(c.last)))}${c.n>1 ? ` · первый: ${esc(dmy(dayKey(c.first)))}` : ""}${c.address ? ` · ${N(c.address)}` : ""}</small></span>
+      ${showMoney() ? `<span class="qty">${money(c.sum)}</span>` : ""}</button>`).join("")}</div>`;
+  if (list.length>n) html += `<p style="text-align:center"><button class="btn small" id="custMore">Показать ещё</button> <small class="hint">Показано: ${n}, всего: ${list.length}</small></p>`;
+  L.innerHTML = html;
+}
+function openCust(key){
+  const c = custIdx().get(key); if (!c) return;
+  const rows = [...c.list].reverse().map((x, i)=>{ const o = x.o || orderById(x.id), nth = c.n - i;
+    const when = new Date(x.t).toLocaleString(LOC(), {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
+    const what = o ? (o.lines||[]).map(l=>`${fmt(l.qty)} × ${NL(l)}`).join(", ") : `<span class="hint">старый заказ: состав на этом устройстве не хранится</span>`;
+    return `<div class="cord"><div class="chead"><span><b>${ordNo(nth)}</b> <span class="hint">${esc(when)}${o ? ` · №${esc(o.num)}` : ""}</span>${o ? ` <span class="tag t-${o.type}">${OTYPES[o.type]}</span>` : ""}${o && o.source ? ` <span class="hint">${esc(o.source)}</span>` : ""}</span><b>${showMoney() ? money(x.s) : ""}</b></div><small>${what}</small>${o && o.type==="delivery" && o.address ? `<small class="hint">${N(o.address)}</small>` : ""}</div>`; }).join("");
+  $("#custTitle").innerHTML = `<a href="tel:${esc(c.phone.replace(/\s/g,""))}" translate="no">${esc(c.phone)}</a>${c.name ? ` · ${N(c.name)}` : ""}`;
+  $("#custBody").innerHTML = `<div class="prev">
+      <div><span>Заказов</span><b>${c.n}</b></div>
+      <div><span>Первый заказ</span><b>${esc(dmy(dayKey(c.first)))}</b></div>
+      <div><span>Последний заказ</span><b>${esc(dmy(dayKey(c.last)))}</b></div>
+      ${showMoney() ? `<div><span>Сумма заказов</span><b>${money(c.sum)}</b></div><div><span>Средний чек</span><b>${money(Math.round(c.sum/c.n))}</b></div>` : ""}
+      ${c.address ? `<div><span>Адрес</span><span>${N(c.address)}</span></div>` : ""}
+    </div><div class="clist">${rows}</div>`;
+  $("#custNew").hidden = !can("orderEdit") || $("#orderDlg").open; $("#custNew").dataset.key = key;
+  $("#custDlg").showModal();
+}
+// a new order for this customer: phone, name and address filled in
+function custNewOrder(key){
+  const c = custIdx().get(key); if (!c || !can("orderEdit")) return;
+  $("#custDlg").close();
+  openOrder(null, c.type==="takeaway" ? "takeaway" : "delivery");
+  Object.assign(OD, {phone:c.phone, name:c.name||"", address:OD.type==="delivery" ? c.address||"" : ""});
+  renderODFields(); custHint(false);
+  const q = $("#oq"); if (q) q.focus();
+}
+document.addEventListener("click", e=>{
+  const b = e.target.closest("[data-cust],#custMore,#custSaveOld,#custNew"); if (!b) return;
+  if (b.id==="custMore"){ S.custN = (S.custN || CUST_PAGE) + CUST_PAGE; return renderList(); }
+  if (b.id==="custSaveOld"){ if (isAdmin()) guarded(custSaveOld); return; }
+  if (b.id==="custNew") return custNewOrder(b.dataset.key);
+  openCust(b.dataset.cust);
+});
 
 /* ----- report ----- */
 function renderReport(L){
@@ -3557,10 +3747,10 @@ function renderODFields(){
   const src = `<label class="f">Источник<select id="o_source">${SOURCES.map(s=>`<option value="${esc(s)}" ${OD.source===s?"selected":""}>${esc(s)}</option>`).join("")}</select></label>`;
   let html = "";
   if (OD.type==="hall") html = `<div class="two">${f("table","Стол №",'inputmode="numeric"')}</div><div id="oTableWarn" class="oreq" hidden></div>`;
-  else if (OD.type==="takeaway") html = `<div class="two">${f("name","Имя или номер")}${f("phone","Телефон",'inputmode="tel"')}</div>${src}`;
-  else html = `<div class="two">${f("phone","Телефон",'inputmode="tel"')}${f("name","Имя")}</div>${f("address","Адрес")}<div class="two">${f("courier","Имя курьера")}${f("due","К какому времени",'type="time"')}</div>${src}`;
+  else if (OD.type==="takeaway") html = `<div class="two">${f("name","Имя или номер")}${f("phone","Телефон",'inputmode="tel" placeholder="0532 123 45 67"')}</div><div id="oCust" class="ocust" hidden></div>${src}`;
+  else html = `<div class="two">${f("phone","Телефон",'inputmode="tel" placeholder="0532 123 45 67"')}${f("name","Имя")}</div><div id="oCust" class="ocust" hidden></div>${f("address","Адрес")}<div class="two">${f("courier","Имя курьера")}${f("due","К какому времени",'type="time"')}</div>${src}`;
   $("#oFields").innerHTML = html;
-  renderTableWarn();
+  renderTableWarn(); custHint(false);
 }
 // another open order at the same table (С12): a new order offers to open that one instead of starting a second
 const tableKey = t => String(t||"").trim().toLowerCase();
@@ -3645,6 +3835,7 @@ function fillOD(){
 }
 $("#orderDlg").addEventListener("change", e=>{
   if (e.target.name==="otype"){ readODFields(); OD.type = e.target.value; renderODFields(); renderODLines(); }
+  else if (e.target.id==="o_phone"){ const p = phoneParse(e.target.value); if (p) e.target.value = p.txt; custHint(true); }
   else if (e.target.id==="oDiscOn"){
     OD.discPct = null; $("#oDiscPct").value = "";
     OD.discBy = e.target.checked ? whoNow() : "";
@@ -3661,6 +3852,7 @@ $("#orderDlg").addEventListener("change", e=>{
 $("#orderDlg").addEventListener("input", e=>{
   if (e.target.id==="oq"){ OD.q = e.target.value; renderODPick(); }
   else if (e.target.id==="o_table") renderTableWarn();
+  else if (e.target.id==="o_phone") custHint(true);
   else if (e.target.dataset.ocom!==undefined){ const l = OD.lines[+e.target.dataset.ocom]; if (l) l.comment = e.target.value; }
   else if (e.target.id==="oCourFee"){ const v = numMoney(e.target.value); OD.courierFee = isNaN(v) || v<0 ? null : Math.round(v*100)/100; odTotal(); }
   else if (e.target.id==="oDiscPct"){
@@ -3756,6 +3948,10 @@ $("#orderForm").addEventListener("submit", async e=>{
     if (b && !(was && was.type==="hall" && tableKey(was.table)===tableKey(OD.table))
       && !tConfirm(`Стол ${b.table}: уже открыт заказ №${b.num}. Всё равно открыть на этом столе второй заказ?`)){ $("#o_table").focus(); return; } }
   if (OD.type!=="hall" && needAll((OD.type==="delivery" ? ["phone","name"] : ["name","phone"]).filter(k=>!OD[k]).map(k=>[$("#o_"+k), k==="name" ? "Укажите имя клиента" : "Укажите телефон клиента"]))) return;
+  // the phone in one form (Д6); only the admin may keep a number that does not look like one
+  if (OD.type!=="hall" && OD.phone){ const p = phoneParse(OD.phone);
+    if (p){ OD.phone = p.txt; $("#o_phone").value = p.txt; }
+    else if (!isAdmin() || !tConfirm(PHONE_BAD + "\n\nВы админ — сохранить номер как есть?")){ need($("#o_phone"), PHONE_BAD); return; } }
   if (!OD.lines.length){ toast("Добавьте в заказ хотя бы одно блюдо"); return; }
   const badPromo = OD.lines.findIndex(l=>l.promo && !(Number(l.price)>=0 && l.price!==null && l.price!==""));
   if (badPromo>=0){ need(document.querySelector(`[data-oprice="${badPromo}"]`), "Укажите цену по акции (0 — подарок)"); return; }
@@ -4044,6 +4240,7 @@ async function payOrder(){
   const on = Object.assign({}, o, {status:"closed", payment, total, closedAt:ts, saleBatchId:batchId, updatedAt:ts}, payx);
   if (!payx.pays) delete on.pays; if (payx.change==null){ delete on.given; delete on.change; }
   ops.push({col:"orders", id:o.id, after:on});
+  { const co = custOp(on); if (co) ops.push(co); } // the customer base (Д6)
   try { await commit(`Закрыт заказ №${o.num}`, ops); $("#payDlg").close(); render(); toast(`Заказ №${o.num} закрыт: ${money(total)}, ${payment}${payx.pays ? ` (наличными ${money(pst.cash)}, картой ${money(pst.card)})` : ""}${payx.change>0 ? `. Сдача ${money(payx.change)}` : ""}`); }
   catch(err){ console.error(err); render(); toast(err.done && err.done.length ? "Сохранено частично. Нажмите ещё раз — лишнего не спишется." : "Не удалось закрыть заказ. Проверьте права на изменение."); }
 }
@@ -4064,6 +4261,7 @@ async function reopenOrder(id){
   if (S.sales.some(x=>x.id===o.saleBatchId)) ops.push({col:"sales", id:o.saleBatchId, after:null});
   const n = Object.assign({}, o, {status:"served", updatedAt:Date.now()}); delete n.payment; delete n.pays; delete n.given; delete n.change; delete n.closedAt; delete n.saleBatchId; delete n.voidReq;
   ops.push({col:"orders", id, after:n});
+  { const co = custOp(o, true); if (co) ops.push(co); }
   try { await commit(`Заказ №${o.num} возвращён в работу`, ops); S.ordView="open"; render(true); toast(`Заказ №${o.num} снова открыт`); }
   catch(err){ console.error(err); toast("Не удалось вернуть заказ."); }
 }
@@ -4108,6 +4306,7 @@ async function applyVoid(o, kind, reason, req){
   const n = Object.assign({}, o, {status:"cancelled", voidKind:kind, wasClosed:closed, cancelReason:reason, cancelledBy:req ? (req.by||"") : me, cancelledAt:ts, updatedAt:ts});
   delete n.voidReq; if (req) n.approvedBy = me; else delete n.approvedBy;
   ops.push({col:"orders", id:o.id, after:n});
+  if (closed){ const co = custOp(o, true); if (co) ops.push(co); } // no longer a paid order of the customer
   await commit(`${kind==="cancel"?"Отменён":"Списан"} заказ №${o.num}`, ops);
   toast(kind==="cancel" ? (closed ? `Заказ №${o.num} отменён, продукты вернулись на склад` : `Заказ №${o.num} отменён`) : `Заказ №${o.num} списан`);
 }
@@ -4282,7 +4481,7 @@ function bellNew(prev){
   fresh.forEach(o=>BELL.seen.add(o.id));
   if (!bellOn()) return;
   bellPlay();
-  const o = fresh[fresh.length-1], w = o.type==="hall" ? (o.table ? "стол " + o.table : "") : [o.name, o.phone].filter(Boolean).join(", ");
+  const o = fresh[fresh.length-1], w = o.type==="hall" ? (o.table ? "стол " + o.table : "") : [o.name, o.phone && phoneTxt(o.phone)].filter(Boolean).join(", ");
   toast(fresh.length > 1 ? `Новые заказы: ${fresh.length}` : `Новый заказ №${o.num} · ${OTYPES[o.type]}${w ? " · " + w : ""}`);
 }
 ["pointerdown","keydown"].forEach(ev=>document.addEventListener(ev, e=>{ if (bellOn() && !bellReady() && !(e.target.closest && e.target.closest("[data-bell]"))) bellCtx(); }, true));
@@ -5166,7 +5365,7 @@ function ticketHtml(o, edited){
     return `<div class="tk-line"><b>${fmt(l.qty)} ×</b> ${esc(tkName(st || dishById(l.id), l.name))}${st?" (set)":""}</div>${inner}${l.comment?`<div class="tk-com">! ${esc(l.comment)}</div>`:""}`;
   }).join("");
   const info = [];
-  if (o.type!=="hall"){ if (o.name) info.push(esc(o.name)); if (o.phone) info.push(esc(o.phone)); }
+  if (o.type!=="hall"){ if (o.name) info.push(esc(o.name)); if (o.phone) info.push(esc(phoneTxt(o.phone))); }
   if (o.type==="delivery"){ if (o.address) info.push(esc(o.address)); if (o.due) info.push("saat "+esc(o.due)); if (o.courier) info.push("kurye: "+esc(o.courier)); }
   if (o.type!=="hall" && o.source && o.source!==SOURCES[0]) info.push(esc(TK_SOURCES[o.source]||o.source));
   return `<div class="tk">
@@ -5342,6 +5541,7 @@ document.addEventListener("input", e => {
   if (t.id==="q"){ S.q=t.value; renderList(); }
   else if (t.id==="hq"){ S.histQ=t.value; S.histN=HIST_PAGE; renderList(); }
   else if (t.id==="sq"){ S.saleQ=t.value; renderList(); }
+  else if (t.id==="custQ"){ S.custQ=t.value; S.custN=0; renderList(); }
   else if (t.id==="mq"){ S.menuQ=t.value; renderList(); }
   else if (t.id==="iq"){ S.invQ=t.value; renderList(); }
   else if (t.dataset && t.dataset.inv){ S.invDraft[t.dataset.inv]=t.value.trim(); if (t.value.trim()) S.invAt[t.dataset.inv]=Date.now(); else delete S.invAt[t.dataset.inv]; t.classList.toggle("changed", t.value.trim()!==""); renderSavebar(); }
@@ -5530,6 +5730,27 @@ Object.assign(I18N, {"Другие названия": ["Other names", "Diğer ad
   "Объединение:": ["Merge:", "Birleştirme:"],
   "Отмена объединения:": ["Merge undone:", "Birleştirme geri alındı:"]});
 // a key that starts or ends with a digit must not glue onto other digits: "за 1" is not in "за 10"
+Object.assign(I18N, {"Клиенты": ["Customers", "Müşteriler"], "Клиент": ["Customer", "Müşteri"], "Новый клиент": ["New customer", "Yeni müşteri"], "Повторный клиент": ["Returning customer", "Tekrar gelen müşteri"],
+  "первый заказ": ["first order", "ilk sipariş"], "до этого заказов:": ["orders before:", "önceki sipariş:"], "последний:": ["last:", "son:"], "первый:": ["first:", "ilk:"],
+  "Имя и адрес — из прошлого заказа. Проверьте.": ["Name and address are from the last order. Please check.", "Ad ve adres önceki siparişten alındı. Kontrol edin."],
+  "Имя — из прошлого заказа. Проверьте.": ["The name is from the last order. Please check.", "Ad önceki siparişten alındı. Kontrol edin."],
+  "Адрес — из прошлого заказа. Проверьте.": ["The address is from the last order. Please check.", "Adres önceki siparişten alındı. Kontrol edin."],
+  "Введите номер полностью: 0532 123 45 67": ["Enter the full number: 0532 123 45 67", "Numarayı tam girin: 0532 123 45 67"],
+  "Проверьте телефон: 10 цифр с кодом, например 0532 123 45 67. Иностранный номер — с «+» и кодом страны.": ["Check the phone: 10 digits with the code, e.g. 0532 123 45 67. A foreign number starts with “+” and the country code.", "Telefonu kontrol edin: alan koduyla 10 hane, örn. 0532 123 45 67. Yabancı numara «+» ve ülke koduyla yazılır."],
+  "Вы админ — сохранить номер как есть?": ["You are the admin — save the number as it is?", "Yöneticisiniz — numara olduğu gibi kaydedilsin mi?"],
+  "Телефон, имя или адрес": ["Phone, name or address", "Telefon, ad veya adres"], "Найти клиента": ["Find a customer", "Müşteri bul"],
+  "Клиентов:": ["Customers:", "Müşteri:"], "повторных:": ["returning:", "tekrar gelen:"], "Заказов:": ["Orders:", "Sipariş:"], "Заказов": ["Orders", "Sipariş sayısı"],
+  "Клиент — это номер телефона: все заказы с этим номером (самовывоз, доставка, сайт) собраны вместе.": ["A customer is a phone number: all orders with this number (takeaway, delivery, website) are put together.", "Müşteri bir telefon numarasıdır: bu numarayla verilen tüm siparişler (gel-al, teslimat, site) bir arada."],
+  "На этом устройстве есть заказы, которых ещё нет в базе клиентов.": ["This device has orders that are not in the customer base yet.", "Bu cihazda müşteri listesinde henüz olmayan siparişler var."],
+  "Без записи их история пропадёт, когда старые заказы уйдут с устройств.": ["Without saving, their history will be lost when old orders leave the devices.", "Kaydedilmezse eski siparişler cihazlardan silinince geçmişleri kaybolur."],
+  "Записать в базу": ["Save to the base", "Listeye kaydet"],
+  "Клиентов пока нет: они появятся после первого закрытого заказа с телефоном.": ["No customers yet: they appear after the first closed order with a phone.", "Henüz müşteri yok: telefonlu ilk kapanan siparişten sonra görünürler."],
+  "старый заказ: состав на этом устройстве не хранится": ["old order: its items are not kept on this device", "eski sipariş: içeriği bu cihazda saklanmıyor"],
+  "Первый заказ": ["First order", "İlk sipariş"], "Последний заказ": ["Last order", "Son sipariş"], "Сумма заказов": ["Orders total", "Siparişlerin toplamı"],
+  "+ Новый заказ этому клиенту": ["+ New order for this customer", "+ Bu müşteriye yeni sipariş"],
+  "Записать в базу клиентов старые заказы с этого устройства?": ["Save the old orders from this device to the customer base?", "Bu cihazdaki eski siparişler müşteri listesine kaydedilsin mi?"],
+  "Сами заказы не меняются.": ["The orders themselves do not change.", "Siparişlerin kendisi değişmez."],
+  "Записано в базу клиентов:": ["Saved to the customer base:", "Müşteri listesine kaydedildi:"], "Записано не всё. Нажмите ещё раз.": ["Not everything was saved. Press again.", "Hepsi kaydedilmedi. Tekrar basın."]});
 const I18N_RE = new RegExp("(?<![А-Яа-яЁёA-Za-z])(" + Object.keys(I18N).sort((a,b)=>b.length-a.length).map(k=>(/^\d/.test(k)?"(?<!\\d)":"") + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + (/\d$/.test(k)?"(?!\\d)":"")).join("|") + ")(?![А-Яа-яЁёA-Za-z])", "g");
 const LI = () => LANG==="en" ? 0 : 1;
 function trS(str){ if (LANG==="ru" || !str || !/[А-Яа-яЁё]/.test(str)) return str; const i = LI(); return str.replace(I18N_RE, m => I18N[m] ? I18N[m][i] : m); }
@@ -5667,7 +5888,7 @@ function webCard(w){
   }
   const sum = ls.reduce((a,l)=>a + (l.src ? l.price*l.qty : 0), 0);
   const lines = ls.map(l=>`<div><span>${fmt(l.qty)} × ${l.src ? N(dn(l.src)) : N(l.name)}${l.kind==="set"?' <span class="tag prod">сет</span>':""}</span><span>${showMoney() && l.src ? money(l.price*l.qty) : ""}</span></div>`).join("");
-  const meta = [`<a href="tel:${esc(w.phone||"")}">${esc(w.phone||"")}</a>`];
+  const meta = [`<a href="tel:${esc(String(w.phone||"").replace(/\s/g,""))}" translate="no">${esc(phoneTxt(w.phone))}</a> ${custTag({type:pick ? "takeaway" : "delivery", phone:w.phone})}`];
   if (!pick && (w.address || w.note)) meta.push(N([w.address, w.note].filter(Boolean).join(", ")));
   meta.push(w.when && w.when!=="asap" ? (pick ? "заберут к " : "к ") + esc(w.when) : "как можно скорее");
   if (w.pay) meta.push("оплата " + (WEB_PAY[w.pay] || esc(w.pay)) + " при получении");
@@ -5704,7 +5925,7 @@ async function webTake(id){
     }); }
   catch(e){ if (e && e.code==="taken") toast("Этот заказ уже принят или отклонён на другом устройстве"); else { console.error(e); toast("Не удалось принять заказ: " + ((e && e.code) || "ошибка")); } return; }
   const pick = w.type==="pickup", nn = await nextOrderNum(), timed = w.when && w.when!=="asap";
-  const o = {id:oid, type: pick ? "takeaway" : "delivery", table:"", name:String(w.name||"").slice(0, 60), phone:String(w.phone||""),
+  const o = {id:oid, type: pick ? "takeaway" : "delivery", table:"", name:String(w.name||"").slice(0, 60), phone:phoneTxt(w.phone).slice(0, 30),
     address: pick ? "" : [w.address, w.note].filter(Boolean).join(", "), courier:"", due: !pick && timed ? w.when : "",
     source:"Собственный: сайт",
     comment:[`С сайта, оплата ${WEB_PAY[w.pay] || ""} при получении`, pick && timed ? `заберут к ${w.when}` : "", w.comment || ""].filter(Boolean).join(". "),
